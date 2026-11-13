@@ -53,9 +53,14 @@ D_cond preset with potential_field_reward_scale 3.3333333333333335), all recorde
 records what repr_probe.py needs to rebuild every model call: the frames as lossless PNG (<index>[_s<sample>]_<turn>.png),
 the row's system prompt (``system``), per turn the env's truth at the pose of the observation the turn answered
 (``critic_features``, reset's for turn 0 and step t-1's after; ``critic_features_error`` when the env could not compute
-it), the unrounded reward (``reward_exact``) and the sha256 of the prompt's token ids vLLM ran (``prompt_ids_sha256``),
-and the truth after the last turn (``final_critic_features``).  Needs --history; refused with --grounding-probe /
---grounding-side.  One probe version per result folder (model.json ``critic_probe``); off, nothing changes.
+it), the unrounded reward (``reward_exact``), the sha256 of the prompt's token ids vLLM ran (``prompt_ids_sha256``) and
+how the answer ended (``finish_reason``, ``stop_reason``), and the truth after the last turn (``final_critic_features``).
+Needs --history; refused with --grounding-probe / --grounding-side / --sft-text and with an empty TABLES_DIR; every
+task must have its table (model.json ``critic_probe_tables``), every switch must be an env-config field and reach the
+built env; the run stops without done.json after CRITIC_PROBE_MAX_ERRORS_IN_A_ROW error rows in a row; a folder
+resumes only with the same model.json (but name and load_seconds).  One probe version per result folder (model.json
+``critic_probe``); off, nothing changes.  Under the switch the rows' progress fields (``progress``, ``failed_gates``)
+are the grouped_gated progress of V4's env, not comparable with plain folders.
 """
 
 from __future__ import annotations
@@ -76,6 +81,7 @@ BANDS = ((1, 3), (4, 6), (7, 8))
 VERSION = "interiorgs_v10_eval_v2"  # v2 (round 8): results rows carry the trajectory and frames
 CRITIC_PROBE_VERSION = "critic_probe_v1"  # gate 0 of docs/PREREG_PPO2.md (run --critic-probe)
 V4_PROGRESS_SCALE = 3.3333333333333335  # V4: the D_cond preset with the progress (potential) scale / 3 (matrix_r12)
+CRITIC_PROBE_MAX_ERRORS_IN_A_ROW = 10  # critic probe: a run stops (no done.json) after this many error rows in a row
 
 
 def band_name(d: int) -> str:
@@ -328,7 +334,9 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["lenient_parse"] = True
     if getattr(args, "turn_footprint_radius", None) is not None:  # experiment 3A: the robot-base turn rule
         out["turn_footprint_radius"] = float(args.turn_footprint_radius)
-    if getattr(args, "critic_probe", None):  # gate 0 (PREREG_PPO2): the env's truth per turn and V4's reward
+    if getattr(args, "critic_probe", None) is not None:  # gate 0 (PREREG_PPO2): the env's truth per turn, V4's reward
+        if not str(args.critic_probe).strip():
+            raise SystemExit("--critic-probe needs the distance tables' folder (an empty value is not 'off')")
         out.update(critic_probe_overrides(args.critic_probe))
     return out
 
@@ -540,6 +548,9 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             seen["prompt_tokens"] = policy.last_prompt_tokens
         if critic_probe and getattr(policy, "last_prompt_ids", None) is not None:
             seen["prompt_ids_sha256"] = ids_digest(policy.last_prompt_ids)
+        if critic_probe and getattr(policy, "last_finish", None) is not None:  # how the answer ended (repr_probe:
+            seen.update(finish_reason=str(policy.last_finish),  # an answer cut by the token limit has no end token)
+                        stop_reason=getattr(policy, "last_stop_reason", None))
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
         if grounding_side:  # v2: the same frame, the action call's earlier turns (kw), the plain user text + question
@@ -671,6 +682,8 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         self.last_entropy: Optional[float] = None
         self.last_tokens: Optional[int] = None
         self.last_prompt_ids: Optional[List[int]] = None  # grounding probe v2: the layout check of the side call
+        self.last_finish: Optional[str] = None  # critic probe: how the last answer ended (stop / length) and on what
+        self.last_stop_reason: Any = None
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
                  as_sft: bool = False, seed: Optional[int] = None) -> str:
@@ -687,6 +700,8 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
                                 sampling_params=params, use_tqdm=False)
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
         self.last_prompt_ids = list(out[0].prompt_token_ids)
+        self.last_finish = out[0].outputs[0].finish_reason
+        self.last_stop_reason = getattr(out[0].outputs[0], "stop_reason", None)
         if self.entropy:
             steps = out[0].outputs[0].logprobs or []
             self.last_entropy = top_logprob_entropy([[lp.logprob for lp in pos.values()] for pos in steps],
@@ -751,13 +766,15 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     check_resume_rule(out, switches)  # experiment 3A: before the env, the model and model.json
     probe = bool(getattr(args, "grounding_probe", False))
     side = bool(getattr(args, "grounding_side", False))  # grounding probe v2
-    critic = bool(getattr(args, "critic_probe", None))  # gate 0 of PREREG_PPO2: the recording mode
+    critic = getattr(args, "critic_probe", None) is not None  # gate 0 of PREREG_PPO2: the recording mode
     if probe and side:
         raise SystemExit("--grounding-probe and --grounding-side: one grounding probe per run")
     if critic and (probe or side):
         raise SystemExit("--critic-probe records the plain run's calls: not with --grounding-probe / --grounding-side")
     if critic and not args.history:
         raise SystemExit("--critic-probe needs --history (repr_probe teacher-forces each episode as one sequence)")
+    if critic and args.sft_text:
+        raise SystemExit("--critic-probe: not with --sft-text (RL training shows the env's text as it is)")
     if critic and not Path(args.critic_probe).is_dir():
         raise SystemExit(f"--critic-probe {args.critic_probe}: not a directory (the tasks' distance tables)")
     probe_key: Dict[str, Any] = {}
@@ -765,8 +782,9 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
         from data_gen.interiorgs_v10 import grounding_probe
 
         probe_key = {"grounding_probe": grounding_probe.VERSION_SIDE if side else grounding_probe.VERSION}
-    if critic:
-        probe_key = {"critic_probe": CRITIC_PROBE_VERSION}
+    if critic:  # every task has its table, before anything starts (counted in model.json)
+        probe_key = {"critic_probe": CRITIC_PROBE_VERSION,
+                     "critic_probe_tables": check_task_tables(tasks, args.critic_probe)}
     if side:
         check_side_support(args.model)
     check_resume_probe(out, probe_key.get("grounding_probe"))  # 2026-11-12, item 5
@@ -775,31 +793,30 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
         check_resume_tables(out, switches)
     cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
+    sampled = sampling_mode(args)
+    if critic:  # no switch silently dropped; a resumed folder has exactly this run's model.json
+        dropped = sorted(k for k in switches if k not in keys)
+        if dropped:
+            raise SystemExit(f"--critic-probe: env switches {dropped} are not ActiveSpatialEnvConfig fields (the env "
+                             "would run without them)")
+        check_resume_record(out, model_record(args, cfg, switches, sampled, probe_key, None))
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
+    if critic:
+        check_env_switches(env, switches)
     t0 = time.time()
     # with history a call carries every earlier frame; SFT trained with cutoff 16,384 tokens
-    sampled = sampling_mode(args)
     policy = VllmPolicy(args.model, max_model_len=16384 if args.history else 8192,
                         max_images=int(args.max_turns) if args.history else 1,
                         temperature=float(args.temperature) if sampled else 0.0,
                         top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
     if side and hasattr(policy, "llm") and not hasattr(policy.llm, "preprocess_chat"):
         raise SystemExit("--grounding-side needs vLLM's LLM.preprocess_chat (vLLM 0.11)")
-    (out / "model.json").write_text(json.dumps({"name": args.name, "model": args.model, "version": VERSION,
-                                                "prompt_format": cfg["prompt_format"], "greedy": not sampled,
-                                                "samples": int(args.samples) if sampled else 1,
-                                                "temperature": float(args.temperature) if sampled else 0.0,
-                                                "top_p": float(args.top_p) if sampled else 1.0,
-                                                "sample_seed": int(args.sample_seed) if sampled else None,
-                                                "env_switches": switches, "max_turns": int(args.max_turns),
-                                                "history": bool(args.history),
-                                                "sft_text": bool(args.sft_text),
-                                                "entropy": bool(getattr(args, "entropy", False)),
-                                                "load_seconds": round(time.time() - t0, 1), **probe_key},
-                                               indent=1))
+    (out / "model.json").write_text(json.dumps(model_record(args, cfg, switches, sampled, probe_key,
+                                                            round(time.time() - t0, 1)), indent=1))
     done = ({(r["index"], r.get("sample")) for r in _jsonl(out / "results.jsonl")}
             if (out / "results.jsonl").exists() else set())
     samples = list(range(int(args.samples))) if sampled else [None]
+    errors_in_a_row = 0
     with open(out / "results.jsonl", "a") as f:
         for i in range(n):
             for k in samples:
@@ -816,7 +833,66 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                         row["sample"] = k
                 f.write(json.dumps(row) + "\n")
                 f.flush()
+                errors_in_a_row = errors_in_a_row + 1 if "error" in row else 0
+                if critic and errors_in_a_row >= CRITIC_PROBE_MAX_ERRORS_IN_A_ROW:  # a systematic fault: no done.json
+                    raise SystemExit(f"--critic-probe: {errors_in_a_row} episodes in a row ended in an error (last: "
+                                     f"{row['error']}); stopped without done.json")
     (out / "done.json").write_text(json.dumps({"episodes": n * len(samples), "seconds": round(time.time() - t0, 1)}))
+
+
+def model_record(args: argparse.Namespace, cfg: Dict[str, Any], switches: Dict[str, Any], sampled: bool,
+                 probe_key: Dict[str, Any], load_seconds: Optional[float]) -> Dict[str, Any]:
+    """model.json of a run (the keys in this order; the probes' keys last)."""
+    return {"name": args.name, "model": args.model, "version": VERSION,
+            "prompt_format": cfg["prompt_format"], "greedy": not sampled,
+            "samples": int(args.samples) if sampled else 1,
+            "temperature": float(args.temperature) if sampled else 0.0,
+            "top_p": float(args.top_p) if sampled else 1.0,
+            "sample_seed": int(args.sample_seed) if sampled else None,
+            "env_switches": switches, "max_turns": int(args.max_turns),
+            "history": bool(args.history),
+            "sft_text": bool(args.sft_text),
+            "entropy": bool(getattr(args, "entropy", False)),
+            "load_seconds": load_seconds, **probe_key}
+
+
+RESUME_FREE_KEYS = ("name", "load_seconds")  # critic probe: what a resumed folder's model.json may differ in
+
+
+def check_resume_record(result: Path, record: Dict[str, Any]) -> None:
+    """Critic probe: a run resuming a folder with results has exactly its model.json, but for RESUME_FREE_KEYS; else
+    it stops before the env and the model start."""
+    results, model = Path(result) / "results.jsonl", Path(result) / "model.json"
+    if not results.is_file() or not _jsonl(results, partial_ok=True):
+        return
+    if not model.is_file():
+        raise SystemExit(f"{result}: results without model.json; give another --name")
+    before = {k: v for k, v in json.loads(model.read_text()).items() if k not in RESUME_FREE_KEYS}
+    now = {k: v for k, v in json.loads(json.dumps(record)).items() if k not in RESUME_FREE_KEYS}
+    differ = sorted(k for k in set(before) | set(now) if before.get(k) != now.get(k))
+    if differ:
+        raise SystemExit(f"{result}: its model.json differs from this run's in {differ}; one setting per result "
+                         "folder (give another --name)")
+
+
+def check_env_switches(env: Any, switches: Dict[str, Any]) -> None:
+    """Critic probe: the built env has every switch's value (nothing dropped or changed on the way)."""
+    cfg = getattr(env, "config", None)
+    missing = object()
+    wrong = {k: getattr(cfg, k, missing) for k, v in switches.items() if getattr(cfg, k, missing) != v}
+    if wrong:
+        raise SystemExit(f"--critic-probe: the env's config differs from the switches in {sorted(wrong)}")
+
+
+def check_task_tables(tasks: Path, tables_dir: str) -> Dict[str, int]:
+    """Critic probe: every task of tasks.jsonl has its distance table (<tables_dir>/<task_id>.npz, as
+    distance_table.table_path names it), else the run stops before anything starts."""
+    ids = [str(r["task_id"]) for r in _jsonl(Path(tasks))]
+    missing = [t for t in ids if not (Path(tables_dir) / f"{t}.npz").is_file()]
+    if missing:
+        raise SystemExit(f"--critic-probe: {len(missing)} of {len(ids)} tasks have no distance table in {tables_dir} "
+                         f"(e.g. {missing[:3]})")
+    return {"tasks": len(ids), "tables_found": len(ids)}
 
 
 def sampling_mode(args: argparse.Namespace) -> bool:

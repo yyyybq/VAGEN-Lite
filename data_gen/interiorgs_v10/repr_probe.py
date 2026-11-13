@@ -11,18 +11,27 @@ reads a turn's value, how much value-relevant ground truth is linearly decodable
 
        python -m data_gen.interiorgs_v10.repr_probe extract --results EVAL/NAME --out FEAT [--shard i/n] [--limit N]
 
-   Per episode the messages exactly as the run built them for the model (evaluation.chat_messages with every earlier
-   turn and the run's sft_text setting, the frames from their PNGs) go through the model's processor: the whole
-   episode (every answer included) is one sequence and one forward.  Each turn's own prompt (its messages with the
-   generation prompt) must tokenise to the first tokens of that sequence, and to exactly the ids vLLM ran
-   (prompt_ids_sha256, prompt_tokens); a difference stops the extraction (--on-mismatch skip records the episode in
-   skipped.jsonl instead).  At index len(prompt_t) - 1, the last token of turn t's generation prompt (where verl's
-   critic reads the value of the turn's first response token), five readings: the outputs of decoder layers 9, 18, 27
-   and 36 (hooks on the layers; layers 9 / 18 / 27 are HF's hidden_states[9] / [18] / [27]; HF's last hidden_states
-   entry is already after the final norm, so layer 36 is read by its own hook) and the output of the final norm.
-   The layer count must be 36.  Written per shard: chunk_*.npz (one float16 array per reading, float32 for a chunk
-   whose values pass float16's range), chunk_*.jsonl (one row per turn, the npz rows' order), manifest.json.
-   Resumable: a rerun skips the episodes already written.
+   The sequence is the TRAINING one ("拼接方式同训练（concat）"): the ids RL's concat agent loop
+   (vagen/agent_loop/gym_agent_loop.py, GymAgentLoop) builds for the episode, mirrored by training_layout: the first
+   prompt (system + first user turn, the chat template with its generation prompt, the processor with the first frame),
+   then per turn the answer's tokens as the generated response ids (the answer text tokenised alone, plus the end of
+   turn <|im_end|> the generation stops on; none for an answer cut by the token limit), then the next user turn's suffix
+   (the chat template of [placeholder system, user] with the generation prompt, the processor with that turn's frame,
+   the placeholder system's ids removed).  One forward per episode with every frame's pixel_values / image_grid_thw in
+   order (the model computes M-RoPE on the whole sequence).  Turn t's position: the length of the ids before its answer
+   - 1, the last token of its generation prompt (where verl's critic reads the value of the turn's first response
+   token).  Each turn's prompt in the eval's own layout (evaluation.chat_messages with the history, the frames from
+   their PNGs) must equal what vLLM ran (prompt_tokens, prompt_ids_sha256): the check that the recorded text and frames
+   are the run's; the first prompt is the same call in both layouts and must agree.  A difference stops the extraction
+   (--on-mismatch skip records the episode in skipped.jsonl and counts it).  A run with --sft-text is refused (training
+   shows the env's text).  Five readings at each position: the outputs of decoder layers 9, 18, 27 and 36 (hooks on the
+   layers; layers 9 / 18 / 27 are HF's hidden_states[9] / [18] / [27]; HF's last hidden_states entry is already after
+   the final norm, so layer 36 is read by its own hook) and the output of the final norm; the first episode of each
+   call also runs with output_hidden_states and stops the extraction unless HF's entries equal the hooks' and the norm
+   of layer 36 gives the final-norm reading.  The layer count must be 36; non-finite values stop the extraction.
+   Written per shard: chunk_*.npz (one float16 array per reading, float32 for a chunk whose values pass float16's
+   range), chunk_*.jsonl (one row per turn, the npz rows' order), manifest.json.  Resumable: a rerun skips the episodes
+   already written.
 3. ``fit`` (GPU when there is one, else CPU; deterministic, fixed seeds):
 
        python -m data_gen.interiorgs_v10.repr_probe fit --features FEAT --out FIT
@@ -33,9 +42,10 @@ reads a turn's value, how much value-relevant ground truth is linearly decodable
    (front / right / back / left; no bearing left out; multinomial) and the distance condition (too_close / ok /
    too_far; absolute_positioning turns with a condition; multinomial).  5 folds grouped by scene_id (assign_folds:
    deterministic, balanced by turns); the regularisation chosen inside each training fold by an inner 3-fold grouped
-   split over a fixed grid (ridge alpha 1e-2 .. 1e4 by decades, sum-of-squares loss as sklearn's Ridge; logistic
+   split over a fixed grid (ridge alpha 1e-2 .. 1e7 by decades, sum-of-squares loss as sklearn's Ridge; logistic
    C = 1 / alpha, sklearn's convention: 0.5 |w|^2 + C * summed log-loss; the inner choice by the pooled squared error /
-   the mean log-loss), the features standardised with the training fold's statistics.  Reported out of fold:
+   the mean log-loss; a choice at the grid's edge is flagged in results.md), the features standardised with the
+   training fold's statistics.  Reported out of fold:
    EV = 1 - var(y - y_hat) / var(y) for G_t, d and the turns left; AUC and accuracy for success; accuracy and the
    majority-class baseline (the training fold's majority) for bearing, condition and success.
    Baselines on the same turns and folds: the privileged-feature MLP (vagen/feature_critic.py: the 29-number encode,
@@ -73,14 +83,21 @@ READING_SOURCES = {"layer9": "output of decoder layer 9 (HF hidden_states[9])",
                    "layer27": "output of decoder layer 27 (HF hidden_states[27])",
                    "layer36": "output of decoder layer 36 before the final norm (forward hook on the last layer)",
                    "final_norm": "output of the final norm (HF hidden_states[-1])"}
-ALPHAS = tuple(10.0 ** k for k in range(-2, 5))  # ridge: 1e-2 .. 1e4
-CS = tuple(1.0 / a for a in ALPHAS)  # logistic C = 1 / alpha: 1e2 .. 1e-4
+ALPHAS = tuple(10.0 ** k for k in range(-2, 8))  # ridge: 1e-2 .. 1e7
+CS = tuple(1.0 / a for a in ALPHAS)  # logistic C = 1 / alpha: 1e2 .. 1e-7
+# the concat agent loop's settings (vagen/agent_loop/gym_agent_loop.py, data.apply_chat_template_kwargs of
+# data_gen/interiorgs_v10/configs/ppo_template_v10.yaml) and the end of a generated turn (the Qwen chat templates')
+TEMPLATE_KWARGS = {"enable_thinking": False}
+END_OF_TURN = "<|im_end|>"
+PLACEHOLDER_SYSTEM = {"role": "system", "content": "placeholder"}  # GymAgentLoop's: its ids are cut off each suffix
 OUTER_FOLDS, INNER_FOLDS = 5, 3
 SEED = 20261019
 READABLE, NOT_READABLE = 0.3, 0.1  # the pre-registered reading (docs/PREREG_PPO2.md, gate 0)
 MLP_EPOCHS = 32  # the privileged MLP's passes over a training fold (the RL critic sees a row 4 passes x 8 updates)
 LOGISTIC_MAX_ITER = 300
-FORWARD_KEYS = ("input_ids", "attention_mask", "pixel_values", "image_grid_thw")  # the processor's batch -> the model
+FORWARD_KEYS = ("input_ids", "attention_mask", "pixel_values", "image_grid_thw")  # model_batch -> the model
+# per-episode counts summed in the shard manifest: the eval-layout check against the run, how the answers ended
+EPISODE_COUNTS = ("prompt_checked", "prompt_unchecked", "eos_appended", "length_cut", "finish_unknown")
 FP16_MAX = 65504.0
 CHUNK_EPISODES = 25
 AP = "absolute_positioning"
@@ -121,6 +138,8 @@ def read_run(result: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         raise SystemExit(f"{result}: run without history; the probe teacher-forces each episode as one sequence")
     if model.get("grounding_probe"):
         raise SystemExit(f"{result}: a grounding-probe run")
+    if model.get("sft_text"):
+        raise SystemExit(f"{result}: run with --sft-text; RL training shows the env's text as it is")
     if not (result / "done.json").is_file():
         raise SystemExit(f"{result}: no done.json (the run has not finished)")
     rows = _jsonl(result / "results.jsonl")
@@ -174,7 +193,7 @@ def shard_of(episodes: Sequence[Dict[str, Any]], i: int, n: int) -> List[Dict[st
 
 
 # ---------------------------------------------------------------------------
-# the chat, the positions
+# the chat: the eval's layout (the check against the run) and the training layout (the readings)
 # ---------------------------------------------------------------------------
 def image_placeholder(_image: Any) -> Dict[str, Any]:
     """An image part as vLLM's chat hands it to the chat template (the frames go to the processor separately)."""
@@ -183,8 +202,10 @@ def image_placeholder(_image: Any) -> Dict[str, Any]:
 
 def conversation(system: str, turns: Sequence[Tuple[str, Any, str]], upto: int, as_sft: bool = False
                  ) -> List[Dict[str, Any]]:
-    """The messages of turn ``upto``'s model call, exactly as the run built them (evaluation.chat_messages with every
-    earlier turn: the history), or with ``upto == len(turns)`` the whole episode with every answer."""
+    """The eval layout: the messages of turn ``upto``'s model call, exactly as the run built them
+    (evaluation.chat_messages with every earlier turn: the history), or with ``upto == len(turns)`` the whole episode
+    with every answer.  Only to check the recorded text and frames against the run (check_prompts); the readings come
+    from training_layout."""
     if not turns or not 0 <= upto <= len(turns):
         raise ValueError(f"conversation: turn {upto} of {len(turns)}")
     if upto < len(turns):
@@ -195,39 +216,25 @@ def conversation(system: str, turns: Sequence[Tuple[str, Any, str]], upto: int, 
     return messages + [{"role": "assistant", "content": E.sft_text(answer) if as_sft else answer}]
 
 
+def _ids(batch: Any) -> List[int]:
+    """The token ids of a processor's batch of one text (input_ids [1, L], a tensor or a list)."""
+    ids = batch["input_ids"][0]
+    return [int(i) for i in (ids.tolist() if hasattr(ids, "tolist") else ids)]
+
+
 def encode(processor: Any, messages: List[Dict[str, Any]], images: Sequence[Any], generation_prompt: bool
            ) -> Tuple[List[int], Any]:
-    """Token ids (and the processor's batch) of a chat: the processor's chat template, then the processor on the text
-    and the frames in their order (it expands each image placeholder to the frame's tokens)."""
+    """Token ids (and the processor's batch) of a chat as vLLM's chat builds the prompt: the chat template, then the
+    processor on the text and the frames in their order (it expands each image placeholder to the frame's tokens)."""
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=generation_prompt)
     batch = processor(text=[text], images=list(images) if images else None, return_tensors="pt")
-    ids = batch["input_ids"][0]
-    return [int(i) for i in (ids.tolist() if hasattr(ids, "tolist") else ids)], batch
-
-
-def turn_positions(full_ids: Sequence[int], prompts: Sequence[Sequence[int]]) -> List[int]:
-    """For each turn the index of its prompt's last token in the episode's sequence: len(prompt_t) - 1.  Each prompt
-    must be the first tokens of the sequence, longer than the turn before and followed by at least one token (the
-    turn's answer); else Mismatch."""
-    full = list(full_ids)
-    out: List[int] = []
-    last = 0
-    for t, prompt in enumerate(prompts):
-        n = len(prompt)
-        if n <= last:
-            raise Mismatch(f"turn {t}: its prompt ({n} tokens) does not extend turn {t - 1}'s ({last} tokens)")
-        if n >= len(full) or full[:n] != list(prompt):
-            k = next((j for j, (a, b) in enumerate(zip(full, prompt)) if a != b), min(n, len(full)))
-            raise Mismatch(f"turn {t}: its prompt's {n} token ids are not the first tokens of the episode's sequence "
-                           f"({len(full)} tokens, first difference at token {k})")
-        out.append(n - 1)
-        last = n
-    return out
+    return _ids(batch), batch
 
 
 def check_prompts(trajectory: Sequence[Dict[str, Any]], prompts: Sequence[Sequence[int]]) -> Dict[str, int]:
-    """Each rebuilt prompt against the run's record of the prompt vLLM ran: its length (prompt_tokens) and its token
-    ids (prompt_ids_sha256, evaluation.ids_digest).  A difference: Mismatch; a turn without a digest is counted."""
+    """Each rebuilt eval-layout prompt against the run's record of the prompt vLLM ran: its length (prompt_tokens) and
+    its token ids (prompt_ids_sha256, evaluation.ids_digest).  A difference: Mismatch; a turn without a digest is
+    counted."""
     checked = unchecked = 0
     for t, (turn, prompt) in enumerate(zip(trajectory, prompts)):
         if turn.get("prompt_tokens") is not None and int(turn["prompt_tokens"]) != len(prompt):
@@ -243,6 +250,98 @@ def check_prompts(trajectory: Sequence[Dict[str, Any]], prompts: Sequence[Sequen
     return {"prompt_checked": checked, "prompt_unchecked": unchecked}
 
 
+def obs_content(text: str, image_placeholder_text: str = "<image>", video_placeholder: str = "<video>"
+                ) -> List[Dict[str, Any]]:
+    """gym_agent_loop.convert_obs_to_content (line by line, without its count check): an observation's text split at
+    its placeholders into text and image parts, empty pieces dropped."""
+    import re
+
+    pattern = f"({re.escape(image_placeholder_text)}|{re.escape(video_placeholder)})"
+    content: List[Dict[str, Any]] = []
+    for seg in re.split(pattern, text):
+        if not seg:
+            continue
+        if seg == image_placeholder_text:
+            content.append({"type": "image"})
+        elif seg == video_placeholder:
+            content.append({"type": "video"})
+        else:
+            content.append({"type": "text", "text": seg})
+    return content
+
+
+def training_layout(processor: Any, system: str, turns: Sequence[Tuple[str, Any, str]],
+                    finishes: Optional[Sequence[Optional[str]]] = None,
+                    template_kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The episode's ids as RL's concat agent loop builds them (vagen/agent_loop/gym_agent_loop.py, GymAgentLoop),
+    mirrored step by step; ``turns``: (user text, frame, answer text) per turn, ``finishes``: each answer's finish
+    reason (None: unknown, taken as stopped).
+
+      init_class            system_prompt_prefix: the ids of the chat template of [placeholder system] without the
+                            generation prompt, through the processor without images
+      _handle_pending_state prompt_ids: the chat template of [system, first user] with the generation prompt, through
+                            the processor with the first frame (the system's and users' content as
+                            convert_obs_to_content builds it)
+      _handle_generating    prompt_ids += the response ids: here the answer text tokenised alone (add_special_tokens
+                            False) plus the end-of-turn token the generation stops on (RL has no stop string: it runs
+                            to <|im_end|>, which vLLM keeps in the token ids); none after an answer cut by the limit
+      _handle_env_state     (not after the last turn) prompt_ids += the chat template of [placeholder system, user] with
+                            the generation prompt, through the processor with the turn's frame, less the first
+                            len(system_prompt_prefix) ids
+
+    Returns the ids, each turn's position (the ids before its answer, less one: its generation prompt's last token),
+    the processor's batches in order (their frames' pixel_values / image_grid_thw) and the first prompt's length."""
+    kw = dict(TEMPLATE_KWARGS if template_kwargs is None else template_kwargs)
+    tok = processor.tokenizer
+    eos = tok.convert_tokens_to_ids(END_OF_TURN)
+    prefix_text = processor.apply_chat_template([PLACEHOLDER_SYSTEM], add_generation_prompt=False, tokenize=False,
+                                                **kw)
+    prefix = _ids(processor(text=[prefix_text], return_tensors="pt"))
+    user0, frame0, _ = turns[0]
+    messages = [{"role": "system", "content": obs_content(system)}, {"role": "user", "content": obs_content(user0)}]
+    raw = processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False, **kw)
+    first = processor(text=[raw], images=[frame0], return_tensors="pt")
+    ids, parts = _ids(first), [first]
+    prompt0 = len(ids)
+    positions: List[int] = []
+    ends = {"eos_appended": 0, "length_cut": 0, "finish_unknown": 0}
+    for t, (user, frame, answer) in enumerate(turns):
+        if t > 0:  # the user suffix of turn t, after turn t - 1's answer
+            raw = processor.apply_chat_template([PLACEHOLDER_SYSTEM, {"role": "user", "content": obs_content(user)}],
+                                                add_generation_prompt=True, tokenize=False, **kw)
+            batch = processor(text=[raw], images=[frame], return_tensors="pt")
+            suffix = _ids(batch)
+            if suffix[:len(prefix)] != prefix:  # the agent loop cuts len(prefix) ids without looking
+                raise Mismatch(f"turn {t}: the user suffix does not start with the placeholder system's ids")
+            ids += suffix[len(prefix):]
+            parts.append(batch)
+        positions.append(len(ids) - 1)
+        finish = finishes[t] if finishes is not None and t < len(finishes) else None
+        response = [int(i) for i in tok.encode(answer, add_special_tokens=False)]
+        if finish == "length":
+            ends["length_cut"] += 1
+        else:
+            response.append(int(eos))
+            ends["eos_appended"] += 1
+            ends["finish_unknown"] += int(finish is None)
+        ids += response
+    return {"input_ids": ids, "positions": positions, "parts": parts, "prompt0_len": prompt0, **ends}
+
+
+def model_batch(ids: Sequence[int], parts: Sequence[Any]) -> Dict[str, Any]:
+    """The forward's inputs: the whole sequence (batch 1, attention everywhere) and every frame's pixel_values /
+    image_grid_thw in the sequence's order."""
+    import torch
+
+    out: Dict[str, Any] = {"input_ids": torch.tensor([list(ids)], dtype=torch.long),
+                           "attention_mask": torch.ones(1, len(ids), dtype=torch.long)}
+    for key in ("pixel_values", "image_grid_thw"):
+        values = [p[key] for p in parts if key in p and p[key] is not None]
+        if values:
+            out[key] = torch.cat([torch.as_tensor(v) for v in values], 0)
+    return out
+
+
 def load_png(path: Path) -> Any:
     from PIL import Image
 
@@ -252,24 +351,33 @@ def load_png(path: Path) -> Any:
 
 def episode_inputs(episode: Dict[str, Any], processor: Any, load_image: Callable[[Path], Any] = load_png,
                    run_check: bool = True) -> Dict[str, Any]:
-    """The episode's sequence (the processor's batch), each turn's position and the prompt checks (``run_check``
-    False: the run's record of its prompts is not compared, every turn counted unchecked)."""
+    """The episode's training-layout sequence (model_batch), each turn's position, the eval-layout prompt checks
+    (``run_check`` False: the run's record of its prompts is not compared, every turn counted unchecked) and the
+    first prompt's agreement between the layouts (always checked)."""
     row, model, result = episode["row"], episode["model"], Path(episode["result"])
     traj = row.get("trajectory") or []
     if not traj:
         raise Mismatch("no recorded turn")
     if "system" not in row:
         raise Mismatch("the row has no system prompt (not a critic-probe row)")
+    if model.get("sft_text"):
+        raise SystemExit("a run with --sft-text: RL training shows the env's text as it is")
     turns = [(t["user"], load_image(result / t["frame"]), t["answer"]) for t in traj]
-    as_sft = bool(model.get("sft_text"))
     images = [im for _, im, _ in turns]
-    full_ids, batch = encode(processor, conversation(row["system"], turns, len(turns), as_sft), images, False)
-    prompts = [encode(processor, conversation(row["system"], turns, t, as_sft), images[:t + 1], True)[0]
-               for t in range(len(turns))]
-    positions = turn_positions(full_ids, prompts)
-    checks = check_prompts(traj, prompts) if run_check else {"prompt_checked": 0, "prompt_unchecked": len(prompts)}
-    return {"batch": batch, "positions": positions, "seq_len": len(full_ids),
-            "prompt_lens": [len(p) for p in prompts], **checks}
+    if run_check:
+        prompts = [encode(processor, conversation(row["system"], turns, t), images[:t + 1], True)[0]
+                   for t in range(len(turns))]
+        checks = check_prompts(traj, prompts)
+    else:
+        prompts = [encode(processor, conversation(row["system"], turns, 0), images[:1], True)[0]]
+        checks = {"prompt_checked": 0, "prompt_unchecked": len(turns)}
+    layout = training_layout(processor, row["system"], turns, [t.get("finish_reason") for t in traj])
+    if layout["input_ids"][:layout["prompt0_len"]] != prompts[0] or layout["prompt0_len"] != len(prompts[0]):
+        raise Mismatch("the first prompt differs between the training and the eval layout")
+    return {"batch": model_batch(layout["input_ids"], layout["parts"]), "positions": layout["positions"],
+            "seq_len": len(layout["input_ids"]), "prompt_lens": [p + 1 for p in layout["positions"]],
+            "prompt0_len": layout["prompt0_len"], "eval_prompt_lens": [len(p) for p in prompts] if run_check else None,
+            **{k: layout[k] for k in ("eos_appended", "length_cut", "finish_unknown")}, **checks}
 
 
 # ---------------------------------------------------------------------------
@@ -370,8 +478,8 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
         raise SystemExit(f"{sdir}: written from {old.get('model')!r}, this run reads {manifest.get('model')!r}")
     old_counts = old.get("counts") or {}
     counts = {"episodes_written": len(have["written"]), "turns_written": have["turns"],
-              "skipped": len(have["skipped"]), "prompt_checked": int(old_counts.get("prompt_checked", 0)),
-              "prompt_unchecked": int(old_counts.get("prompt_unchecked", 0))}
+              "skipped": len(have["skipped"]),
+              **{key: int(old_counts.get(key, 0)) for key in EPISODE_COUNTS}}
     wide = dict(old.get("float32_readings") or {})
     man = {**manifest, "shard_episodes": len(episodes), "counts": counts, "float32_readings": wide,
            "status": "running", "updated": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -410,15 +518,21 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
             a = np.asarray(got[name])
             if a.shape[0] != len(targets):
                 raise RuntimeError(f"episode {ep['key']}: {a.shape[0]} rows of {name} for {len(targets)} turns")
+            if not np.all(np.isfinite(a)):  # never stored
+                flush()
+                raise SystemExit(f"episode {ep['key']}: {int((~np.isfinite(a)).sum())} non-finite values in {name}")
             arrays[name].append(a)
-        for tg, pos, plen in zip(targets, inputs["positions"], inputs["prompt_lens"]):
+        eval_lens = inputs.get("eval_prompt_lens") or [None] * len(targets)
+        for tg, pos, plen, elen in zip(targets, inputs["positions"], inputs["prompt_lens"], eval_lens):
             metas.append({"key": ep["key"], "result": str(Path(ep["result"]).resolve()), "index": row["index"],
                           "sample": row.get("sample"), "task_id": row.get("task_id"), "scene_id": row.get("scene_id"),
                           "task_type": row.get("task_type"), "d_star": row.get("d_star"), **tg,
                           "position": pos, "prompt_tokens": plen, "seq_len": inputs["seq_len"],
+                          # the turn's place in RL's response budget (the response starts after the first prompt)
+                          "response_offset": pos + 1 - inputs["prompt0_len"], "eval_prompt_tokens": elen,
                           "episode_turns": len(targets)})
-        counts["prompt_checked"] += inputs["prompt_checked"]
-        counts["prompt_unchecked"] += inputs["prompt_unchecked"]
+        for key in EPISODE_COUNTS:
+            counts[key] += int(inputs[key])
         in_chunk += 1
         if in_chunk >= chunk_episodes:
             flush()
@@ -437,6 +551,17 @@ def _atomic_append(path: Path, record: Dict[str, Any]) -> None:
         f.flush()
 
 
+def threads_of(given: Optional[int], default: int) -> int:
+    """torch's CPU threads: the option, else OMP_NUM_THREADS / MKL_NUM_THREADS when set, else ``default``."""
+    if given:
+        return int(given)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        value = os.environ.get(var, "").strip()
+        if value.isdigit() and int(value) > 0:
+            return int(value)
+    return int(default)
+
+
 def text_model(model: Any) -> Any:  # pragma: no cover - needs the model
     """The decoder stack (``layers`` and the final ``norm``) of a Qwen3-VL model."""
     for path in (("model", "language_model"), ("language_model",), ("model",)):
@@ -448,9 +573,31 @@ def text_model(model: Any) -> Any:  # pragma: no cover - needs the model
     raise SystemExit("the model has no decoder stack with layers and norm")
 
 
+NORM_TOLERANCE = 1e-2  # the final norm of the layer-36 reading against the final-norm reading (bf16, rtol and atol)
+
+
+def check_diagnosis(diag: Dict[str, Any]) -> None:
+    """The first forward of an extraction call: HF's hidden_states has NUM_LAYERS + 1 entries, its entries 9 / 18 / 27
+    and its last equal the hooks' readings of the same forward, and the final norm applied to the layer-36 reading
+    gives the final-norm reading; else the extraction stops."""
+    agree = diag.get("hidden_states_agree") or {}
+    bad = []
+    if diag.get("hidden_states_entries") != NUM_LAYERS + 1:
+        bad.append(f"hidden_states has {diag.get('hidden_states_entries')} entries, not {NUM_LAYERS + 1}")
+    bad += [f"hidden_states disagree with the hook: {k}" for k in ("layer9", "layer18", "layer27", "final_norm")
+            if agree.get(k) is not True]
+    if not diag.get("norm_of_layer36_ok"):
+        bad.append(f"the final norm of layer 36 is not the final-norm reading (max abs diff "
+                   f"{diag.get('norm_of_layer36_max_abs_diff')})")
+    if diag.get("hidden_states_error"):
+        bad.append(f"the forward with output_hidden_states failed: {diag['hidden_states_error']}")
+    if bad:
+        raise SystemExit("the readings' check failed: " + "; ".join(bad))
+
+
 def make_reader(model: Any, device: str, diag: Dict[str, Any]):  # pragma: no cover - needs a GPU
-    """read(batch, positions): one forward, the five readings at the positions (float32 numpy).  The first call also
-    runs the forward with output_hidden_states and records whether HF's hidden_states agree (diag)."""
+    """read(batch, positions): one forward, the five readings at the positions (float32 numpy).  The first call runs
+    its forward with output_hidden_states as well and stops unless check_diagnosis passes on it (diag)."""
     import torch
 
     lm = text_model(model)
@@ -481,24 +628,28 @@ def make_reader(model: Any, device: str, diag: Dict[str, Any]):  # pragma: no co
         return got, out, pos
 
     def read(batch, positions):
-        got, _, pos = run(batch, positions)
-        if not diag.get("checked"):
+        if diag.get("checked"):
+            got, _, _ = run(batch, positions)
+        else:  # the same forward: the hooks and HF's hidden_states
             diag["checked"] = True
-            with torch.no_grad():
-                renorm = lm.norm(got["layer36"][None])[0]
-            diag["norm_of_layer36_max_abs_diff"] = float((renorm.float() - got["final_norm"].float()).abs().max())
             try:
-                got2, out, _ = run(batch, positions, hidden_states=True)
+                got, out, pos = run(batch, positions, hidden_states=True)
                 hs = out.hidden_states
                 diag["hidden_states_entries"] = len(hs)
                 diag["hidden_states_agree"] = {
-                    **{f"layer{i}": bool(torch.equal(hs[i][0].index_select(0, pos), got2[f"layer{i}"]))
+                    **{f"layer{i}": bool(torch.equal(hs[i][0].index_select(0, pos), got[f"layer{i}"]))
                        for i in LAYERS[:3]},
-                    "final_norm": bool(torch.equal(hs[-1][0].index_select(0, pos), got2["final_norm"])),
+                    "final_norm": bool(torch.equal(hs[-1][0].index_select(0, pos), got["final_norm"])),
                     "hidden_states[36]_is_final_norm": bool(torch.equal(hs[NUM_LAYERS][0].index_select(0, pos),
-                                                                        got2["final_norm"]))}
-            except Exception as exc:  # noqa: BLE001 - a diagnosis only; the readings come from the hooks
+                                                                        got["final_norm"]))}
+                with torch.no_grad():
+                    renorm = lm.norm(got["layer36"][None])[0]
+                diag["norm_of_layer36_max_abs_diff"] = float((renorm.float() - got["final_norm"].float()).abs().max())
+                diag["norm_of_layer36_ok"] = bool(torch.allclose(renorm.float(), got["final_norm"].float(),
+                                                                 rtol=NORM_TOLERANCE, atol=NORM_TOLERANCE))
+            except Exception as exc:  # noqa: BLE001 - recorded, then refused by check_diagnosis
                 diag["hidden_states_error"] = f"{type(exc).__name__}: {exc}"
+            check_diagnosis(diag)
         return {name: got[name].float().cpu().numpy() for name in READINGS}
 
     return read
@@ -519,15 +670,25 @@ def cmd_extract(args: argparse.Namespace) -> None:  # pragma: no cover - needs a
     if layers != NUM_LAYERS:
         raise SystemExit(f"{model_path}: config num_hidden_layers {layers}, the probe reads a {NUM_LAYERS}-layer model")
     i, n = parse_shard(args.shard)
-    torch.set_num_threads(int(args.threads))
+    torch.set_num_threads(threads_of(args.threads, 8))
     processor = AutoProcessor.from_pretrained(model_path)
+    eos_id = int(processor.tokenizer.convert_tokens_to_ids(END_OF_TURN))
+    gen_path = Path(model_path) / "generation_config.json"
+    gen_eos = json.loads(gen_path.read_text()).get("eos_token_id") if gen_path.is_file() else None
+    if gen_eos is not None and eos_id not in (gen_eos if isinstance(gen_eos, list) else [gen_eos]):
+        raise SystemExit(f"{END_OF_TURN} ({eos_id}) is not among the model's eos_token_id {gen_eos}: the generation "
+                         "would not stop on it")
     model = AutoModelForImageTextToText.from_pretrained(model_path, torch_dtype=torch.bfloat16,
                                                         attn_implementation=args.attn).to("cuda").eval()
     diag: Dict[str, Any] = {}
     manifest = {"version": VERSION, "model": model_path, "readings": list(READINGS), "reading_sources": READING_SOURCES,
                 "layers": list(LAYERS), "num_layers": NUM_LAYERS, "hidden_size": cfg.text_config.hidden_size,
                 "forward_dtype": "bfloat16", "stored_dtype": "float16", "attn_implementation": args.attn,
-                "position": "len(prompt_t) - 1: the last token of turn t's generation prompt",
+                "layout": "training concat (vagen/agent_loop/gym_agent_loop.py GymAgentLoop, mirrored by "
+                          "training_layout)", "template_kwargs": TEMPLATE_KWARGS,
+                "end_of_turn": {"token": END_OF_TURN, "id": eos_id, "generation_eos": gen_eos},
+                "position": "the ids before turn t's answer - 1: the last token of its generation prompt",
+                "sft_text_runs": [f["path"] for f in info["folders"] if f.get("sft_text")],  # refused: always []
                 "shard": [i, n], "on_mismatch": args.on_mismatch, "run_prompt_check": not args.skip_run_check,
                 "max_turns": info["folders"][0]["max_turns"],
                 "transformers": transformers.__version__, "torch": torch.__version__,
@@ -743,7 +904,8 @@ def logistic_cv(x, y, n_classes: int, folds: np.ndarray, groups: Sequence[str],
                               xtr[torch.as_tensor(ite, device=device)], cs, max_iter)
             loss += [logloss(p[j], ytr[ite]) for j in range(len(cs))]
         best = int(loss.argmin())
-        oof[te] = logistic_path(xtr, ytr, n_classes, xt[torch.as_tensor(te, device=device)], [cs[best]], max_iter)[0]
+        path = [c for c in sorted(cs) if c <= cs[best]]  # warm-started up the C path, as the inner fits
+        oof[te] = logistic_path(xtr, ytr, n_classes, xt[torch.as_tensor(te, device=device)], path, max_iter)[-1]
         chosen.append(cs[best])
     return {"oof": oof, "C": chosen, "majority": majority}
 
@@ -919,8 +1081,26 @@ def fit_all(metas: Sequence[Dict[str, Any]], arrays: Dict[str, np.ndarray], max_
     res.update(best_reading=best, best_ev_G_t=evs.get(best) if best else None,
                verdict=reading_of(evs.get(best) if best else None),
                rule=("docs/PREREG_PPO2.md gate 0 (frozen): the best reading's out-of-fold EV of G_t >= 0.3 "
-                     "'linearly readable', < 0.1 'not readable', otherwise 'weak'; the other targets numbers only"))
+                     "'linearly readable', < 0.1 'not readable', otherwise 'weak'; the other targets numbers only"),
+               grid_edges=grid_edges(res))
     return res
+
+
+def grid_edges(res: Dict[str, Any]) -> List[str]:
+    """The probes whose penalty was chosen at an end of its grid in some fold (the grid may be too narrow there)."""
+    out = []
+    edges = {"alpha_per_fold": (min(ALPHAS), max(ALPHAS), "alpha"), "C_per_fold": (min(CS), max(CS), "C")}
+    probes = [(f"{reading} {target}", r) for reading, rs in res["readings"].items() for target, r in rs.items()
+              if isinstance(r, dict)]
+    probes.append(("baseline turn_family_ridge G_t", res["baselines"]["turn_family_ridge"]))
+    for name, r in probes:
+        for key, (lo, hi, what) in edges.items():
+            values = r.get(key) or []
+            hit = sorted({v for v in values if v is not None and (math.isclose(v, lo) or math.isclose(v, hi))})
+            if hit:
+                folds = [f for f, v in enumerate(values) if v in hit]
+                out.append(f"{name}: {what} {', '.join(f'{v:g}' for v in hit)} at the grid's edge in folds {folds}")
+    return out
 
 
 def results_md(res: Dict[str, Any]) -> str:
@@ -944,13 +1124,20 @@ def results_md(res: Dict[str, Any]) -> str:
     b = res["baselines"]
     lines += ["", f"Baselines (same turns, same folds), EV of G_t: privileged-feature MLP "
                   f"{f(b['privileged_mlp']['ev_G_t'])}; ridge on turn index + family {f(b['turn_family_ridge']['ev_G_t'])}."]
+    edges = res.get("grid_edges") or []
+    lines += ["", f"Penalty at the grid's edge (ridge alpha {min(ALPHAS):g}..{max(ALPHAS):g}, logistic C = 1 / alpha): "
+                  + ("none." if not edges else "")] + [f"- {e}" for e in edges]
+    lines += ["", "Notes: the hidden states are read in the training concat layout (vagen/agent_loop/gym_agent_loop.py) "
+                  "at the last token of each turn's generation prompt.  The episodes ran in V4's env (evaluation run "
+                  "--critic-probe), so the result rows' progress fields (progress, failed_gates) are its grouped_gated "
+                  "progress, not comparable with plain evaluation folders."]
     return "\n".join(lines) + "\n"
 
 
 def cmd_fit(args: argparse.Namespace) -> None:  # pragma: no cover - the full run (fit_all is tested)
     import torch
 
-    torch.set_num_threads(int(args.threads))
+    torch.set_num_threads(threads_of(args.threads, 4))
     torch.manual_seed(int(args.seed))
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     metas, arrays, info = load_features(Path(args.features), args.allow_partial)
@@ -977,20 +1164,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     x.add_argument("--shard", default="0/1", help="i/n: episode k of the listing goes to shard k %% n")
     x.add_argument("--limit", type=int, default=None, help="at most N more episodes in this call (a smoke test)")
     x.add_argument("--on-mismatch", choices=("fail", "skip"), default="fail",
-                   help="a rebuilt prompt that differs from the sequence or from the run's: stop (default) or record "
-                        "the episode in skipped.jsonl and go on")
+                   help="a rebuilt eval-layout prompt that differs from the run's, or a first prompt that differs "
+                        "between the layouts: stop (default) or record the episode in skipped.jsonl, count it and go on")
     x.add_argument("--skip-run-check", action="store_true",
-                   help="do not compare the rebuilt prompts with the run's record (prompt_tokens, prompt_ids_sha256); "
-                        "the prefix check stays; recorded in the manifest (default: compared)")
+                   help="do not compare the rebuilt eval-layout prompts with the run's record (prompt_tokens, "
+                        "prompt_ids_sha256); the first prompt's agreement between the layouts stays; recorded in the "
+                        "manifest (default: compared)")
     x.add_argument("--chunk-episodes", type=int, default=CHUNK_EPISODES)
     x.add_argument("--attn", default="sdpa", help="attn_implementation of the forward")
-    x.add_argument("--threads", type=int, default=8, help="torch CPU threads (the processor)")
+    x.add_argument("--threads", type=int, default=None,
+                   help="torch CPU threads (the processor); default OMP_NUM_THREADS / MKL_NUM_THREADS, else 8")
     f = sub.add_parser("fit", help="the probes, the baselines and the reading")
     f.add_argument("--features", required=True)
     f.add_argument("--out", required=True)
     f.add_argument("--device", default=None, help="default: cuda when available, else cpu")
     f.add_argument("--seed", type=int, default=SEED)
-    f.add_argument("--threads", type=int, default=4)
+    f.add_argument("--threads", type=int, default=None,
+                   help="torch CPU threads; default OMP_NUM_THREADS / MKL_NUM_THREADS, else 4")
     f.add_argument("--allow-partial", action="store_true", help="fit shards that are not done (recorded)")
     args = ap.parse_args(argv)
     {"extract": cmd_extract, "fit": cmd_fit}[args.cmd](args)
