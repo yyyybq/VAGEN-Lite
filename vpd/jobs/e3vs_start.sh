@@ -31,8 +31,8 @@
 #               chosen once, before any training).  open3d 0.19.0 (the official collision model) comes from O3D_DIR =
 #               OUT/envs/e3vs-o3d, appended to PYTHONPATH only for collider_smoke and the run.py evals (not for
 #               training, merges, or the vLLM server, from whose env run.py removes it); run.py re-checks every
-#               test scene's mesh sha256.  Before the guard, `mesh_collision o3d-check` refuses (exit 2) a module of
-#               O3D_DIR that PY_Q3 imports itself.
+#               test scene's mesh sha256.  Before it, step o3d_check (after the chown trap, recorded in steps.jsonl):
+#               `mesh_collision o3d-check` refuses (exit 2) a module of O3D_DIR that PY_Q3 imports itself.
 #   gsplat      copy OUT/e3vs/torch_ext (the prep job's build) to job-local $TORCH_EXTENSIONS_DIR, then the B18 probe
 #               -> RUN/gsplat_probe.json (as root: does gsplat rebuild, how long); every eval copies it into its
 #               manifest (run.py --gsplat-probe)
@@ -156,13 +156,6 @@ FREE_FACTS="/tmp $(free_gib /tmp) GiB, /dev/shm $(free_gib /dev/shm) GiB availab
 mkdir -p "$RUN"
 [[ $DRY == 1 ]] || mkdir -p "$A" "$E"
 cd "$VPD_WORKTREE"
-if ! "$PY_Q3" -m vpd.e3vs.mesh_collision o3d-check; then  # a module of O3D_DIR that PY_Q3 has would be shadowed
-  if [[ $DRY == 1 ]]; then
-    echo "[dry] o3d-check would stop the job here"
-  else
-    exit 2
-  fi
-fi
 vpd_chown_trap "$RUN" "$PILOT"
 # a timeout or signal must not leave merged weights on the node: both bases, fixed names only
 [[ $DRY == 1 ]] || vpd_on_exit "for d in /tmp/vpd_merged/${START}__0W /tmp/vpd_merged/${START}__100 /dev/shm/vpd_merged/${START}__0W /dev/shm/vpd_merged/${START}__100; do rm -rf -- \"\$d\"; done"
@@ -225,6 +218,14 @@ x() {  # run under the deadline, or print under VPD_DRYRUN=1 (VPD_DRY_FAIL=STEP,
   else
     tx "$@"
   fi
+}
+
+o3d_check() {  # N3 (identical text in both payloads): a module of O3D_DIR that PY_Q3 imports itself is refused
+  if "$PY_Q3" -m vpd.e3vs.mesh_collision o3d-check; then
+    return 0
+  fi
+  [[ $DRY == 1 ]] && { echo "[dry] o3d-check would stop the job here"; return 0; }
+  return 1
 }
 
 guard() {
@@ -421,6 +422,7 @@ echo "[e3vs_start] $START start $(date -u +%FT%TZ) RUN=$RUN optional=$OPTIONAL d
      "deadline=${DEADLINE_S}s merge_base=${MERGE_BASE:-<none>} (${FREE_FACTS})"
 vpd_node_facts "$RUN/node.txt"
 gsplat_env
+step o3d_check o3d_check || exit 2  # after the chown trap (RUN, PILOT chowned at EXIT); in steps.jsonl
 step guard guard          # a failure ends the job (set -e)
 step gsplat gsplat_setup  # a failure ends the job: no eval can render without gsplat
 step collider_smoke collider_smoke  # a failure ends the job: torch + gsplat + open3d and the test-scene mesh

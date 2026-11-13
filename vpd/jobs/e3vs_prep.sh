@@ -22,6 +22,8 @@
 # Steps (vpd_step -> RUN/steps.jsonl; a SIGTERM / SIGINT / SIGHUP adds a line {name, rc 143/130/129, signal} for the
 # step it cut; the first failure ends the job, later steps are not run: each step needs the one before).  The job
 # RESUMES: a resubmission skips every step whose outputs exist and are valid for the current inputs:
+#   o3d_check     mesh_collision o3d-check: no module of O3D_DIR that PY_Q3 imports itself; a failure exits 2
+#                 (the same step, same text, as in e3vs_start.sh)
 #   guard         vpd/PREREG_E3VS_PILOT.md committed and clean (PREREG header); its commit -> RUN/prereg_commit.txt
 #                 (from a code snapshot RUN/code: the job's copy equals the file of the snapshot's commit,
 #                 vpd_snapshot_file; the commit is the one that last changed it, as `git log -1` gave before)
@@ -112,13 +114,6 @@ O3D_PP="$PYTHONPATH:$O3D_DIR"
 
 mkdir -p "$RUN"
 cd "$VPD_WORKTREE"
-if ! "$PY" -m vpd.e3vs.mesh_collision o3d-check; then  # a module of O3D_DIR that PY_Q3 has would be shadowed
-  if [[ $DRY == 1 ]]; then
-    echo "[dry] o3d-check would stop the job here"
-  else
-    exit 2
-  fi
-fi
 
 # >>> timed-run helpers (identical text in e3vs_prep.sh and e3vs_start.sh; tested by test_e3vs_loop.py)
 VPD_CHILD=
@@ -192,6 +187,14 @@ stamp() {  # STEP
 
 json_pass() {  # FILE: exit 0 when the JSON file has "pass": true
   [[ -s $1 ]] && "$PY" -c 'import json, sys; sys.exit(0 if json.load(open(sys.argv[1])).get("pass") is True else 1)' "$1"
+}
+
+o3d_check() {  # N3 (identical text in both payloads): a module of O3D_DIR that PY_Q3 imports itself is refused
+  if "$PY_Q3" -m vpd.e3vs.mesh_collision o3d-check; then
+    return 0
+  fi
+  [[ $DRY == 1 ]] && { echo "[dry] o3d-check would stop the job here"; return 0; }
+  return 1
 }
 
 prereg_guard() {
@@ -318,6 +321,7 @@ sft_step() {  # --overwrite: images rendered from an older demo pool are never r
 echo "[e3vs_prep] start $(date -u +%FT%TZ) RUN=$RUN procs=$PROCS parity_scene=$SCENE dry=$DRY deadline=${DEADLINE_S}s"
 vpd_node_facts "$RUN/node.txt"
 gsplat_env
+step o3d_check o3d_check || exit 2  # recorded in steps.jsonl; a shadowing O3D_DIR ends the job (exit 2)
 step guard prereg_guard
 step inputs check_inputs
 step gsplat_probe probe_step

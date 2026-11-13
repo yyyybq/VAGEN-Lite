@@ -1354,8 +1354,8 @@ def test_prep_payload_dry_run(scratch):
     assert [c.split()[1].split("/")[-1] for c in cmds if c.startswith("stamp ")] == \
         ["bfs_train", "bfs_val", "bfs_test", "floors", "sft"]
     steps = [json.loads(x) for x in open(run / "steps.jsonl")]
-    assert [s["name"] for s in steps] == ["guard", "inputs", "gsplat_probe", "parity", "mesh_val", "bfs_train",
-                                          "bfs_val", "bfs_test", "floors", "sft"]
+    assert [s["name"] for s in steps] == ["o3d_check", "guard", "inputs", "gsplat_probe", "parity", "mesh_val",
+                                          "bfs_train", "bfs_val", "bfs_test", "floors", "sft"]
     assert all(s["rc"] == 0 for s in steps) and not (paths.E3VS_OUT / "PREP_DONE").exists()
     assert not any("occupancy" in c for c in cmds) and not list(root.iterdir())  # a dry run writes nothing there
     o3d = [c for c in cmds if c.endswith("  # +o3d")]
@@ -1467,6 +1467,30 @@ def test_prep_payload_stops_on_a_failed_mesh_validation(scratch):
     assert "\nstep mesh_val mesh_step\n" in text and "set -euo pipefail" in (JOBS / "common_env.sh").read_text()
 
 
+def test_o3d_check_is_a_recorded_step_after_the_chown_trap(scratch):
+    """S1 / N6: o3d_check is the first step of both payloads (same function text), in the start job after the chown
+    trap (so nothing root-owned is left behind); a failing check is a steps.jsonl line and exits 2."""
+    fn = {}
+    for job in ("e3vs_prep.sh", "e3vs_start.sh"):
+        t = (JOBS / job).read_text()
+        i = t.index("o3d_check() {")
+        fn[job] = t[i:t.index("\n}\n", i) + 3]
+        assert "\nstep o3d_check o3d_check || exit 2" in t and t.index("step o3d_check o3d_check") < t.index(
+            "\nstep guard "), job
+    assert fn["e3vs_prep.sh"] == fn["e3vs_start.sh"]
+    st = (JOBS / "e3vs_start.sh").read_text()
+    assert st.index('mkdir -p "$A" "$E"') < st.index('vpd_chown_trap "$RUN" "$PILOT"') < st.index(
+        "step o3d_check o3d_check")
+    run = scratch / "o3dcheck_run"
+    run.mkdir()
+    s = (f"RUN={run}\nsource {JOBS / 'common_env.sh'}\nRESERVE=0\nDEADLINE=$(( $(date +%s) + 100 ))\nMIN_STEP_S=0\n"
+         + _helpers("e3vs_prep.sh") + "DRY=0\nPY_Q3=false\n" + fn["e3vs_prep.sh"]
+         + "step o3d_check o3d_check || exit 2\necho AFTER\n")
+    r = subprocess.run(["bash", "-c", s], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and "AFTER" not in r.stdout, (r.stdout, r.stderr)
+    assert [(x["name"], x["rc"]) for x in map(json.loads, open(run / "steps.jsonl"))] == [("o3d_check", 1)]
+
+
 ROOMY = {"VPD_FAKE_FREE_GIB": "/tmp=100,/dev/shm=100"}
 
 
@@ -1504,8 +1528,8 @@ def test_start_payload_dry_run(scratch):
     assert not any("--tier raw --mode u,c" in c or "--tier 0W --mode u,c" in c for c in cmds)  # optional off
     assert all(c.startswith(str(paths.PY_TRAIN)) for c in cmds if "n2_train_vpd.py" in c)
     steps = [s["name"] for s in map(json.loads, open(run / "steps.jsonl"))]
-    assert steps == ["guard", "gsplat", "collider_smoke", "train_0W", "train_100", "eval_raw", "merge_0W", "eval_0W",
-                     "unmerge_0W", "merge_100", "eval_100", "unmerge_100"]
+    assert steps == ["o3d_check", "guard", "gsplat", "collider_smoke", "train_0W", "train_100", "eval_raw", "merge_0W",
+                     "eval_0W", "unmerge_0W", "merge_100", "eval_100", "unmerge_100"]
     # 2.8 GPU-h = 10080 s: outer 9780 + kill 120 ends 180 s early (container start / teardown headroom)
     text = (JOBS / "e3vs_start.sh").read_text()
     assert "deadline=9600s" in r.stdout and "timeout -k 120 9780 bash" in text and "9960" not in text
@@ -1623,16 +1647,17 @@ def test_start_payload_keeps_going_after_a_failed_step(scratch):
 
     r = _dry("e3vs_start.sh", ["Q3B"], scratch / "kg1", VPD_DRY_FAIL="eval_raw,train_100", **ROOMY)
     assert r.returncode == 1 and "failed steps: train_100 eval_raw" in r.stderr, r.stdout + r.stderr
-    assert steps_of(scratch / "kg1") == [("guard", 0), ("gsplat", 0), ("collider_smoke", 0), ("train_0W", 0),
-                                         ("train_100", 3), ("eval_raw", 3), ("merge_0W", 0), ("eval_0W", 0),
-                                         ("unmerge_0W", 0)]
+    assert steps_of(scratch / "kg1") == [("o3d_check", 0), ("guard", 0), ("gsplat", 0), ("collider_smoke", 0),
+                                         ("train_0W", 0), ("train_100", 3), ("eval_raw", 3), ("merge_0W", 0),
+                                         ("eval_0W", 0), ("unmerge_0W", 0)]
     assert "[dry] touch" not in r.stdout
     r2 = _dry("e3vs_start.sh", ["Q3B"], scratch / "kg2", VPD_DRY_FAIL="train_0W", **ROOMY)
-    assert r2.returncode == 1 and steps_of(scratch / "kg2") == [("guard", 0), ("gsplat", 0), ("collider_smoke", 0),
-                                                                  ("train_0W", 3), ("eval_raw", 0)]
+    assert r2.returncode == 1 and steps_of(scratch / "kg2") == [("o3d_check", 0), ("guard", 0), ("gsplat", 0),
+                                                                  ("collider_smoke", 0), ("train_0W", 3),
+                                                                  ("eval_raw", 0)]
     r3 = _dry("e3vs_start.sh", ["Q3B"], scratch / "kg3", VPD_DRY_FAIL="merge_0W,eval_100", **ROOMY)
     assert r3.returncode == 1 and "failed steps: merge_0W eval_100" in r3.stderr
-    assert steps_of(scratch / "kg3")[5:] == [("eval_raw", 0), ("merge_0W", 3), ("unmerge_0W", 0), ("merge_100", 0),
+    assert steps_of(scratch / "kg3")[6:] == [("eval_raw", 0), ("merge_0W", 3), ("unmerge_0W", 0), ("merge_100", 0),
                                              ("eval_100", 3), ("unmerge_100", 0)]
 
 
