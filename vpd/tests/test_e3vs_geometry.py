@@ -220,8 +220,10 @@ def test_viewmat_and_K_match_official(official, episodes):
 # ------------------------------------------------------------------------------------------------------------
 # success
 # ------------------------------------------------------------------------------------------------------------
-def _ref_success(c, goals, official, pos=0.25, ang=20.0, margin=1e-7):
-    """Reference on the official view_forward; returns None near a threshold (ambiguous in float)."""
+def _ref_success(c, goals, official, pos=0.25, ang=20.0, margin=1e-6):
+    """Reference on the official view_forward; returns None within margin (1e-6 m of 0.25 m or 1e-6 deg of 20 deg)
+    of a threshold (ambiguous in float, and the tie margin G.SUCCESS_TIE_EPS moves the boundary out by < 2e-9 m /
+    2e-7 deg)."""
     out = False
     for g in goals:
         d = float(np.linalg.norm(c[:3, 3] - g[:3, 3]))
@@ -393,6 +395,141 @@ def test_rollout_skips_colliding_moves_only():
     calls = []
     G.rollout(s, ["turn_left", "look_up", "stop"], collides=lambda a, b: calls.append(1) or True)
     assert calls == []  # rotations and stop never ask the collider
+
+
+# ------------------------------------------------------------------------------------------------------------
+# exact ties (J5 bfs_train 2026-11-13, episode 293 start 4): <= 0.25 m and <= 20 deg are inclusive everywhere
+# ------------------------------------------------------------------------------------------------------------
+COS20 = math.cos(math.radians(20.0))
+
+
+def _pose(pos, yaw_deg, pitch_deg=0.0) -> np.ndarray:
+    """Roll-free camera at pos looking along (yaw, pitch) in degrees (pitch > 0 looks up)."""
+    y, p = math.radians(yaw_deg), math.radians(pitch_deg)
+    f = np.array([math.cos(p) * math.cos(y), math.cos(p) * math.sin(y), math.sin(p)])
+    r = np.cross(f, [0.0, 0.0, 1.0])
+    r /= np.linalg.norm(r)
+    c = np.eye(4)
+    c[:3, 0], c[:3, 1], c[:3, 2], c[:3, 3] = r, np.cross(f, r), f, pos
+    return c
+
+
+def test_tie_margin_is_one_constant_used_by_every_success_test():
+    assert G.SUCCESS_TIE_EPS == 1e-9 and (E.SUCCESS_POS_M, E.SUCCESS_ANG_DEG) == (0.25, 20.0)
+    assert G.success_bounds() == (0.25 * 0.25 + 1e-9, COS20 - 1e-9) == (G.SUCCESS_D2_MAX, G.SUCCESS_COS_MIN)
+    assert (B._POS_TOL2, B._COS_TOL) == (G.SUCCESS_D2_MAX, G.SUCCESS_COS_MIN)  # the BFS lattice test
+    for f in (G.match_goals, G.success, G.within_tolerance, G.success_bounds):
+        assert f.__defaults__ == (E.SUCCESS_POS_M, E.SUCCESS_ANG_DEG)
+
+
+def test_exact_20deg_tie_is_a_success_for_both_turn_orders():
+    """A goal exactly 20 deg (in yaw or in pitch) from the orientation reached by turn_left x k, or by
+    turn_right x (12 - k), then the same looks: a success both ways, and for the BFS lattice test.  Without the
+    margin the verdict followed the float rounding (asserted at the end, so the fixture has real ties)."""
+    n = below = path_dependent = 0
+    for yaw0 in range(0, 360, 10):  # the template grid
+        s = _pose((1.0, -2.0, 1.3), yaw0)
+        lat = B.Lattice(s)
+        for k in range(12):
+            for look in (-1, 0, 1):
+                looks = ["look_up" if look > 0 else "look_down"] * abs(look)
+                ends = []
+                for turns in (["turn_left"] * k, ["turn_right"] * ((12 - k) % 12)):
+                    c = s
+                    for a in turns + looks:
+                        c = G.apply_action(c, a)
+                    ends.append(c)
+                st = (*lat.start[:3], k, look)
+                yaw, pitch = yaw0 + 30 * k, 30 * look
+                at = s[:3, 3] + [0.1, 0.05, -0.02]
+                goals = [_pose(at, yaw, pitch + 20), _pose(at, yaw, pitch - 20)]
+                if look == 0:
+                    goals += [_pose(at, yaw + 20), _pose(at, yaw - 20)]
+                for g in goals:
+                    assert B._near(lat, st, B.goal_table({0: g}))
+                    exact = []
+                    for c in ends:
+                        assert abs(G.view_angle_deg(c, g) - 20.0) < 1e-9  # a real tie
+                        assert G.success(c, [g]) and G.match_goals(c, {0: g}).all()
+                        exact.append(float(G.view_forward(g) @ G.view_forward(c)) >= COS20)  # no margin
+                    n += 1
+                    below += not all(exact)
+                    path_dependent += exact[0] != exact[1]
+    assert n == 36 * 12 * (2 * 3 + 2)
+    assert below > 0 and path_dependent > 0, (below, path_dependent)
+
+
+def test_bfs_lattice_test_floors_and_match_goals_agree_at_ties():
+    """BFS _near, geometry.match_goals / success and floors.episode_hits on one grid: exact ties (20 deg, 0.25 m)
+    are inside, 20 + 1e-6 deg and 0.25 + 1e-6 m outside, 20 - 1e-6 deg and 0.25 - 1e-6 m inside."""
+    walks = [[], ["turn_left"] * 2, ["turn_right"] * 10, ["move_right", "turn_left", "turn_left", "move_right"],
+             ["look_down", "turn_right", "move_forward"], ["turn_left"] * 5 + ["look_up", "move_up"],
+             ["move_backward", "look_up", "turn_right", "turn_right", "move_left"]]
+    angles = {20.0: True, 20.0 - 1e-6: True, 20.0 + 1e-6: False, 19.0: True, 21.0: False}
+    offsets = {(0.0, 0.0, 0.0): True, (0.15, 0.2, 0.0): True, (0.0, -0.2, 0.15): True, (-0.25, 0.0, 0.0): True,
+               (0.0, 0.0, 0.25 - 1e-6): True, (0.25 + 1e-6, 0.0, 0.0): False, (0.0, 0.15 + 1e-6, -0.2): False}
+    n = 0
+    for yaw0 in (0, 40, 130, 250):
+        for pitch0 in (0, -30):
+            s = _pose((0.5, 2.0, 1.1), yaw0, pitch0)
+            lat = B.Lattice(s)
+            for walk in walks:
+                st = lat.start
+                for a in walk:
+                    st = lat.step(st, a)
+                poses, _ = G.rollout(s, walk)
+                c = poses[-1]
+                assert np.abs(np.array(st[:3]) - c[:3, 3]).max() < 1e-12
+                yaw, pitch = yaw0 + 30 * st[3], pitch0 + 30 * st[4]
+                prefixes = [tuple(walk[:i]) for i in range(len(walk) + 1)]
+                for th, ok_a in angles.items():
+                    dirs = [(yaw, pitch + th), (yaw, pitch - th)]
+                    if pitch == 0:
+                        dirs += [(yaw + th, 0), (yaw - th, 0)]
+                    for off, ok_d in offsets.items():
+                        for gy, gp in dirs:
+                            g = _pose(c[:3, 3] + off, gy, gp)
+                            want = ok_a and ok_d
+                            assert B._near(lat, st, B.goal_table({0: g})) is want, (yaw0, pitch0, walk, th, off)
+                            assert bool(G.match_goals(c, [g])[0]) is want and G.success(c, {0: g}) is want
+                            ep = {"start_c2w": s, "goals": {0: g}}
+                            assert bool(F.episode_hits(ep, prefixes)[-1]) is want
+                            n += 1
+    assert n == 4 * (22 + 18) * 5 * 7  # (yaw0) x (directions per pitch0 = 0 / -30 over the walks) x angles x offsets
+
+
+def _ep293_like(yaw0) -> dict:
+    """Shaped like J5 bfs_train episode 293 start 4: a level start; one answerable viewpoint looking 80 deg left of
+    the start (20 deg past two left turns), 0.2048 m beyond the end of move_right, turn_left x 2, move_right.  Every
+    lattice state within 0.25 m of it at depth <= 4 that looks within 20 deg is a depth-4 state after two left turns,
+    exactly 20 deg away (the next yaw, 10 deg away, needs a third turn and so a fifth step)."""
+    s = _pose((0.4, -1.1, 1.25), yaw0)
+    end = G.rollout(s, ["move_right", "turn_left", "turn_left", "move_right"])[0][-1]
+    away = (end[:3, 3] - s[:3, 3]) / np.linalg.norm(end[:3, 3] - s[:3, 3])
+    goal = _pose(end[:3, 3] + 0.2048 * away, yaw0 + 80)
+    return {"split": "train", "episode_index": 293, "scene_id": "synthetic", "question_type": "t", "question": "q",
+            "instance_id": 1, "goals": {10: goal}, "unans": {4: s}, "start_viewpoint": 4, "start_c2w": s}
+
+
+def test_bfs_replay_of_an_exact_tie_like_episode_293(monkeypatch):
+    raised = 0
+    for yaw0 in range(0, 360, 10):
+        ep = _ep293_like(yaw0)
+        rec = B.solve_start(ep, 4, ep["start_c2w"], None, False, 16, B.STATE_CAP)  # must not raise
+        assert rec["status"] == "reached" and rec["opt_len"] == 4 and rec["goal_viewpoint"] == 10
+        assert rec["actions"].count("turn_left") == 2 and rec["replay_dev"] < TOL
+        end = np.array(rec["poses"][-1])
+        assert abs(G.view_angle_deg(end, ep["goals"][10]) - 20.0) < 1e-9 and G.success(end, ep["goals"])
+        with monkeypatch.context() as m:  # the exact comparisons of the code before the margin
+            m.setattr(G, "SUCCESS_TIE_EPS", 0.0)
+            m.setattr(B, "_POS_TOL2", 0.25 * 0.25)
+            m.setattr(B, "_COS_TOL", COS20)
+            try:
+                B.solve_start(ep, 4, ep["start_c2w"], None, False, 16, B.STATE_CAP)
+            except AssertionError as e:
+                assert "replayed path ends off-goal" in str(e)
+                raised += 1
+    assert raised > 0  # the fixture reproduces the J5 failure without the margin
 
 
 @needs_repo

@@ -4,14 +4,20 @@ Every sequence over the 10 non-stop actions (vpd.e3vs.SEARCH_ORDER) of length 0,
 is executed from each episode's start pose with the official action semantics (geometry.apply_action, camera
 mode, 0.25 m / 30 deg, no pitch limit) and, if ``--collides`` is given, the official restrict_collision rule
 (a colliding move is skipped and the step consumed).  The final pose (the blind policy then issues STOP) is
-scored with geometry.success (0.25 m AND <= 20 deg to any answerable viewpoint).
+scored with geometry's success test (0.25 m AND <= 20 deg to any answerable viewpoint, both inclusive, tie margin
+included: geometry.within_tolerance, the function match_goals / success use).
 
 Choice: the highest train success; ties -> the shorter sequence -> the earlier one in enumeration order
 (lengths ascending, itertools.product order over SEARCH_ORDER).  Val and test never influence the choice.
 
 Pre-registered gate floor (DECISIONS B8, PREREG_E3VS_PILOT): "the train-chosen fixed action sequence's test
-success under the frozen collision model".  Run without collision this reproduces the survey: (move_up,
-look_down) train 16.1%, val 10.8%, test 14.1%.  The frozen floor comes from the e3vs-prep job with
+success under the frozen collision model".  Run without collision and with the exact (no-margin) comparison this
+reproduces the survey: (move_up, look_down) train 16.1%, val 10.8%, test 14.1% (226/1406, 25/231, 53/377).
+With the tie margin (2026-11-13) exact ties on both bounds count; most of the change are exact 0.25 m distance
+ties (cells that become a success, distance / 20 deg / both: train 688 / 177 / 43 of 908, val 60 / 21 / 12 of 93,
+test 198 / 54 / 14 of 266).  The no-collision choice is then (turn_left, move_right, turn_left): train 241/1406 =
+17.1%, val 32/231 = 13.9%, test 66/377 = 17.5% ((move_up, look_down) keeps 226/1406, 25/231, 53/377).  That
+no-collision run is a reference, not the gate floor.  The frozen floor comes from the e3vs-prep job with
 ``--collides vpd.e3vs.mesh_collision:load_collider --tag mesh`` (floors_mesh.json; the official mesh model).
 One process; with --collides the CLI pins itself to one CPU (the collider's Embree / TBB pool follows the
 affinity).
@@ -85,7 +91,7 @@ def episode_hits(ep: dict, seqs, collides=None) -> np.ndarray:
     f = poses[:, :3, 2] / np.linalg.norm(poses[:, :3, 2], axis=1, keepdims=True)
     d2 = ((p[:, None, :] - gp[None, :, :]) ** 2).sum(-1)
     dot = f @ gf.T
-    ok = (d2 <= SUCCESS_POS_M * SUCCESS_POS_M) & (dot >= math.cos(math.radians(SUCCESS_ANG_DEG)))
+    ok = G.within_tolerance(d2, dot)  # geometry.success's test, vectorised over (sequence, goal)
     return ok.any(axis=1)
 
 
@@ -143,7 +149,8 @@ def run(out: Path | None = None, collides: str | None = None, tag: str | None = 
     idx = {s: i for i, s in enumerate(seqs)}
     res = {
         "tag": tag, "collides": collides, "max_len": MAX_LEN, "n_sequences": len(seqs),
-        "search_order": list(SEARCH_ORDER), "tolerance": {"pos_m": SUCCESS_POS_M, "ang_deg": SUCCESS_ANG_DEG},
+        "search_order": list(SEARCH_ORDER),
+        "tolerance": {"pos_m": SUCCESS_POS_M, "ang_deg": SUCCESS_ANG_DEG, "tie_eps": G.SUCCESS_TIE_EPS},
         "chosen": row(best),
         "gate_floor": {"definition": GATE_DEFINITION, "seq": list(seqs[best]), "split": "test",
                        **_rate(k["test"][best], n["test"])},

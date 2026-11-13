@@ -12,13 +12,20 @@ val 218/231 reached, 13 capped, median 3; test 355/377, 22 capped; train 1,344/1
     by that order; "stop" is appended to every path;
   - depth cap 16; state cap 1.5M, checked after each completed depth (as the prototype: the state count can
     overshoot the cap by the last layer);
-  - success = geometry.success (0.25 m AND <= 20 deg to any answerable viewpoint).
+  - success = geometry.success (0.25 m AND <= 20 deg to any answerable viewpoint, both inclusive): the lattice
+    goal test uses geometry's bounds SUCCESS_D2_MAX / SUCCESS_COS_MIN (tie margin SUCCESS_TIE_EPS included), so
+    an exact tie (0.25 m or 20 deg) is a success for the BFS, its replay, the floors and the closed-loop eval
+    alike.
 
 Collision is pluggable: ``--collides MODULE:FUNC`` names a factory ``FUNC(scene_id) -> collides(p0, p1)``
 (the pilot: vpd.e3vs.mesh_collision:load_collider, the official mesh model; the occupancy grid of WP-E3VS-B
 until 2026-11-12).  A translation whose segment collides is not an edge (the official
 restrict_collision rule skips it, so it never helps a shortest path); rotations never collide.  The default is
-no collision; that run must reproduce the survey numbers above.
+no collision; with the exact (no-margin) comparison that run reproduces the survey numbers above in all three
+splits.  With the tie margin (2026-11-13) it gives val 218/231 reached, 13 capped, median 3; test 355/377, 22
+capped; train 1,345/1,406, 61 capped.  22 val, 16 test and 77 train starts get a different path: 4, 6 and 28 a
+shorter one, none a longer one, and train episode 518 is reached at depth 10 instead of capped; the changes come
+from distance ties in 20 val, 10 test and 50 train starts, 20-deg ties in 2, 6 and 24, both in 3 train starts.
 
 Every found path is replayed with the official-semantics geometry.rollout from the start c2w (with the same
 collides); the replayed final pose must be a success and no replayed move may collide.
@@ -74,8 +81,8 @@ _OFF = 1 << 20  # cm offset for key packing (+-10 km)
 # prototype (strict ">= 90") let them look up twice to a vertical view; there the official planar_forward is
 # zero and move_left/right are no-ops, which the yaw-based lattice cannot represent.  The tolerance closes that.
 PITCH_EPS_DEG = 1e-6
-_COS_TOL = math.cos(math.radians(SUCCESS_ANG_DEG))
-_POS_TOL2 = SUCCESS_POS_M * SUCCESS_POS_M
+# The success bounds of geometry.match_goals (not recomputed here): squared distance and cosine, tie margin included.
+_POS_TOL2, _COS_TOL = G.SUCCESS_D2_MAX, G.SUCCESS_COS_MIN
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -390,7 +397,8 @@ def run(split: str, out: Path | None = None, limit: int | None = None, procs: in
     summ.update({
         "split": split, "tag": tag, "collides": collides, "limit": limit, "procs": procs, "extra": extra,
         "max_depth": max_depth, "state_cap": cap, "seconds": round(elapsed, 1),
-        "search_order": list(SEARCH_ORDER), "tolerance": {"pos_m": SUCCESS_POS_M, "ang_deg": SUCCESS_ANG_DEG},
+        "search_order": list(SEARCH_ORDER),
+        "tolerance": {"pos_m": SUCCESS_POS_M, "ang_deg": SUCCESS_ANG_DEG, "tie_eps": G.SUCCESS_TIE_EPS},
         "inputs": inputs,
         "code": code_meta(Path(__file__), Path(G.__file__), Path(sys.modules["vpd.e3vs"].__file__)),
         "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

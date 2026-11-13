@@ -26,7 +26,8 @@ Differences from the official module (all intentional):
   - ``viewmat_and_K`` returns float64 numpy arrays (official: float32 torch tensors of the same values);
   - ``success`` / ``match_goals`` are new: the official repo scores with a VQA judge, the pilot scores the
     viewpoint (report v2 section 3.2): position within 0.25 m AND view-direction angle <= 20 deg of any
-    answerable viewpoint.
+    answerable viewpoint, both inclusive (PREREG_E3VS_PILOT section 6), with the tie margin SUCCESS_TIE_EPS
+    below.  The BFS lattice test (bfs_demos) and the floors (floors.episode_hits) use the same bounds.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from typing import Iterable, Mapping
 
 import numpy as np
 
-from vpd.e3vs import ACTIONS
+from vpd.e3vs import ACTIONS, SUCCESS_ANG_DEG, SUCCESS_POS_M
 
 WORLD_UP = np.array([0.0, 0.0, 1.0])
 _ACTION_SET = frozenset(ACTIONS)
@@ -170,6 +171,45 @@ def rollout(c2w, actions: Iterable[str], step: float = 0.25, ang: float = 30.0, 
 # ------------------------------------------------------------------------------------------------------------
 # success
 # ------------------------------------------------------------------------------------------------------------
+# Tie margin of the success test: d2 <= pos_tol**2 + EPS and dot >= cos(ang_tol) - EPS.
+# Why: PREREG_E3VS_PILOT section 6 says <= 0.25 m AND <= 20 deg, both inclusive, and the goals sit on the template
+# grid, so exact ties on both bounds are common (counted on the episode files, no collision):
+#   - 20 deg: every answerable viewpoint's yaw offset from its episode's start is a multiple of 10 deg and a turn
+#     is 30 deg: exact-20-deg lattice ties in 74/231 val, 177/377 test and 586/1406 train episodes;
+#   - 0.25 m: poses reached from the start with one or two moves are exactly 0.25 m (to float precision) from an
+#     answerable viewpoint in 73/231 val, 98/377 test and 349/1406 train episodes.
+# At a tie the computed squared distance or cosine lands a few ulps on either side of the bound, so without a margin
+# the verdict depended on float rounding, at distance ties as at angle ties.  At the 20-deg ties the BFS lattice
+# test (cos/sin-built forward) and match_goals (the rotation-matrix pose) disagreed, and match_goals' own verdict
+# depended on the turn order that produced the pose (turn_left x k vs turn_right x (12 - k): path dependent in
+# 80/137 val, 193/313 test and 613/1085 train ties).  The J5 prep job's bfs_train stopped on it (episode 293
+# start 4: the lattice accepted a 20-deg end pose, the replay rejected it).  With the margin every exact tie is a
+# success, as the text says.  Most of what the margin changes are distance ties: floors cells (sequence x episode,
+# no collision) that become a success, distance / 20 deg / both: val 60 / 21 / 12 of 93, test 198 / 54 / 14 of 266,
+# train 688 / 177 / 43 of 908.  1e-9 is about 1.7e-7 deg on the cosine at 20 deg and 2e-9 m on the distance at
+# 0.25 m: 20 + 1e-6 deg and 0.25 + 1e-6 m stay outside, and every floors cell or BFS state the margin flips is
+# within 1e-15 of a bound (the nearest non-tie angle is 4.9e-3 off in cosine, about 0.8 deg).  Checked on the
+# episode files: starts that are a success stay 0/2014, unanswerable viewpoints inside an answerable one's success
+# region stay 0/10239 (the section 6 facts), and no unanswerable viewpoint (starts included) is exactly 0.25 m
+# (within 1e-9 m) from an answerable one (that is about pairs of viewpoints; poses reached by moves do tie, above).
+SUCCESS_TIE_EPS = 1e-9
+
+
+def success_bounds(pos_tol: float = SUCCESS_POS_M, ang_tol: float = SUCCESS_ANG_DEG) -> tuple[float, float]:
+    """(largest squared distance, smallest view-direction cosine) that count as a success, tie margin included."""
+    return pos_tol * pos_tol + SUCCESS_TIE_EPS, math.cos(math.radians(ang_tol)) - SUCCESS_TIE_EPS
+
+
+# The pilot's bounds (0.25 m, 20 deg); bfs_demos' scalar lattice goal test uses them.
+SUCCESS_D2_MAX, SUCCESS_COS_MIN = success_bounds()
+
+
+def within_tolerance(d2, dot, pos_tol: float = SUCCESS_POS_M, ang_tol: float = SUCCESS_ANG_DEG) -> np.ndarray:
+    """The success test on squared distances and unit view-direction dot products (arrays broadcast)."""
+    d2_max, cos_min = success_bounds(pos_tol, ang_tol)
+    return (np.asarray(d2) <= d2_max) & (np.asarray(dot) >= cos_min)
+
+
 def _goal_stack(goals) -> np.ndarray:
     if isinstance(goals, Mapping):
         goals = list(goals.values())
@@ -181,8 +221,9 @@ def _goal_stack(goals) -> np.ndarray:
     return g
 
 
-def match_goals(c2w, goals, pos_tol: float = 0.25, ang_tol: float = 20.0) -> np.ndarray:
-    """Boolean mask over goals: within pos_tol metres AND view directions within ang_tol degrees."""
+def match_goals(c2w, goals, pos_tol: float = SUCCESS_POS_M, ang_tol: float = SUCCESS_ANG_DEG) -> np.ndarray:
+    """Boolean mask over goals: within pos_tol metres AND view directions within ang_tol degrees (both inclusive,
+    tie margin SUCCESS_TIE_EPS)."""
     g = _goal_stack(goals)
     if len(g) == 0:
         return np.zeros(0, dtype=bool)
@@ -191,10 +232,10 @@ def match_goals(c2w, goals, pos_tol: float = 0.25, ang_tol: float = 20.0) -> np.
     d2 = np.einsum("ij,ij->i", d, d)
     gf = g[:, :3, 2] / np.linalg.norm(g[:, :3, 2], axis=1, keepdims=True)
     dot = gf @ view_forward(c2w)
-    return (d2 <= pos_tol * pos_tol) & (dot >= math.cos(math.radians(ang_tol)))
+    return within_tolerance(d2, dot, pos_tol, ang_tol)
 
 
-def success(c2w, goals, pos_tol: float = 0.25, ang_tol: float = 20.0) -> bool:
+def success(c2w, goals, pos_tol: float = SUCCESS_POS_M, ang_tol: float = SUCCESS_ANG_DEG) -> bool:
     """Viewpoint success: within pos_tol of ANY goal viewpoint with view angle <= ang_tol (both inclusive)."""
     return bool(match_goals(c2w, goals, pos_tol, ang_tol).any())
 
