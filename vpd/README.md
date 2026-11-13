@@ -89,7 +89,7 @@
 | `jobs/common_env.sh`、`jobs/preflight.sh` | 作业脚本的公共开头（线程数、离线开关、chown 陷阱、节点信息）和开跑前检查 | WP-OPS |
 | `jobs/wb_demos.sh` | sco 作业脚本：渲染示范、生成热身集、生成档位 | WP-WBDEMO |
 | `jobs/wb_smoke.sh`、`jobs/wb_pilot_start.sh` | sco 作业脚本：WalkerBench smoke 和每个起点的试点 | WP-WBPILOT |
-| `jobs/e3vs_prep.sh`、`jobs/e3vs_start.sh` | sco 作业脚本：E3VS 准备和每个起点的试点。2026-11-12 起碰撞模型是官方 mesh：准备作业的 `mesh_val` 一步（原 `occupancy`）验证 99 个 mesh，不过就停；KEY 是 99 个 mesh 的 `mesh_set_sha256`；新 RUN 里 gsplat_probe、parity 按已有输出跳过；两个作业把 `envs/e3vs-o3d` 接在 PYTHONPATH 后面 | WP-E3VS-B；meshcm（第三轮） |
+| `jobs/e3vs_prep.sh`、`jobs/e3vs_start.sh` | sco 作业脚本：E3VS 准备和每个起点的试点。2026-11-12 起碰撞模型是官方 mesh：准备作业的 `mesh_val` 一步（原 `occupancy`）验证 99 个 mesh，不过就停（退出码 1 闸门指标不过、2 输入被拒、3 出错没有结果、4 可能是坐标系不一致，都停下问用户）；KEY 是 99 个 mesh 的 `mesh_set_sha256`；新 RUN 里 gsplat_probe、parity 按已有输出跳过；起点作业在 gsplat 之后、训练之前做一次碰撞模型冒烟（`mesh_collision smoke`）；只有要用碰撞模型的 PY_Q3 调用（mesh_val、BFS、下限、冒烟、run.py）才把 `envs/e3vs-o3d` 接在 PYTHONPATH 后面，run.py 不把它传给 vLLM 服务 | WP-E3VS-B；meshcm（第三轮） |
 | `walkerbench/sandbox.py` | 唯一的 WalkerBench 运行副本 helper：改渲染尺寸、全景目录、任务目录 | WP-CORE |
 | `walkerbench/history.py` | 干净的 K 轮历史窗口，训练和评测共用 | WP-CORE |
 | `walkerbench/action_regex.py` | 约束解码用的每步正则 | WP-CORE |
@@ -149,7 +149,7 @@
 | `tvr/runs/explore/rl/` | `COMPARE_RL.json`、`COMPARE_RL.md`（compare_rl，10 个探索评测都有效之后）；`COMPARE_Q3SG.json`、`COMPARE_Q3SG.md`（compare_q3sg，5 个 Q3SG 评测都有效、训练器不变量成立之后） |
 | `tvr/runs/explore/mpdiag/` | 合并正确性诊断（vpd-tvr-mpdiag，探索性质）的报告，每次一个 `<RUN 名>/`（`mp_diag.json`、`mp_diag.md`） |
 | `envs/tvr` | TVR 的 conda 环境（要用户批准后才建） |
-| `envs/e3vs-o3d` | E3VS 碰撞模型用的 open3d（`pip --target`，要用户批准后才装；只有 E3VS 两个作业把它接在 PYTHONPATH 后面；里面不能有 numpy / torch，作业会拒绝） |
+| `envs/e3vs-o3d` | E3VS 碰撞模型用的 open3d 0.19.0（官方固定的版本；`pip --target`，用户 2026-11-13 批准后已装）。只有 E3VS 两个作业里要用碰撞模型的 PY_Q3 调用把它接在 PYTHONPATH 后面；`mesh_collision o3d-check` 拒绝其中任何一个 PY_Q3 自己也能导入的顶层模块 |
 | `e3vs/` | `repo/`、`data/`、`mesh_dl/`（用户下载的 ScanNet++ mesh）、`mesh_manifest.json`、`mesh_sha256.txt`（mesh_verify）、`mesh_val/validation.json`（碰撞模型验证）、`parity/`、`torch_ext/`、`prep_state/`、`bfs/mesh/`、`floors/floors_mesh.json`、`sft/`、`runs/`；`occ/` 是 2026-11-12 没通过验证的占据栅格，留作记录 |
 
 合并后的权重**不进** OUT，也不进 /mnt/umm 的任何地方：
