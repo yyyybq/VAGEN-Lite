@@ -552,7 +552,7 @@ def collision_provenance(collides: str | None) -> dict | None:
     return {"factory": MC.FACTORY, "official_file": str(MC.METRICS_REL), "official_sha256": MC.METRICS_SHA256,
             "official_class": MC.OFFICIAL_CLASS, "tolerance_m": MC.TOLERANCE_M, "in_obstacle_m": MC.IN_OBSTACLE_M,
             "validation": str(vp), "validation_pass": None if val is None else val.get("pass"),
-            "validation_problems": None if val is None else MC.definition_problems(val),
+            "validation_problems": None if val is None else MC.record_problems(val),
             "mesh_set_sha256": None if val is None else val.get("mesh_set_sha256"),
             "validation_official": None if val is None else val.get("official")}
 
@@ -759,6 +759,8 @@ def main(argv=None) -> int:
             else:
                 from vpd.common.vllm_server_vpd import VLLMServer
 
+                # open3d's dir is for this process only (the colliders): the vLLM server gets the env without it
+                os.environ["PYTHONPATH"] = MC.scrub_o3d_pythonpath(os.environ.get("PYTHONPATH"))
                 srv = VLLMServer(info["served"], log=run_dirs[modes[0]] / "vllm.log", model_dir=a.model_dir,
                                  gpu_memory_utilization=a.gpu_memory_utilization, max_images=1,
                                  max_model_len=a.max_model_len)

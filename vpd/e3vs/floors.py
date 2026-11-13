@@ -13,6 +13,8 @@ Pre-registered gate floor (DECISIONS B8, PREREG_E3VS_PILOT): "the train-chosen f
 success under the frozen collision model".  Run without collision this reproduces the survey: (move_up,
 look_down) train 16.1%, val 10.8%, test 14.1%.  The frozen floor comes from the e3vs-prep job with
 ``--collides vpd.e3vs.mesh_collision:load_collider --tag mesh`` (floors_mesh.json; the official mesh model).
+One process; with --collides the CLI pins itself to one CPU (the collider's Embree / TBB pool follows the
+affinity).
 
 Output (``--out``, default OUT/e3vs/floors/floors_<tag>.json): the choice with k/n/rate/Wilson 95% per split,
 the train top 10, reference sequences, the per-episode test and val outcomes of the chosen sequence, inputs and
@@ -179,6 +181,8 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, default=None, help="first N episodes per split (tests only)")
     ap.add_argument("--out", type=Path, default=None)
     a = ap.parse_args(argv)
+    if a.collides and hasattr(os, "sched_setaffinity"):  # single process: one CPU for the collider's Embree / TBB
+        os.sched_setaffinity(0, {min(os.sched_getaffinity(0))})
     run(out=a.out, collides=a.collides, tag=a.tag, repo=a.repo, limit=a.limit)
     return 0
 

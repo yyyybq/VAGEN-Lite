@@ -892,7 +892,8 @@ def fake_mesh_validation(shas: dict, ok: bool = True) -> dict:
     return {"pass": ok, "scenes": {s: {"sha256": h} for s, h in shas.items()},
             "mesh_set_sha256": MV.mesh_set_sha256(shas), "tolerance_m": MC.TOLERANCE_M,
             "in_obstacle_m": MC.IN_OBSTACLE_M, "pooled": {"threshold": MC.VALID_MAX_FRAC},
-            "official": {"sha256": MC.METRICS_SHA256, "commit": E.E3VS_COMMIT}}
+            "official": {"sha256": MC.METRICS_SHA256, "commit": E.E3VS_COMMIT, "open3d_version": MC.O3D_VERSION},
+            "frame_ok": True, "frame_warnings": []}
 
 
 @needs_repo

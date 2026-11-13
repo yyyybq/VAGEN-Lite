@@ -34,7 +34,10 @@ Outputs (``--out``, default OUT/e3vs/bfs/<tag>/<split>/):
 
 ``--extra`` also searches from each episode's other unanswerable viewpoints (records tagged extra=True), the
 start pool for tiers above about 900 demos.  CPU: pure Python, one thread per process; ``--procs`` is an
-explicit process count (default 1).  The full train split (about 18 min at 1 core) belongs in the e3vs-prep
+explicit process count (default 1); each pool worker is pinned to one CPU (round robin over the affinity), and
+a --procs 1 CLI run with --collides to one CPU, because the mesh collider's Embree / TBB sizes its thread pool
+from the affinity.  With --procs > 1 a factory's ``prefork(scene_ids)`` (the mesh factory's hashes the meshes)
+runs in the parent before the fork.  The full train split (about 18 min at 1 core) belongs in the e3vs-prep
 sco job, not on the login node.
 
 Usage: python -m vpd.e3vs.bfs_demos --split val [--limit N] [--procs 1] [--collides MOD:FUNC --tag T]
@@ -261,12 +264,27 @@ def episode_starts(ep: dict, extra: bool):
 _W: dict = {}
 
 
+def _pin_worker() -> int | None:
+    """In a pool worker: pin it to one CPU (round robin over the inherited affinity by worker number) before any
+    collider is built: Embree / TBB (the mesh collider) sizes its thread pool from the affinity."""
+    import multiprocessing as mp
+
+    ident = getattr(mp.current_process(), "_identity", ())
+    if not ident or not hasattr(os, "sched_setaffinity"):
+        return None  # the parent (--procs 1 runs in-process; main() pins the CLI process)
+    cpus = sorted(os.sched_getaffinity(0))
+    cpu = cpus[(ident[0] - 1) % len(cpus)]
+    os.sched_setaffinity(0, {cpu})
+    return cpu
+
+
 def _init(episodes, factory_spec, extra, max_depth, cap):
     for k, v in {"OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
                  "NUMEXPR_NUM_THREADS": "1"}.items():
         os.environ[k] = v
+    cpu = _pin_worker()
     _W.update(episodes=episodes, factory=load_collider_factory(factory_spec), colliders={}, extra=extra,
-              max_depth=max_depth, cap=cap)
+              max_depth=max_depth, cap=cap, cpu=cpu)
 
 
 def _collider(scene: str):
@@ -360,6 +378,9 @@ def run(split: str, out: Path | None = None, limit: int | None = None, procs: in
                 print(f"  {split} {i + 1}/{len(eps)} {time.time() - t0:.0f}s", flush=True)
     else:
         import multiprocessing as mp
+        hook = getattr(load_collider_factory(collides), "prefork", None)
+        if hook is not None:  # e.g. the mesh factory hashes the meshes once here; the forked workers inherit it
+            hook(sorted({e["scene_id"] for e in eps}))
         ctx = mp.get_context("fork")
         with ctx.Pool(int(procs), initializer=_init, initargs=(eps, collides, extra, max_depth, cap)) as pool:
             results = list(pool.imap(_solve_episode, range(len(eps)), chunksize=1))
@@ -408,6 +429,8 @@ def main(argv=None) -> int:
     ap.add_argument("--repo", type=Path, default=None, help="E3VS checkout (default: vpd.e3vs.repo_dir())")
     ap.add_argument("--out", type=Path, default=None)
     a = ap.parse_args(argv)
+    if a.collides and a.procs <= 1 and hasattr(os, "sched_setaffinity"):  # in-process search: one CPU
+        os.sched_setaffinity(0, {min(os.sched_getaffinity(0))})
     run(a.split, out=a.out, limit=a.limit, procs=a.procs, collides=a.collides, tag=a.tag, extra=a.extra,
         max_depth=a.max_depth, cap=a.cap, repo=a.repo)
     return 0

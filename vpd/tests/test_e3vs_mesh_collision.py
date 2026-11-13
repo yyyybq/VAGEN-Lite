@@ -1,17 +1,19 @@
 """Tests of vpd.e3vs.mesh_collision: the official E3VS Collisions (mesh + Open3D ray casting) as the pilot's
 collision model (PREREG_E3VS_PILOT section 16, user 2026-11-12).
 
-open3d is not installed yet (pending the user's OK).  Two backends run the same synthetic scenes:
+open3d 0.19.0 is installed (user approved 2026-11-13) in OUT/envs/e3vs-o3d; it is importable when that dir is on
+PYTHONPATH.  Two backends run the same synthetic scenes:
   - "stub": a minimal stand-in for the open3d API that metrics.py and mesh_collision use (io.read_triangle_mesh,
     t.geometry.TriangleMesh.from_legacy, t.geometry.RaycastingScene add_triangles / cast_rays /
-    compute_distance, core.Tensor), ray-casting axis-aligned box surfaces in numpy.  It runs now and exercises
-    the OFFICIAL metrics.py code (executed from the pinned checkout) and our wiring around it;
-  - "open3d": the real library on the same boxes written as triangle meshes; skipped (pytest.importorskip) until
-    open3d is importable (OUT/envs/e3vs-o3d on PYTHONPATH).
+    compute_distance, core.Tensor), ray-casting axis-aligned box surfaces in numpy.  It exercises the OFFICIAL
+    metrics.py code (executed from the pinned checkout) and our wiring around it without open3d;
+  - "open3d": the real library on the same boxes written as triangle meshes (pytest.importorskip: skipped only
+    when OUT/envs/e3vs-o3d is not on PYTHONPATH).
+Tiny synthetic meshes only.  Embree / TBB sizes its thread pool from the CPU affinity, so importing this module
+pins the test process to one CPU (the first of its affinity).
 
-Login node, 1 core:  OMP_NUM_THREADS=1 ... nice -n 19 PY_Q3 -B -m pytest -q -p no:cacheprovider
-vpd/tests/test_e3vs_mesh_collision.py   (pytest tmp dirs only; with real open3d, run it under `taskset -c <one
-core>`: Embree's BVH build uses every CPU it sees)
+Login node:  OMP_NUM_THREADS=1 ... PYTHONPATH=<tree>:OUT/envs/e3vs-o3d taskset -c <one cpu> nice -n 19 PY_Q3 -B -m
+pytest -q -p no:cacheprovider vpd/tests/test_e3vs_mesh_collision.py   (pytest tmp dirs only)
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ from pathlib import Path
 for _k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
     os.environ.setdefault(_k, "1")
 sys.dont_write_bytecode = True
+if hasattr(os, "sched_setaffinity"):  # before any open3d import: one CPU for Embree / TBB (a plain pytest run)
+    os.sched_setaffinity(0, {min(os.sched_getaffinity(0))})
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
@@ -153,9 +157,10 @@ class _Legacy:
         return types.SimpleNamespace(min_bound=lo, max_bound=hi)
 
 
-def make_stub():
+def make_stub(version: str = MC.O3D_VERSION):
     m = types.ModuleType("open3d")
-    m.__version__ = "stub"
+    m.__version__ = version  # the stand-in claims the pinned version (mesh_collision refuses any other)
+    m.IS_STUB = True
     m.core = types.SimpleNamespace(Tensor=_Tensor, Dtype=types.SimpleNamespace(Float32="Float32"))
     m.io = types.SimpleNamespace(read_triangle_mesh=lambda p: _Legacy(p))
     m.t = types.SimpleNamespace(geometry=types.SimpleNamespace(
@@ -207,6 +212,40 @@ def test_jobs_append_the_open3d_dir():
     assert not any("e3vs-o3d" in j.read_text() for j in sorted(JOBS.glob("*.sh")) if not j.name.startswith("e3vs_"))
 
 
+def test_o3d_dir_shadow_check(tmp_path):
+    """N3: a top-level module of O3D_DIR that this interpreter imports from elsewhere is refused; the installed
+    dir shadows nothing."""
+    d = tmp_path / "o3d"
+    for pkg in ("numpy", "zz_vpd_unique_pkg"):
+        (d / pkg).mkdir(parents=True)
+        (d / pkg / "__init__.py").write_text("")
+    (d / "json.py").write_text("")
+    (d / "zz_vpd_unique_mod.py").write_text("")
+    (d / "bin").mkdir()  # not a package
+    (d / "foo-1.0.dist-info").mkdir()
+    assert MC.o3d_top_names(d) == ["json", "numpy", "zz_vpd_unique_mod", "zz_vpd_unique_pkg"]
+    probs = MC.o3d_shadow_problems(d)
+    assert [p.split(":")[0] for p in probs] == ["json", "numpy"]
+    assert MC.main(["o3d-check", "--dir", str(d)]) == 1 and MC.main(["o3d-check", "--dir", str(tmp_path / "x")]) == 1
+    if MC.O3D_DIR.is_dir():
+        assert MC.o3d_shadow_problems() == [] and "open3d" in MC.o3d_top_names() and MC.main(["o3d-check"]) == 0
+    pp = os.pathsep.join(["/tree", str(MC.O3D_DIR), "/other", str(MC.O3D_DIR / "sub")])
+    assert MC.scrub_o3d_pythonpath(pp) == os.pathsep.join(["/tree", "/other"])
+    assert MC.scrub_o3d_pythonpath(None) == ""
+    run_src = (paths.VPD_PKG / "e3vs" / "run.py").read_text()
+    i, j = run_src.index("MC.scrub_o3d_pythonpath("), run_src.index("srv = VLLMServer(")
+    assert i < j and 'os.environ["PYTHONPATH"] = MC.scrub_o3d_pythonpath(' in run_src  # before the server starts
+
+
+def test_pin_one_cpu_in_a_child():
+    code = ("import os; from vpd.e3vs import mesh_collision as MC; n = len(os.sched_getaffinity(0)); "
+            "c = MC.pin_one_cpu(1); print(n, c, sorted(os.sched_getaffinity(0)))")
+    env = dict(os.environ, PYTHONPATH=str(paths.WORKTREE), PYTHONDONTWRITEBYTECODE="1")
+    r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True, text=True, env=env, timeout=120)
+    n, c, rest = r.stdout.split(" ", 2)
+    assert r.returncode == 0 and json.loads(rest) == [int(c)], r.stderr
+
+
 def test_importing_the_code_does_not_import_open3d():
     code = ("import sys, vpd.e3vs.mesh_collision, vpd.e3vs.run, vpd.e3vs.summary, vpd.e3vs.bfs_demos, "
             "vpd.e3vs.floors; print('open3d' in sys.modules)")
@@ -244,6 +283,8 @@ def test_pinned_official_collision_code():
     assert re.search(r"""action_setting:\s*["']?restrict_collision""", cfg)
     assert re.search(r"collision_mesh_path:.*\{scene_id\}/scans/mesh_aligned_0\.05\.ply", cfg)
     assert str(MV.MESH_REL) == "scans/mesh_aligned_0.05.ply"
+    # N2: the official open3d pin
+    assert f'"open3d=={MC.O3D_VERSION}"' in (REPO / "pyproject.toml").read_text()
 
 
 def _fake_repo(tmp_path, commit: str, metrics: bytes | None) -> Path:
@@ -278,6 +319,50 @@ def test_open3d_missing_is_a_clear_error(tmp_path, monkeypatch):
         MC.MeshCollider("s", p, repo=REPO)
     with pytest.raises(FileNotFoundError):
         MC.MeshCollider("s", tmp_path / "missing.ply", repo=REPO)
+
+
+@needs_repo
+def test_open3d_version_is_the_official_pin(tmp_path, monkeypatch):
+    """N2: any open3d but 0.19.0 is refused; a validation made with another version is not of the definition."""
+    monkeypatch.setattr(MC, "_OFFICIAL", {})
+    monkeypatch.setitem(sys.modules, "open3d", make_stub("0.18.0"))
+    with pytest.raises(ImportError, match="not the official pin 0.19.0"):
+        MC.open3d()
+    p = write_box_mesh(tmp_path / "s" / MV.MESH_REL, [ROOM])
+    with pytest.raises(ImportError, match="0.18.0"):
+        MC.MeshCollider("s", p, repo=REPO)
+    v = {"official": {"sha256": MC.METRICS_SHA256, "commit": E.E3VS_COMMIT, "open3d_version": "0.18.0"}}
+    assert any("open3d '0.18.0'" in x for x in MC.definition_problems(v))
+
+
+@needs_repo
+def test_official_code_is_the_hashed_bytes(tmp_path, monkeypatch):
+    """N1: the executed module is compiled from exactly the bytes that were hashed (one read; no importlib, no
+    __pycache__)."""
+    monkeypatch.setattr(MC, "_OFFICIAL", {})
+    monkeypatch.setitem(sys.modules, "open3d", make_stub())
+    reads = []
+    orig = Path.read_bytes
+
+    def counting(self):
+        if self.name == "metrics.py":
+            reads.append(str(self))
+        return orig(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting)
+    calls = []
+    real_compile = compile
+
+    def spy(src, filename, mode, *a, **k):
+        if str(filename).endswith("metrics.py"):
+            calls.append(src)
+        return real_compile(src, filename, mode, *a, **k)
+
+    monkeypatch.setattr("builtins.compile", spy)
+    mod, facts = MC.official_metrics(REPO)
+    assert len(reads) == 1 and len(calls) == 1 and isinstance(calls[0], bytes)
+    assert __import__("hashlib").sha256(calls[0]).hexdigest() == MC.METRICS_SHA256 == facts["sha256"]
+    assert mod.__spec__ is None and mod.__file__.endswith("metrics.py") and hasattr(mod, "Collisions")
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -332,8 +417,8 @@ def test_official_check_on_a_box_room(backend, tmp_path):
     poses, flags = G.rollout(start, ["move_forward", "turn_left", "move_backward"], collides=col)
     assert flags == [True, False, False] and np.allclose(poses[1], start)
     assert col.meta["official"]["sha256"] == MC.METRICS_SHA256 and col.meta["official"]["commit"] == E.E3VS_COMMIT
-    assert MC.loaded_official()[0]["open3d_version"] == ("stub" if backend.kind == "stub" else
-                                                          sys.modules["open3d"].__version__)
+    assert MC.loaded_official()[0]["open3d_version"] == MC.O3D_VERSION
+    assert getattr(sys.modules["open3d"], "IS_STUB", False) == (backend.kind == "stub")
 
 
 @needs_repo
@@ -396,6 +481,25 @@ def test_validate_scene_and_pooled():
     assert not p3["pass_iphone"]  # 1.0 % is not < 1 %
     empty = MC.pooled_validation({"a": {**rec, "iphone_segments": 0, "iphone_colliding": 0}})
     assert empty["iphone_colliding_frac"] is None and not empty["pass_iphone"]  # no segment: cannot pass
+    # S1 frame fields: template viewpoints and starts inside the mesh AABB, per scene and pooled; quantiles
+    assert rec["viewpoints_in_aabb"] == 3 and rec["viewpoints_in_aabb_frac"] == 1.0
+    assert rec["starts_n"] == 3 and rec["starts_in_aabb"] == 3 and rec["iphone_in_aabb_frac"] == round(12 / 13, 6)
+    for k in ("viewpoints", "iphone", "starts"):
+        assert {"p01", "p05", "p50"} <= set(rec["distance_m"][k]), k
+    fr = pooled["frame"]
+    assert fr["iphone_in_aabb_frac"] == round(12 / 13, 6) and fr["viewpoints_in_aabb_frac"] == 1.0
+    assert fr["starts_in_aabb_frac"] == 1.0 and pooled["start_distance_m"]["n"] == 3
+    assert MC.frame_check({"a": rec}, pooled) == ([], [])  # 92 % >= 90 %
+    # one scene's iPhone centres mostly outside: listed, a warning, though the pooled share is fine
+    bad = {**rec, "iphone_in_aabb": 5, "iphone_in_aabb_frac": round(5 / 13, 6)}
+    good = {**rec, "iphone_frames": 1000, "iphone_in_aabb": 1000, "iphone_in_aabb_frac": 1.0}
+    per = {"a": bad, "b": good}
+    warn, sus = MC.frame_check(per, MC.pooled_validation(per))
+    assert [x["scene_id"] for x in sus] == ["a"] and len(warn) == 1 and "1 scenes" in warn[0]
+    # the template viewpoints outside: a pooled warning and the scene listed
+    vbad = {**rec, "viewpoints_in_aabb": 0, "viewpoints_in_aabb_frac": 0.0}
+    warn, sus = MC.frame_check({"a": vbad}, MC.pooled_validation({"a": vbad}))
+    assert any("template viewpoints" in w for w in warn) and sus[0]["viewpoints_in_aabb_frac"] == 0.0
 
 
 def _mesh_tree(tmp_path, scenes: dict, write) -> tuple[Path, Path]:
@@ -476,9 +580,12 @@ def test_validate_check_and_factory(backend, tmp_path, monkeypatch):
     assert st["moves_colliding"] == sum(col(corner[:3, 3], G.apply_action(corner, m)[:3, 3]) for m in MC.MOVES)
     assert res["mesh_set_sha256"] == json.loads(man.read_text())["mesh_set_sha256"] and res["manifest"]["key_matches"]
     assert res["official"]["sha256"] == MC.METRICS_SHA256 and res["tolerance_m"] == 1e-4
+    assert res["official"]["open3d_version"] == MC.O3D_VERSION
     assert res["iphone_convention"] == {"convention": "opencv", "source": "given (--convention)",
                                         "note": res["iphone_convention"]["note"]}
-    assert not MC.definition_problems(v)
+    assert not MC.definition_problems(v) and res["frame_ok"] and res["frame_warnings"] == []
+    assert p["frame"]["viewpoints_in_aabb_frac"] == 1.0 and p["frame"]["starts_in_aabb_frac"] == 1.0
+    assert p["frame"]["suspect_scenes"] == [] and res["scenes"]["s1"]["distance_m"]["starts"]["n"] == 3
     # check: passes and prints the key; a changed mesh, another manifest key or another definition fail it
     c = MC.check(["s1"], out, man, root)
     assert c["ok"] and c["mesh_set_sha256"] == res["mesh_set_sha256"]
@@ -523,12 +630,156 @@ def test_validation_fails_on_a_viewpoint_in_obstacle(backend, tmp_path):
     assert not res["pass"] and res["pooled"]["pass_iphone"] and not res["pooled"]["pass_viewpoints"]
     assert res["scenes"]["s1"]["inside_tags"] == ["ep100_goal1"]
     assert not MC.check(["s1"], tmp_path / "val", man, root)["ok"]
-    # the iPhone poses outside the mesh frame: the metric passes trivially, the validation warns (descriptive)
+    # the iPhone poses outside the mesh frame: the metric passes trivially; the frame stop holds the validation
     far = ring.copy()
     far[:, :3, 3] += 100.0
-    res2 = MC.validate(["s1"], _episodes("s1", STARTS), tmp_path / "val2", man, root, iphone={"s1": far},
+    d2 = tmp_path / "val2"
+    res2 = MC.validate(["s1"], _episodes("s1", STARTS), d2, man, root, iphone={"s1": far},
                        repo=REPO, convention="opencv")
-    assert res2["pass"] and res2["warnings"] and "AABB" in res2["warnings"][0]
+    assert res2["pass"] and not res2["frame_ok"] and res2["warnings"] == res2["frame_warnings"]
+    assert "AABB" in res2["frame_warnings"][0] and res2["pooled"]["frame"]["suspect_scenes"][0]["scene_id"] == "s1"
+    c = MC.check(["s1"], d2, man, root)
+    assert not c["ok"] and "possible frame mismatch not acknowledged" in c["problems"][0]
+    with pytest.raises(ValueError):
+        MC.ack_frame("  ", d2)
+    assert MC.main(["ack-frame", "--out", str(d2), "--note", "user 2026-11-13: frames checked (test)"]) == 0
+    assert MC.check(["s1"], d2, man, root)["ok"] and not MC.record_problems(json.loads(
+        MC.validation_path(d2).read_text()), d2)
+    ack = json.loads(MC.frame_ack_path(d2).read_text())
+    MC.frame_ack_path(d2).write_text(json.dumps({**ack, "frame_warnings": ["another warning"]}))
+    assert not MC.check(["s1"], d2, man, root)["ok"]  # an ack covers exactly the warnings it was given for
+
+
+@needs_repo
+def test_validate_cli_exit_codes_and_smoke(backend, tmp_path, monkeypatch, capsys):
+    """S2: validate exits 0 pass, 1 gating failure (wins over a frame warning), 2 refused, 3 any other error (no
+    validation result, nothing written), 4 frame stop; S3: the smoke loads the first test scene's validated mesh."""
+    eps = [e for sp in E.SPLITS for e in E.load_episodes(sp, REPO)]
+    sid = sorted({e["scene_id"] for e in eps if e["split"] == "test"})[0]
+    pts = np.array([c[:3, 3] for _, c in RD.scene_viewpoints(eps, sid)])
+    lo, hi = pts.min(axis=0) - 1.0, pts.max(axis=0) + 1.0  # a room around every template viewpoint of the scene
+    root, man = _mesh_tree(tmp_path, {sid: [(tuple(map(float, lo)), tuple(map(float, hi)))]}, backend.scene)
+    ins = tmp_path / "insscene"
+    monkeypatch.setattr(RD, "INSSCENE_ROOT", ins)  # validate reads render.INSSCENE_ROOT at call time
+
+    def iphone(centres):
+        d = ins / sid
+        d.mkdir(parents=True, exist_ok=True)
+        c2w = np.array([look_c2w(c, [0, 1, 0]) for c in centres])
+        np.savez(d / "scene_iphone_metadata.npz", trajectories=c2w, intrinsics=np.tile(np.eye(3), (len(c2w), 1, 1)),
+                 images=np.array([f"{i:04d}.jpg" for i in range(len(c2w))]))
+
+    base = ["validate", "--scenes", sid, "--mesh-root", str(root), "--convention", "opencv", "--repo", str(REPO)]
+
+    def run(name, manifest=man):
+        out = tmp_path / name
+        return MC.main(base + ["--out", str(out), "--manifest", str(manifest)]), out
+
+    mid = (lo + hi) / 2
+    rc, out = run("v3")  # no InsScene file for the scene: an error, no result
+    err = capsys.readouterr().err
+    assert rc == MC.RC_ERROR == 3 and "ERROR, no validation result" in err and not out.exists()
+    rc, out = run("v2", tmp_path / "no_manifest.json")
+    assert rc == MC.RC_REFUSED == 2 and "REFUSED" in capsys.readouterr().err and not out.exists()
+    iphone([mid + [0.02 * i, 0.0, 0.0] for i in range(40)])
+    rc, out0 = run("v0")
+    assert rc == MC.RC_PASS == 0, capsys.readouterr().err
+    v0 = json.loads(MC.validation_path(out0).read_text())
+    assert v0["pass"] and v0["frame_ok"] and v0["pooled"]["frame"]["viewpoints_in_aabb_frac"] == 1.0
+    # back and forth through the wall x = hi: every segment collides (and half the centres are outside the box)
+    iphone([[hi[0] + (0.1 if i % 2 else -0.1), mid[1], mid[2]] for i in range(20)])
+    rc, out = run("v1")
+    err = capsys.readouterr().err
+    assert rc == MC.RC_GATE == 1 and "mesh validation FAILED" in err and "FRAME WARNING" in err
+    v1 = json.loads(MC.validation_path(out).read_text())
+    assert not v1["pass"] and v1["pooled"]["iphone_colliding_frac"] == 1.0 and not v1["frame_ok"]
+    iphone([mid + [100.0 + 0.02 * i, 0.0, 0.0] for i in range(40)])  # far outside the mesh: a frame stop
+    rc, out = run("v4")
+    err = capsys.readouterr().err
+    assert rc == MC.RC_FRAME == 4 and "possible frame mismatch" in err
+    v4 = json.loads(MC.validation_path(out).read_text())
+    assert v4["pass"] and not v4["frame_ok"] and v4["pooled"]["frame"]["suspect_scenes"][0]["scene_id"] == sid
+    assert any("frame mismatch" in x for x in MC.record_problems(v4, out))
+    # S3 smoke on the passing validation: imports, load_collider, one official check
+    for k, val in (("VPD_E3VS_MESH_ROOT", root), ("VPD_E3VS_MESH_MANIFEST", man), ("VPD_E3VS_MESH_VAL_DIR", out0)):
+        monkeypatch.setenv(k, str(val))
+    assert MC.main(["smoke", "--split", "test", "--imports", "json", "--repo", str(REPO)]) == 0
+    sm = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert sm["scene_id"] == sid and sm["collides"] is False and list(sm["imports"]) == ["json"]
+    assert sm["official"]["open3d_version"] == MC.O3D_VERSION and sm["mesh_sha256"] == v0["scenes"][sid]["sha256"]
+    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(out))  # a frame-stopped validation: the smoke refuses
+    assert MC.main(["smoke", "--split", "test", "--imports", "", "--repo", str(REPO)]) == MC.RC_ERROR
+    assert "SMOKE FAILED" in capsys.readouterr().err
+    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(out0))
+    assert MC.main(["smoke", "--split", "test", "--imports", "no_such_module_vpd", "--repo", str(REPO)]) == 3
+
+
+# prefork / worker pinning probes (bfs_demos --collides vpd.tests.test_e3vs_mesh_collision:probe_factory)
+_PREFORK: list = []
+
+
+def probe_factory(scene_id):
+    log = os.environ.get("VPD_TEST_PROBE_LOG")
+    if log:
+        with open(log, "a") as f:
+            f.write(json.dumps({"pid": os.getpid(), "cpus": sorted(os.sched_getaffinity(0)), "scene": scene_id}) + "\n")
+    return lambda p0, p1: False
+
+
+probe_factory.prefork = lambda scenes: _PREFORK.append((os.getpid(), list(scenes)))
+
+
+@needs_repo
+def test_bfs_prefork_in_parent_and_one_cpu_per_worker(tmp_path, monkeypatch):
+    """N4: the factory's prefork runs once, in the parent, before the fork; S5: each worker has one CPU."""
+    import multiprocessing as mp
+
+    log = tmp_path / "probe.jsonl"
+    monkeypatch.setenv("VPD_TEST_PROBE_LOG", str(log))
+    _PREFORK.clear()
+    B.run("val", out=tmp_path / "bfs", limit=3, procs=2, collides="vpd.tests.test_e3vs_mesh_collision:probe_factory",
+          tag="probe", repo=REPO, quiet=True)
+    scenes = sorted({e["scene_id"] for e in E.load_episodes("val", REPO)[:3]})
+    assert _PREFORK == [(os.getpid(), scenes)]
+    rows = [json.loads(x) for x in log.read_text().splitlines()]
+    assert rows and all(r["pid"] != os.getpid() and len(r["cpus"]) == 1 for r in rows)
+    # the round robin over the affinity (no real CPUs touched)
+    got = []
+    monkeypatch.setattr(B.os, "sched_getaffinity", lambda pid: {9, 3, 5})
+    monkeypatch.setattr(B.os, "sched_setaffinity", lambda pid, cpus: got.append(set(cpus)))
+    for ident, want in ((1, 3), (2, 5), (3, 9), (4, 3)):
+        monkeypatch.setattr(mp, "current_process", lambda ident=ident: types.SimpleNamespace(_identity=(ident,)))
+        assert B._pin_worker() == want
+    assert got == [{3}, {5}, {9}, {3}]
+    monkeypatch.setattr(mp, "current_process", lambda: types.SimpleNamespace(_identity=()))
+    assert B._pin_worker() is None and len(got) == 4  # the parent is never pinned by the worker hook
+
+
+@needs_repo
+def test_mesh_prefork_fills_the_memo(backend, tmp_path, monkeypatch):
+    """N4: load_collider.prefork hashes each mesh once in the parent; load_collider (in a forked worker: the
+    inherited memo) then does not hash again; prefork refuses a mesh that is not the validated one."""
+    root, man = _mesh_tree(tmp_path, {"s1": [ROOM, PILLAR]}, backend.scene)
+    out = tmp_path / "val"
+    ring = np.array([look_c2w([2.0 + np.cos(a), 2.0 + np.sin(a), 1.4], [1, 0, 0])
+                     for a in np.linspace(0, 2 * np.pi, 60)])
+    assert MC.validate(["s1"], _episodes("s1", STARTS), out, man, root, iphone={"s1": ring}, repo=REPO,
+                       convention="opencv")["pass"]
+    for k, val in (("VPD_E3VS_MESH_ROOT", root), ("VPD_E3VS_MESH_MANIFEST", man), ("VPD_E3VS_MESH_VAL_DIR", out)):
+        monkeypatch.setenv(k, str(val))
+    monkeypatch.setattr(MC, "_MEMO", {})
+    calls = []
+    real = MC.sha256_file
+    monkeypatch.setattr(MC, "sha256_file", lambda p, *a: calls.append(str(p)) or real(p, *a))
+    shas = MC.load_collider.prefork(["s1"])
+    assert calls == [str(MC.mesh_path("s1"))] and shas["s1"] == E.sha256_file(MC.mesh_path("s1"))
+    assert isinstance(MC.load_collider("s1"), MC.MeshCollider) and len(calls) == 1
+    with pytest.raises(AssertionError, match="not in"):
+        MC.load_collider.prefork(["s9"])
+    with open(MC.mesh_path("s1"), "ab") as f:
+        f.write(b"\0")
+    with pytest.raises(AssertionError, match="sha256"):
+        MC.load_collider.prefork(["s1"])
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -541,18 +792,23 @@ def test_three_call_sites_use_the_validated_mesh(backend, tmp_path, monkeypatch)
 
     eps = {sp: E.load_episodes(sp, REPO) for sp in E.SPLITS}
     first = {sp: eps[sp][0] for sp in E.SPLITS}
-    cubes = {}
-    for ep in first.values():  # a 0.2 m cube shell around each first start: every translation from it collides
+    all_eps = [e for sp in E.SPLITS for e in eps[sp] if e["scene_id"] in {f["scene_id"] for f in first.values()}]
+    cubes, rooms = {}, {}
+    for ep in first.values():
+        # a 0.2 m cube shell around each first start (every translation from it collides), inside a room 1 m beyond
+        # every template viewpoint of the scene (so that the frame check sees them inside the mesh AABB)
         p = ep["start_c2w"][:3, 3]
-        cubes[ep["scene_id"]] = [(tuple(p - 0.1), tuple(p + 0.1))]
+        vp = np.array([c[:3, 3] for _, c in RD.scene_viewpoints(all_eps, ep["scene_id"])])
+        rooms[ep["scene_id"]] = vp.min(axis=0) - 1.0, vp.max(axis=0) + 1.0
+        cubes[ep["scene_id"]] = [(tuple(map(float, p - 0.1)), tuple(map(float, p + 0.1))),
+                                 tuple(tuple(map(float, x)) for x in rooms[ep["scene_id"]])]
     root, man = _mesh_tree(tmp_path, cubes, backend.scene)
     out = tmp_path / "val"
     scenes = sorted(cubes)
-    iphone = {s: np.array([look_c2w(np.array(cubes[s][0][0]) + [3.0 + 0.1 * i, 0.0, 0.0], [1, 0, 0])
-                           for i in range(5)]) for s in scenes}
-    all_eps = [e for sp in E.SPLITS for e in eps[sp] if e["scene_id"] in cubes]
+    iphone = {s: np.array([look_c2w(rooms[s][0] + [0.5 + 0.02 * i, 0.5, 0.5], [1, 0, 0]) for i in range(5)])
+              for s in scenes}  # 0.5 m inside the room walls, away from every viewpoint and cube
     res = MC.validate(scenes, all_eps, out, man, root, iphone=iphone, repo=REPO, convention="opencv")
-    assert res["pass"], res["pooled"]
+    assert res["pass"] and res["frame_ok"], (res["pooled"], res["frame_warnings"])
     assert all(res["pooled"]["starts_by_split"][sp]["all_blocked"] >= 1 for sp in E.SPLITS)
     for k, val in (("VPD_E3VS_MESH_ROOT", root), ("VPD_E3VS_MESH_MANIFEST", man), ("VPD_E3VS_MESH_VAL_DIR", out)):
         monkeypatch.setenv(k, str(val))
