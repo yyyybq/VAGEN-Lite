@@ -105,6 +105,13 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # <task_id>.npz, d = the pose's remaining minimum number of actions; a pose missing from the table counts 0).
     distance_tables_dir: Optional[str] = None
     optimal_progress_slack: int = 4
+    # The privileged critic (the user's supplement of 2026-11-13, gate 1 of docs/PREREG_PPO2.md;
+    # vagen/feature_critic.py), default off: critic_features adds info["critic_features"] at reset and after every
+    # step (critic_features.py: the pose's remaining minimum number of actions from the task's distance table in
+    # critic_feature_tables_dir, the bearing sector and the distance condition of the task's object A, the family).
+    # No reward, success rule or termination changes.
+    critic_features: bool = False
+    critic_feature_tables_dir: Optional[str] = None
     potential_field_gamma: float = 1.0   # ★ Ng1999 γ for "potential" mode. 1.0 ⇒ equivalent to "delta".
     # Reward-only ablation switches.  These do not disable the potential-field
     # scorer, canonical gate, success decision, or termination.  Defaults keep

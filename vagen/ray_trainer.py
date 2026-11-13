@@ -1571,6 +1571,14 @@ class RayPPOTrainer:
         self.use_reference_policy = need_reference_policy(self.role_worker_mapping)
         self.use_rm = need_reward_model(self.role_worker_mapping)
         self.use_critic = need_critic(self.config)
+        # the privileged critic (trainer.critic_source features, vagen/feature_critic.py; the user's supplement of
+        # 2026-11-13, gate 1 of docs/PREREG_PPO2.md): a three-layer MLP in this process on the env's ground truth, no
+        # critic worker; None (default "model") leaves every path below as it was
+        from vagen.feature_critic import from_config as _feature_critic_from_config
+
+        self.feature_critic = _feature_critic_from_config(self.config)
+        if self.feature_critic is not None and self.use_critic:
+            raise ValueError("trainer.critic_source features runs without the critic worker (critic.enable false)")
         self.ray_worker_group_cls = ray_worker_group_cls
         self.device_name = device_name if device_name else self.config.trainer.device
         self.validation_generations_logger = ValidationGenerationsLogger(
@@ -2382,6 +2390,12 @@ class RayPPOTrainer:
 
         # save dataloader
         local_mkdir_safe(local_global_step_folder)
+        feature_critic_path = None
+        if self.feature_critic is not None:  # the privileged critic: the MLP, Adam, read-out, buffer and RNG
+            from vagen.feature_critic import CHECKPOINT_FILE as _FC_FILE
+
+            feature_critic_path = os.path.join(local_global_step_folder, _FC_FILE)
+            self.feature_critic.save(feature_critic_path)
         dataloader_local_path = os.path.join(local_global_step_folder, "data.pt")
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)
@@ -2404,7 +2418,11 @@ class RayPPOTrainer:
             "u1_fm_backprop": os.environ.get("U1_FM_BACKPROP", "unset"),
             "created_unix_time": time.time(),
         }
-        if not checkpoint_metadata["has_actor"] or not checkpoint_metadata["has_critic"]:
+        if feature_critic_path is not None:  # the privileged critic only (every other run's metadata as before)
+            checkpoint_metadata["feature_critic_path"] = feature_critic_path
+            checkpoint_metadata["has_feature_critic"] = os.path.isfile(feature_critic_path)
+        if (not checkpoint_metadata["has_actor"] or not checkpoint_metadata["has_critic"]
+                or not checkpoint_metadata.get("has_feature_critic", True)):
             raise RuntimeError(f"refusing COMPLETE marker for incomplete checkpoint: {checkpoint_metadata}")
         metadata_tmp = checkpoint_metadata_path + ".tmp"
         with open(metadata_tmp, "w", encoding="utf-8") as f:
@@ -2483,6 +2501,15 @@ class RayPPOTrainer:
             self.critic_wg.load_checkpoint(
                 critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
             )
+        if self.feature_critic is not None:  # the privileged critic: a run resumes only with its state
+            from vagen.feature_critic import CHECKPOINT_FILE as _FC_FILE
+
+            feature_critic_path = os.path.join(global_step_folder, _FC_FILE)
+            if not os.path.isfile(feature_critic_path):
+                raise RuntimeError(f"feature critic: {feature_critic_path} is missing; the run cannot resume without "
+                                   "the critic's state")
+            self.feature_critic.load(feature_critic_path)
+            print(f"feature critic: resumed from {feature_critic_path} ({self.feature_critic.updates} updates)")
 
         # load dataloader,
         # TODO: from remote not implemented yet
@@ -2888,6 +2915,10 @@ class RayPPOTrainer:
                         with marked_timer("values", timing_raw, color="cyan"):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
+                    elif self.feature_critic is not None:  # the privileged critic: values at every candidate's anchors
+                        with marked_timer("values", timing_raw, color="cyan"):
+                            batch.batch["values"], feature_metrics = self.feature_critic.values(batch)
+                            metrics.update(feature_metrics)
 
                     with marked_timer("adv", timing_raw, color="brown"):
                         # we combine with rule-based rm
@@ -3076,7 +3107,7 @@ class RayPPOTrainer:
                     # filter, over the episodes the update keeps (before any padding to the workers)
                     turn_gae_run = str(self.config.algorithm.adv_estimator) == "turn_gae"
                     critic_all_candidates = bool(self.config.trainer.get("critic_all_candidates", False))
-                    if critic_all_candidates and not self.use_critic:
+                    if critic_all_candidates and not (self.use_critic or self.feature_critic is not None):
                         raise ValueError("trainer.critic_all_candidates needs a value network (critic)")
                     if self.config.filter.get("enable", False):
                         if self.config.trainer.get("rollout_data_dir", None) or critic_all_candidates:
@@ -3232,9 +3263,15 @@ class RayPPOTrainer:
                             metrics["critic/value_loss"] = metrics["critic/vf_loss"]
                         if "critic/vpred_mean" in metrics:
                             metrics["critic/pred/mean"] = metrics["critic/vpred_mean"]
+                    elif self.feature_critic is not None:  # the privileged critic: every candidate, before the filter
+                        with marked_timer("update_critic", timing_raw, color="pink"):
+                            if pre_filter_batch is None:
+                                raise RuntimeError("feature critic: no every-candidate batch (the filter is off)")
+                            metrics.update(self.feature_critic.update(pre_filter_batch))
 
                     # Critic warmup should only delay actor updates when a critic is actually used.
-                    actor_warmup_steps = int(self.config.trainer.critic_warmup) if self.use_critic else 0
+                    actor_warmup_steps = (int(self.config.trainer.critic_warmup)
+                                          if (self.use_critic or self.feature_critic is not None) else 0)
                     actor_update_ready = actor_warmup_steps <= self.global_steps and not overfit_steps
                     metrics["trainer/actor_update_performed"] = float(actor_update_ready)
                     metrics["trainer/actor_update_skipped_by_warmup"] = float(not actor_update_ready)

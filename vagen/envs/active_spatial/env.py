@@ -809,8 +809,17 @@ class ActiveSpatialEnv(BaseEnv):
             "initial_region_metrics": self.current_region_metrics,
             "collision_convention": self.current_collision_convention,
         }
-        
+        if self.config.get("critic_features", False):  # the privileged critic (2026-11-13), default off
+            info["critic_features"] = self._critic_features()
+
         return obs, info
+
+    def _critic_features(self) -> Dict[str, Any]:
+        """The privileged critic's ground truth at the current pose, the pose the next observation is rendered from
+        (critic_features.py; env critic_features)."""
+        from .critic_features import features
+
+        return features(self.current_item, self.view_engine.get_pose(), self.config.get("critic_feature_tables_dir"))
 
     def _build_task_prompt(self, item: Dict[str, Any]) -> str:
         object_label = item.get("object_label", "object")
@@ -1424,6 +1433,8 @@ class ActiveSpatialEnv(BaseEnv):
         info["termination_reason"] = termination_reason
         info["reward_trace"] = self._reward_trace.as_dict()
         info["reward_trace_flat"] = self._reward_trace.flat()
+        if self.config.get("critic_features", False):  # the privileged critic (2026-11-13), default off
+            info["critic_features"] = self._critic_features()
 
         return obs, self.reward, done, info
     

@@ -100,6 +100,9 @@ class AgentData:
         self.turn_span: Optional[tuple] = None
         self.invalid_spans: List[List[int]] = []
         self.turn_spans: List[List[int]] = []  # every generated turn's span, in order (vagen/turn_gae.py)
+        # the privileged critic (2026-11-13, vagen/feature_critic.py): the env's critic_features of every observation,
+        # reset's first, then each step's (the observation the next turn answers); [] when the env does not give them
+        self.obs_features: List[Optional[Dict[str, Any]]] = []
         self.progress_return: float = 0.0  # round 12 freeze, V8: the env's applied progress reward, summed
 
         # Episode metadata – populated from env info during the episode
@@ -286,6 +289,8 @@ class GymAgentLoop(AgentLoopBase):
         agent_data.scene_id   = _ep_scene_id
         agent_data.initial_score = _ep_init_score
         agent_data.task_id = _ep_task_id
+        if info and "critic_features" in info:  # the privileged critic (2026-11-13): the first observation's truth
+            agent_data.obs_features.append(info["critic_features"])
 
         # State machine: always GENERATE -> INTERACT, and decide termination inside INTERACT
         state = AgentState.PENDING
@@ -358,6 +363,10 @@ class GymAgentLoop(AgentLoopBase):
             from vagen.turn_gae import turn_record  # the estimator clips them and folds a cut-off turn's reward
 
             output.extra_fields["turn_rewards"] = turn_record(agent_data.turn_spans, agent_data.env_rewards)
+            if agent_data.obs_features:  # the privileged critic (2026-11-13): each turn's observation and the outcome
+                from vagen.feature_critic import add_to_record
+
+                add_to_record(output.extra_fields["turn_rewards"], agent_data.obs_features, agent_data.traj_success)
         return output
 
     async def _handle_pending_state(self, agent_data: AgentData, sampling_params: Dict[str, Any]) -> AgentState:
@@ -450,6 +459,8 @@ class GymAgentLoop(AgentLoopBase):
             obs, reward, done, info = {"obs_str":"Environment Error"}, 0.0, True, {"traj_success": False}
 
         agent_data.env_rewards.append(float(reward))
+        if agent_data.obs_features:  # the privileged critic (2026-11-13): the truth of the observation after this step
+            agent_data.obs_features.append((info or {}).get("critic_features"))
         if getattr(self, "record_reward_parts", False):  # round 12 freeze, V8: the turn's applied progress reward
             from vagen.split_reward_adv import progress_of_turn
 

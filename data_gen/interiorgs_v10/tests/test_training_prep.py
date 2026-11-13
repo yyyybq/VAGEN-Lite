@@ -524,6 +524,73 @@ class TrainingPrepTest(unittest.TestCase):
                     TP.package_overrides(name)
             finally:
                 del TP.OPT_PACKAGES[name]
+        # the privileged critic (the user's supplement of 2026-11-13, gate 1 of PREREG_PPO2.md): p1tgae_fc is
+        # p1tgae_c2 without the value network's own settings, plus critic_source features and the MLP's settings;
+        # its overrides turn the critic worker off and set nothing in the critic block; no other package has it
+        fc = TP.OPT_PACKAGES["p1tgae_fc"]
+        self.assertEqual({k: v for k, v in fc.items() if k not in TP.CRITIC_SOURCE_KEYS},
+                         {k: v for k, v in TP.OPT_PACKAGES["p1tgae_c2"].items()
+                          if k not in TP.CRITIC_KEYS + ("critic_mini_batch_groups",)})
+        self.assertEqual([n for n, pk in TP.OPT_PACKAGES.items() if any(k in pk for k in TP.CRITIC_SOURCE_KEYS)],
+                         ["p1tgae_fc"])
+        over = TP.package_overrides("p1tgae_fc")
+        self.assertEqual((over["critic.enable"], over["trainer.critic_source"], over["trainer.critic_all_candidates"],
+                          over["trainer.critic_warmup"], over["algorithm.adv_estimator"], over["algorithm.lam"]),
+                         (False, "features", True, 30, "turn_gae", 0.95))
+        self.assertEqual(over["trainer.feature_critic"], fc["feature_critic"])
+        self.assertEqual([k for k in over if k.startswith("critic.")], ["critic.enable"])
+        for name, pkg, pattern in (("_fc_model", dict(fc, critic_source="model"), "only be 'features'"),
+                                   ("_fc_nosettings", {k: v for k, v in fc.items() if k != "feature_critic"},
+                                    "only be 'features'"),
+                                   ("_fc_nobatch", {k: v for k, v in fc.items() if k != "critic_all_candidates"},
+                                    "every candidate"),
+                                   ("_fc_worker", dict(fc, critic_lr=5e-5), "replaces"),
+                                   ("_fc_replay", dict(fc, critic_replay_updates=8), "replaces"),
+                                   ("_fc_badlr", dict(fc, feature_critic=dict(fc["feature_critic"], lr=0)), "lr"),
+                                   ("_fc_unknown", dict(fc, feature_critic=dict(fc["feature_critic"], depth=3)), "unknown"),
+                                   ("_grpo_fc", dict(TP.OPT_PACKAGES["p1"], critic_source="features", feature_critic={}),
+                                    "value network")):
+            TP.OPT_PACKAGES[name] = pkg
+            try:
+                with self.assertRaisesRegex(ValueError, pattern, msg=name):
+                    TP.package_overrides(name)
+            finally:
+                del TP.OPT_PACKAGES[name]
+        # rl-config: the train env gives the truth from the tables (every train task needs one), the val env does not;
+        # everything else is p1tgae_c2's config without its critic settings
+        tables = self.root / "fc_tables"
+        tables.mkdir(exist_ok=True)
+        empty = self.root / "fc_tables_empty"
+        empty.mkdir(exist_ok=True)
+        for line in (sft / "rows.jsonl").read_text().splitlines():
+            if line.strip():
+                (tables / f"{json.loads(line)['task_id']}.npz").write_bytes(b"")
+        with self.assertRaisesRegex(SystemExit, "critic-feature-tables DIR"):
+            config("rl_fc_none", opt_package="p1tgae_fc", critic_warmup=None)
+        with self.assertRaisesRegex(SystemExit, "privileged critic"):
+            config("rl_fc_wrong", opt_package="p1tgae_c2", critic_warmup=None, critic_feature_tables=str(tables))
+        with self.assertRaisesRegex(SystemExit, "no distance table"):
+            config("rl_fc_empty", opt_package="p1tgae_fc", critic_warmup=None, critic_feature_tables=str(empty))
+        ppo_f, report_f = config("rl_fc_a", opt_package="p1tgae_fc", critic_warmup=None, critic_feature_tables=str(tables))
+        ppo_c, report_c = config("rl_fc_b", opt_package="p1tgae_c2", critic_warmup=None)
+        self.assertEqual((ppo_f["trainer"].pop("critic_source"), ppo_f["trainer"].pop("feature_critic")),
+                         ("features", dict(fc["feature_critic"], max_turns=12)))
+        self.assertEqual((ppo_f["critic"].pop("enable"), ppo_c["critic"].pop("enable")), (False, True))
+        for key in ("cliprange_value", "ppo_epochs", "ppo_mini_batch_size"):
+            ppo_c["critic"].pop(key)
+        ppo_c["critic"].pop("optim")
+        self.assertEqual(json.loads(json.dumps(ppo_f).replace("rl_fc_a", "X")),
+                         json.loads(json.dumps(ppo_c).replace("rl_fc_b", "X")))
+        self.assertEqual((report_f["critic_source"], report_f["critic_feature_tables"], report_f["critic_feature_tables_checked"]),
+                         ("features", str(tables.resolve()), report_f["train"]))
+        self.assertNotIn("critic_source", report_c)
+        envs = {name: {split: yaml.safe_load((self.root / name / f"{split}_env.yaml").read_text())["envs"][0]["config"]
+                       for split in ("train", "val")} for name in ("rl_fc_a", "rl_fc_b")}
+        self.assertEqual((envs["rl_fc_a"]["train"].pop("critic_features"), envs["rl_fc_a"]["train"].pop("critic_feature_tables_dir")),
+                         (True, str(tables.resolve())))
+        self.assertNotIn("critic_features", envs["rl_fc_a"]["val"])
+        self.assertEqual(json.loads(json.dumps(envs["rl_fc_a"]).replace("rl_fc_a", "X")),
+                         json.loads(json.dumps(envs["rl_fc_b"]).replace("rl_fc_b", "X")))
 
     def test_rl_config_standards_and_seed(self):
         """Round 12: named standard configurations (configs/rl_standards.json, the package with S0 and with the dense
@@ -539,7 +606,13 @@ class TrainingPrepTest(unittest.TestCase):
                                              "v10_p1tgaec2_Dcond", "v10_p1tgaec2_S0", "v10_p1tgaec2ofit_Dcond",
                                              "v10_p1tgaec2rb_Dcond",
                                              "v10_p1tgaec_Dcond", "v10_p1tgaec_S0",
+                                             "v10_p1tgaefc_Dcond", "v10_p1tgaefc_S0",
                                              "v10_p2_D", "v10_p2_S0"])
+        # the privileged critic (2026-11-13): the p1 pair with package p1tgae_fc and the b3000 tasks' tables
+        for name, base in (("v10_p1tgaefc_S0", "v10_p1_S0"), ("v10_p1tgaefc_Dcond", "v10_p1_Dcond")):
+            self.assertEqual(standards[name], {**standards[base], "opt_package": "p1tgae_fc",
+                                               "critic_feature_tables": "/mnt/umm/users/yinbaiqiao/reward_runs/tables/b3000"})
+        self.assertIn("_v10_p1tgaefc", json.loads(TP.STANDARDS_FILE.read_text(encoding="utf-8")))
         # the PPO supplement (the user's decision 甲 of 2026-11-08): the p1 pair with the GAE package, nothing else
         for name, base in (("v10_p1gae_S0", "v10_p1_S0"), ("v10_p1gae_Dcond", "v10_p1_Dcond")):
             self.assertEqual(standards[name], {**standards[base], "opt_package": "p1gae"})
@@ -660,6 +733,10 @@ class TrainingPrepTest(unittest.TestCase):
         self.assertEqual(json.loads(json.dumps(env_r).replace("rl_std_tgcr", "X")),
                          json.loads(json.dumps(env_c2).replace("rl_std_tgc2", "X")))
         self.assertEqual((report_r["standard"], report_r["opt_package"]), ("v10_p1tgaec2rb_Dcond", "p1tgae_c2_rb"))
+        # the privileged critic's standard names the b3000 tables: these synthetic train tasks have none there (or
+        # the folder is not mounted), so rl-config refuses before writing a config
+        with self.assertRaisesRegex(SystemExit, "distance table"):
+            config("rl_std_fc", standard="v10_p1tgaefc_Dcond", seed=7)
         ppo, env, report = config("rl_std_d", standard="v10_p1_D", seed=7)
         a = ppo["actor_rollout_ref"]
         self.assertEqual((ppo["algorithm"]["adv_estimator"], ppo["data"]["train_batch_size"], a["rollout"]["n"],

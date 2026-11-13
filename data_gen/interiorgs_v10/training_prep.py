@@ -452,12 +452,25 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
                      "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0,
                      "lam": 0.95, "critic_lr": 5e-5, "critic_value_clip": False, "critic_ppo_epochs": 1,
                      "critic_all_candidates": True, "critic_mini_batch_groups": 3, "critic_replay_updates": 8},
+    # the privileged critic (the user's supplement of 2026-11-13, gate 1 of docs/PREREG_PPO2.md): p1tgae_c2's actor,
+    # batch, filter, warm-up 30 and every-candidate value data, with the value from a three-layer MLP in the trainer
+    # on the env's ground truth instead of the value network (vagen/feature_critic.py: the remaining minimum number of
+    # actions from the task's distance table, the bearing sector, the distance condition, the turn's index, the
+    # family; success cross-entropy plus the turns-left regression, a least-squares read-out to the return; a buffer
+    # of the last 8 updates, 4 passes an update): no critic worker (critic.enable false); the env gives the truth
+    # (critic_features on, its tables from --critic-feature-tables, usually the standard's).  gamma 1 / lam 0.95
+    "p1tgae_fc": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
+                  "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0, "lam": 0.95,
+                  "critic_all_candidates": True, "critic_source": "features",
+                  "feature_critic": {"hidden": 128, "lr": 1e-3, "epochs": 4, "mini_batch": 256, "buffer_updates": 8,
+                                     "steps_weight": 1.0, "ridge": 1e-4, "threads": 4}},
 }
 NO_VALUE_CLIP = 1.0e6  # critic.cliprange_value of a package without value clipping (far beyond any return)
 CRITIC_KEYS = ("critic_lr", "critic_value_clip", "critic_ppo_epochs")  # a package's value-network settings
 CRITIC_BATCH_KEYS = ("critic_all_candidates", "critic_mini_batch_groups")  # the value network's data (p1tgae_c2)
 CRITIC_CHECK_KEYS = ("critic_overfit_steps",)  # the critic overfit check (p1tgae_c2_ofit)
 CRITIC_REPLAY_KEYS = ("critic_replay_updates",)  # the critic replay pilot (p1tgae_c2_rb)
+CRITIC_SOURCE_KEYS = ("critic_source", "feature_critic")  # the privileged critic (p1tgae_fc)
 PACKAGE_ESTIMATORS = ("grpo", "gae", "turn_gae")  # the advantage estimators a package may name (default grpo)
 CRITIC_ESTIMATORS = ("gae", "turn_gae")  # the ones with a value network (their warm-up is part of the package)
 
@@ -469,7 +482,8 @@ STANDARDS_FILE = Path(__file__).with_name("configs") / "rl_standards.json"
 STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "opt_package", "reward_preset",
                  "ppo_template", "env_template", "group_filter", "keep_std_threshold", "keep_std_floor",
                  "format_example", "lenient_parse", "invalid_penalty", "invalid_turn_nonpositive",
-                 "turn_footprint_radius")  # experiment 3A (the user's decision 甲 of 2026-11-06)
+                 "turn_footprint_radius",  # experiment 3A (the user's decision 甲 of 2026-11-06)
+                 "critic_feature_tables")  # the privileged critic (2026-11-13): the train tasks' distance tables
 # Round 12, the dense-reward first batch (D-keep, the user's decision of 2026-10-21): which group filter the
 # package's batch goes through.  mixed_outcome (the package's) trains only on tasks whose episodes both succeed and
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
@@ -536,9 +550,26 @@ def package_overrides(name: str, candidates: Optional[int] = None, target_groups
         if "gamma" not in p or "lam" not in p:
             raise ValueError(f"package {name}: turn_gae needs its own gamma and lam (counted per turn)")
         out.update({"algorithm.gamma": float(p["gamma"]), "algorithm.lam": float(p["lam"]), "critic.enable": True})
-    named = [k for k in CRITIC_KEYS + CRITIC_BATCH_KEYS + CRITIC_CHECK_KEYS + CRITIC_REPLAY_KEYS if k in p]  # the critic pilot (2026-11-10): the value network's own settings
+    named = [k for k in CRITIC_KEYS + CRITIC_BATCH_KEYS + CRITIC_CHECK_KEYS + CRITIC_REPLAY_KEYS + CRITIC_SOURCE_KEYS
+             if k in p]  # the critic pilot (2026-11-10): the value network's own settings
     if named and estimator not in CRITIC_ESTIMATORS:
         raise ValueError(f"package {name}: {named} set the value network, which {estimator!r} does not have")
+    if "critic_source" in p or "feature_critic" in p:  # the privileged critic (2026-11-13): no critic worker
+        if p.get("critic_source") != "features" or not isinstance(p.get("feature_critic"), dict):
+            raise ValueError(f"package {name}: critic_source can only be 'features', with its feature_critic settings")
+        if estimator != "turn_gae":
+            raise ValueError(f"package {name}: the privileged critic is for turn_gae, not {estimator!r}")
+        if p.get("critic_all_candidates") is not True:
+            raise ValueError(f"package {name}: the privileged critic trains on every candidate (critic_all_candidates)")
+        worker = [k for k in CRITIC_KEYS + ("critic_mini_batch_groups",) + CRITIC_CHECK_KEYS + CRITIC_REPLAY_KEYS
+                  if k in p]
+        if worker:
+            raise ValueError(f"package {name}: {worker} set the value network, which the privileged critic replaces")
+        from vagen.feature_critic import settings as _feature_settings
+
+        _feature_settings(dict(p["feature_critic"], max_turns=1))  # the settings' check (max_turns from rl-config)
+        out.update({"critic.enable": False, "trainer.critic_source": "features",
+                    "trainer.feature_critic": dict(p["feature_critic"])})
     if "critic_lr" in p:
         if isinstance(p["critic_lr"], bool) or not float(p["critic_lr"]) > 0:
             raise ValueError(f"package {name}: critic_lr must be positive, not {p['critic_lr']!r}")
@@ -798,6 +829,27 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                              f"thick ({args.env_template})")
         history["env"]["turn_footprint_radius"] = float(footprint)
     history["env"].update(design_variant_overrides(args, history["env"]))
+    # the privileged critic (package p1tgae_fc, 2026-11-13): the train env gives each observation's ground truth
+    # (env critic_features) from the train tasks' distance tables; every train task must have one
+    feature_env: Dict[str, Any] = {}
+    feature_tables = getattr(args, "critic_feature_tables", None)
+    features_package = OPT_PACKAGES.get(getattr(args, "opt_package", None) or "", {}).get("critic_source") == "features"
+    if features_package or feature_tables:
+        from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
+
+        if not features_package:
+            raise SystemExit("--critic-feature-tables is for the privileged critic: give --opt-package p1tgae_fc")
+        if not feature_tables or not Path(feature_tables).is_dir():
+            raise SystemExit(f"package {args.opt_package} needs --critic-feature-tables DIR (the train tasks' "
+                             f"distance tables), not {feature_tables!r}")
+        if "critic_features" not in ActiveSpatialEnvConfig.__dataclass_fields__:
+            raise SystemExit("this checkout's env has no critic_features: the RL env would drop it")
+        missing = sorted(r["task_id"] for r in parts["train"]
+                         if not (Path(feature_tables) / f"{r['task_id']}.npz").is_file())
+        if missing:
+            raise SystemExit(f"{len(missing)} of {len(parts['train'])} train tasks have no distance table in "
+                             f"{feature_tables} (e.g. {missing[:3]}): the privileged critic needs one for each")
+        feature_env = {"critic_features": True, "critic_feature_tables_dir": str(Path(feature_tables).resolve())}
     env_paths = {}
     for split, selected in parts.items():
         _write_jsonl(out / f"{split}.jsonl", selected)
@@ -805,7 +857,8 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         entry = env["envs"][0]
         entry.update(n_envs=len(selected), seed=[0, len(selected)], seed_list=list(range(len(selected))))
         entry["config"].update(jsonl_path=str((out / f"{split}.jsonl").resolve()), gs_root=str(args.gs_root),
-                               train_size=len(selected), **history["env"])
+                               train_size=len(selected), **history["env"],
+                               **(feature_env if split == "train" else {}))
         env_paths[split] = out / f"{split}_env.yaml"
         env_paths[split].write_text(yaml.safe_dump(env, sort_keys=False))
     mismatches = prompt_mismatches(dict(tcfg, prompt_format_example=fmt), [r["task_type"] for r in rows],
@@ -876,6 +929,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
                              f"{warmup}: leave it out")
         for key, value in package.items():
             _set(ppo, key, value)
+        if package.get("trainer.critic_source") == "features":  # the privileged critic: the env's turn limit
+            _set(ppo, "trainer.feature_critic", dict(package["trainer.feature_critic"],
+                                                    max_turns=int(template["envs"][0].get("max_turns", 12))))
     if getattr(args, "invalid_turn_nonpositive", False):  # round 12 freeze (the user's 3.2, vagen/invalid_turns.py)
         _set(ppo, "algorithm.invalid_turn_nonpositive_adv", True)
     if getattr(args, "rollout_log_probs", False):
@@ -993,6 +1049,10 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     if footprint is not None:  # experiment 3A: only when set, so every other report stays as it was
         report["turn_footprint_radius"] = float(footprint)
+    if feature_env:  # the privileged critic (2026-11-13): only when set, so every other report stays as it was
+        report["critic_source"] = "features"
+        report["critic_feature_tables"] = feature_env["critic_feature_tables_dir"]
+        report["critic_feature_tables_checked"] = len(parts["train"])
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 
@@ -1316,6 +1376,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--distance-tables", default=None,
                    help="round 13 (B): the directory of per-task distance tables (distance_table.py build) the "
                         "optimal progress reads")
+    c.add_argument("--critic-feature-tables", default=None,
+                   help="the privileged critic (package p1tgae_fc, 2026-11-13): the directory of the train tasks' "
+                        "distance tables the env's critic_features read (every train task needs one; usually from "
+                        "the standard)")
     c.add_argument("--progress-weights", default=None,
                    help="round 12 freeze, variants V1 / V2: the grouped progress's frame, face and relation weights, "
                         "e.g. 0.15,0.15,0.70 (default 0.25,0.25,0.5)")

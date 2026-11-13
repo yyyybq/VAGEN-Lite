@@ -79,5 +79,14 @@
  "_v10_p1tgaec2rb": "The critic replay pilot (the user's supplement of 2026-11-12, item 4): v10_p1tgaec2_Dcond with package p1tgae_c2_rb (the user's choice of 2026-11-12, option 1: every update the value network trains one pass on the every-candidate batches of the last 8 updates, this one included, each with the returns of its own update; p1tgae_c2 trains two passes on this update's alone; each episode gets 8 passes over its life against 2). Verdict as level 1a: filtered-batch critic/values/explained_var_valid mean > 0.3 over updates 76-90 and over 91-100. One V4 run, seed 20261019, from C0 SFT e8, as qw3tgc2d.",
  "v10_p1tgaec2rb_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
                           "opt_package": "p1tgae_c2_rb", "reward_preset": "D_cond",
-                          "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
+                          "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "_v10_p1tgaefc": "The privileged critic (the user's supplement of 2026-11-13, gate 1 of docs/PREREG_PPO2.md): the p1tgae pair with package p1tgae_fc (no value network: each turn's value from a three-layer MLP in the trainer on the env's ground truth, vagen/feature_critic.py; p1tgae_c2's actor, filter, warm-up 30 and every-candidate value data), on the reward line's b3000 tasks (plan rl rows: /mnt/umm/users/yinbaiqiao/reward_runs/tasks/rows_b3000.jsonl with task_pool reserve: 3,000 train tasks), whose distance tables the env reads (critic_feature_tables). Door A: critic/all/values/explained_var_valid mean >= 0.3 over updates 76-90 and over 91-100. V4 = v10_p1tgaefc_Dcond with C0's four V4 keys, as qw3tgc2d.",
+ "v10_p1tgaefc_S0": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                     "opt_package": "p1tgae_fc", "reward_preset": "S0",
+                     "critic_feature_tables": "/mnt/umm/users/yinbaiqiao/reward_runs/tables/b3000",
+                     "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"},
+ "v10_p1tgaefc_Dcond": {"history_mode": "concat", "task_pool": "reserve", "save_freq": 50, "no_internal_val": true,
+                        "opt_package": "p1tgae_fc", "reward_preset": "D_cond",
+                        "critic_feature_tables": "/mnt/umm/users/yinbaiqiao/reward_runs/tables/b3000",
+                        "ppo_template": "configs/ppo_template_v10.yaml", "env_template": "configs/rl_env_v10_S0.yaml"}
 }
