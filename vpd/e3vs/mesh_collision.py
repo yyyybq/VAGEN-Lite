@@ -8,8 +8,12 @@ No geometry is re-implemented here.  The official class ``Collisions`` of E3VS-B
 ``e3vs/eval/metrics.py`` (sha256 METRICS_SHA256), is executed from the pinned checkout: its bytes are read once,
 hashed, compared with METRICS_SHA256 (and the repo commit with the pin), and exactly those bytes are compiled and
 run in a fresh module (no package __init__, no __pycache__ read or written):
-  load_scene_mesh   o3d.io.read_triangle_mesh(<scene>/scans/mesh_aligned_0.05.ply, the official configs'
-                    collision_mesh_path) -> o3d.t.geometry.TriangleMesh.from_legacy -> RaycastingScene.add_triangles;
+  load_scene_mesh   o3d.io.read_triangle_mesh(<scene>/scans/mesh_aligned_0.05_semantic.ply) ->
+                    o3d.t.geometry.TriangleMesh.from_legacy -> RaycastingScene.add_triangles.  The official configs'
+                    collision_mesh_path is <scene>/scans/mesh_aligned_0.05.ply; the user downloaded the semantic
+                    version (2026-11-13): the same geometry plus per-vertex label columns, which the official loader
+                    does not use (only the vertices and triangles reach the ray-casting scene).  Geometry only, the
+                    official code unchanged: there is no loader layer of ours;
   check_trajectory_collision(p0s, p1s, tolerance=1e-4)   a float32 ray from p0 along the unit direction to p1;
                     collided iff its first hit t_hit is in (tolerance, |p1 - p0| - tolerance).
 The official evaluator (evaluator.py, action_setting "restrict_collision") asks it for every move and skips a
@@ -27,7 +31,9 @@ There is no threshold of ours left to adjust: a validation failure goes to the u
 quantity the official check uses.  Descriptive "near": distance < NEAR_M = 0.05 m (the old 1-voxel margin).
 
 validate  (prep job vpd-e3vs-prep, step mesh_val; CPU only, pinned to one CPU)
-  inputs   OUT/e3vs/mesh_manifest.json (vpd.e3vs.mesh_verify) must exist, be ok, have a consistent
+  inputs   the meshes OUT/e3vs/mesh/<scene>/scans/mesh_aligned_0.05_semantic.ply (byte copies of the user's
+           download OUT/e3vs/mesh_dl, which mesh_verify checks against it) and their manifest
+           OUT/e3vs/mesh/MANIFEST.json (vpd.e3vs.mesh_verify): it must exist, be ok, have a consistent
            mesh_set_sha256 and list every scene, and every mesh file must still have the manifest's sha256;
            otherwise the run is REFUSED and nothing is written.
   gating   (PREREG section 5 thresholds: each < 1 %, pooled over the scenes; "pass" in validation.json)
@@ -45,11 +51,11 @@ validate  (prep job vpd-e3vs-prep, step mesh_val; CPU only, pinned to one CPU)
            (0.9), or any scene with an iPhone or template in-AABB share < 0.9 (listed), is a possible frame
            mismatch (metric 1 would pass trivially): frame_ok false, frame_warnings, exit RC_FRAME.  The stop holds
            (check and load_collider refuse) until `ack-frame` records the user's decision for this mesh set.
-  output   OUT/e3vs/mesh_val/validation.json; its mesh_set_sha256 (mesh_verify.mesh_set_sha256 of the validated
-           per-scene sha256s, for the 99 scenes equal to the manifest's) is the key the prep job stamps on
-           everything built with this model (BFS, floors, SFT) and that the start jobs and the gate check.  Its
-           "code" records the sha256 of the E3VS code (code.e3vs_files: vpd/e3vs/*.py and vpd/jobs/e3vs_*.sh;
-           recording only), as the eval manifests of run.py do.
+  output   OUT/e3vs/mesh/validation.json (the frame_ack.json of ack-frame goes beside it); its mesh_set_sha256
+           (mesh_verify.mesh_set_sha256 of the validated per-scene sha256s, for the 99 scenes equal to the
+           manifest's) is the key the prep job stamps on everything built with this model (BFS, floors, SFT) and
+           that the start jobs and the gate check.  Its "code" records the sha256 of the E3VS code (code.e3vs_files:
+           vpd/e3vs/*.py and vpd/jobs/e3vs_*.sh; recording only), as the eval manifests of run.py do.
 check     validation.json passes, was made with this definition (official file, commit, tolerance, threshold,
           open3d version), its key matches its scene list and the manifest, no unacknowledged frame warning, it
           covers the asked scenes, and every asked mesh still has the validated sha256 (re-hashed); prints
@@ -68,8 +74,9 @@ import), a missing open3d raises Open3DMissing.  Embree / TBB sizes its thread p
 single-process collider users are pinned to one CPU each: validate, floors and smoke (pin_one_cpu), and each BFS
 worker (round robin, bfs_demos); the tests pin themselves at import.  run.py's closed loop is NOT pinned (it
 starts the vLLM server and is multi-threaded): its per-eval scene builds run inside the job's CPU quota.  Env
-overrides for tests and job dry runs (the jobs unset them in production): VPD_E3VS_MESH_ROOT (the mesh_dl dir),
-VPD_E3VS_MESH_MANIFEST, VPD_E3VS_MESH_VAL_DIR.
+overrides for tests and job dry runs (the jobs unset them in production): VPD_E3VS_MESH_ROOT (the mesh root,
+default OUT/e3vs/mesh), VPD_E3VS_MESH_MANIFEST (default OUT/e3vs/mesh/MANIFEST.json), VPD_E3VS_MESH_VAL_DIR (the
+dir of validation.json and frame_ack.json, default OUT/e3vs/mesh).
 
 CLI:
     python -m vpd.e3vs.mesh_collision validate --scenes all|train|val|test|ID,ID [--out DIR] [--convention auto]
@@ -124,11 +131,12 @@ FRAME_MIN_IN_AABB = 0.9
 FRAME_ACK = "frame_ack.json"
 SMOKE_SEGMENT_M = 0.05
 RC_PASS, RC_GATE, RC_REFUSED, RC_ERROR, RC_FRAME = 0, 1, 2, 3, 4
-DEFINITION = ("PREREG_E3VS_PILOT section 5 with the section-16 row of 2026-11-12/13: official E3VS Collisions "
-              "(metrics.py) on the ScanNet++ mesh_aligned_0.05.ply, check_trajectory_collision with its default "
-              "tolerance 1e-4 m, open3d 0.19.0; gating: pooled iPhone consecutive-frame segment collision share < 1% "
-              "and pooled template-viewpoint in-obstacle share (unsigned distance to the mesh < 1e-4 m) < 1%; "
-              "frame stop (not a gate): iPhone / template in-mesh-AABB share < 0.9 pooled or in any scene")
+DEFINITION = ("PREREG_E3VS_PILOT section 5 with the section-16 rows of 2026-11-12/13: official E3VS Collisions "
+              "(metrics.py) on the ScanNet++ mesh_aligned_0.05_semantic.ply (geometry only: the vertices and "
+              "triangles the official loader reads; the label columns unused), check_trajectory_collision with its "
+              "default tolerance 1e-4 m, open3d 0.19.0; gating: pooled iPhone consecutive-frame segment collision "
+              "share < 1% and pooled template-viewpoint in-obstacle share (unsigned distance to the mesh < 1e-4 m) "
+              "< 1%; frame stop (not a gate): iPhone / template in-mesh-AABB share < 0.9 pooled or in any scene")
 
 
 class Open3DMissing(ImportError):
@@ -143,15 +151,16 @@ class MeshRefused(RuntimeError):
 # locations, CPU affinity, the open3d dir
 # ------------------------------------------------------------------------------------------------------------
 def mesh_root() -> Path:
-    return Path(os.environ.get("VPD_E3VS_MESH_ROOT") or MV.MESH_DL)
+    """The collision mesh root OUT/e3vs/mesh (copies of the user's download OUT/e3vs/mesh_dl, mesh_verify)."""
+    return Path(os.environ.get("VPD_E3VS_MESH_ROOT") or MV.MESH_ROOT)
 
 
 def manifest_path() -> Path:
-    return Path(os.environ.get("VPD_E3VS_MESH_MANIFEST") or paths.E3VS_OUT / MV.MANIFEST)
+    return Path(os.environ.get("VPD_E3VS_MESH_MANIFEST") or MV.MESH_ROOT / MV.MANIFEST)
 
 
 def val_dir() -> Path:
-    return Path(os.environ.get("VPD_E3VS_MESH_VAL_DIR") or paths.E3VS_OUT / "mesh_val")
+    return Path(os.environ.get("VPD_E3VS_MESH_VAL_DIR") or MV.MESH_ROOT)
 
 
 def validation_path(directory: Path | None = None) -> Path:
@@ -301,7 +310,7 @@ class MeshCollider:
         self.path = Path(path) if path is not None else mesh_path(scene_id)
         if not self.path.is_file():
             raise FileNotFoundError(f"no collision mesh for scene {scene_id} at {self.path} (the user downloads the "
-                                    "ScanNet++ meshes; python -m vpd.e3vs.mesh_verify)")
+                                    "ScanNet++ meshes, copied to OUT/e3vs/mesh; python -m vpd.e3vs.mesh_verify)")
         mod, facts = official_metrics(repo)
         self.o3d = open3d()
         self._lock = threading.Lock()
@@ -848,9 +857,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cmd", choices=("validate", "check", "smoke", "ack-frame", "o3d-check"))
     ap.add_argument("--scenes", default="all", help="all | train | val | test | ID,ID,...")
-    ap.add_argument("--out", type=Path, default=None, help="validation dir (default OUT/e3vs/mesh_val)")
-    ap.add_argument("--manifest", type=Path, default=None, help="default OUT/e3vs/mesh_manifest.json")
-    ap.add_argument("--mesh-root", type=Path, default=None, help="default OUT/e3vs/mesh_dl")
+    ap.add_argument("--out", type=Path, default=None, help="validation dir (default OUT/e3vs/mesh)")
+    ap.add_argument("--manifest", type=Path, default=None, help="default OUT/e3vs/mesh/MANIFEST.json")
+    ap.add_argument("--mesh-root", type=Path, default=None, help="default OUT/e3vs/mesh")
     ap.add_argument("--convention", default="auto", choices=("auto",) + RD.CONVENTIONS,
                     help="iPhone pose convention, recorded only (auto = the parity files' choice)")
     ap.add_argument("--split", default="test", choices=SPLITS, help="smoke: the split of the scene")

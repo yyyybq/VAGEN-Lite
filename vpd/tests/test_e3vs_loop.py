@@ -900,9 +900,9 @@ def fake_mesh_validation(shas: dict, ok: bool = True) -> dict:
 def test_run_preflight_refuses_before_any_server(scratch, monkeypatch):
     """Data-independent: a tmp data root without meshes, mesh validation or PLYs (the real ones may exist)."""
     empty = scratch / "preflight_data"
-    monkeypatch.setenv("VPD_E3VS_MESH_ROOT", str(empty / "mesh_dl"))
-    monkeypatch.setenv("VPD_E3VS_MESH_MANIFEST", str(empty / "mesh_manifest.json"))
-    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(empty / "mesh_val"))
+    monkeypatch.setenv("VPD_E3VS_MESH_ROOT", str(empty / "mesh"))
+    monkeypatch.setenv("VPD_E3VS_MESH_MANIFEST", str(empty / "mesh" / "MANIFEST.json"))
+    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", str(empty / "mesh"))
     monkeypatch.setattr(RD.paths, "E3VS_DATA", empty / "data")  # RD.ply_path / ply_sha256 read it at call time
     rd = scratch / "preflight"
     base = ["--start", "Q3S", "--tier", "raw", "--mode", "u", "--split", "val", "--limit", "2", "--fake-server",
@@ -921,7 +921,7 @@ def test_run_preflight_refuses_before_any_server(scratch, monkeypatch):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"not the validated mesh " + s.encode())
         shas[s] = "0" * 64
-    (empty / "mesh_val").mkdir(parents=True)
+    MC.validation_path().parent.mkdir(parents=True, exist_ok=True)  # the mesh root holds the validation too
     MC.validation_path().write_text(json.dumps(fake_mesh_validation(shas)))
     with pytest.raises(SystemExit, match="not the validated one"):
         RU.main(base + ["--renderer", "fake"])
@@ -1372,18 +1372,16 @@ def test_prep_payload_dry_run(scratch):
 
 
 def _mesh_root(root: Path, sids) -> str:
-    """Synthetic mesh files + a mesh_verify manifest + a passing validation.json under root; returns the key."""
-    from vpd.tests.test_e3vs_mesh_verify import write_ply
+    """Synthetic mesh files in root/mesh (copies of root/mesh_dl, the listing root/data) + the mesh_verify
+    manifest root/mesh/MANIFEST.json + a passing root/mesh/validation.json (the job hooks' layout); returns the key."""
+    from vpd.tests.test_e3vs_mesh_verify import make_tree
 
-    for s in sids:
-        write_ply(MC.mesh_path(s, root / "mesh_dl"))
-    ids = root / "ids.txt"
-    ids.write_text("".join(f"{s}\n" for s in sids))
-    man = MV.verify(root / "mesh_dl", ids, root, expected=list(sids))
+    mesh, ids, kw = make_tree(root, sids)
+    assert mesh == root / "mesh" and MC.mesh_path(sids[0], mesh).is_file()
+    man = MV.verify(mesh, ids, mesh, expected=list(sids), **kw)
     assert man["ok"], man["problems"]
     shas = {s: r["sha256"] for s, r in man["scenes"].items()}
-    (root / "mesh_val").mkdir(parents=True, exist_ok=True)
-    (root / "mesh_val" / "validation.json").write_text(json.dumps(fake_mesh_validation(shas)))
+    (mesh / "validation.json").write_text(json.dumps(fake_mesh_validation(shas)))
     return man["mesh_set_sha256"]
 
 
@@ -1393,7 +1391,7 @@ def test_prep_payload_resumes(scratch):
     root = scratch / "prep_resume_e3vs"
     sid = "00dd871005"
     key = _mesh_root(root, [sid])
-    assert key == MV.mesh_set_sha256({sid: E.sha256_file(MC.mesh_path(sid, root / "mesh_dl"))})
+    assert key == MV.mesh_set_sha256({sid: E.sha256_file(MC.mesh_path(sid, root / "mesh"))})
     (root / "parity").mkdir(parents=True)
     (root / "parity" / f"parity_{sid}.json").write_text(json.dumps({"pass": True}))
     (root / "parity" / "gsplat_probe_prep.json").write_text(json.dumps({"extension_loaded": True}))
@@ -1435,7 +1433,7 @@ def test_prep_payload_resumes(scratch):
     assert [c for c in cmds2 if "-m vpd.e3vs.floors" in c] and not any("bfs_demos" in c or "make_sft" in c
                                                                        for c in cmds2)
     # a changed mesh: the mesh check fails, the validation runs, and everything after it reruns
-    with open(MC.mesh_path(sid, root / "mesh_dl"), "ab") as f:
+    with open(MC.mesh_path(sid, root / "mesh"), "ab") as f:
         f.write(b"x")
     r3 = _dry("e3vs_prep.sh", [], scratch / "prep_resume_run3", **env)
     cmds3 = _dry_cmds(r3.stdout)
@@ -1592,7 +1590,7 @@ def test_start_payload_guard_compares_the_mesh_key(scratch):
         assert stopped and f"prep_state/{st} 'other' != the validated mesh set {key}: refusing" in r.stderr, r.stderr
         (root / "prep_state" / st).write_text(key + "\n")
     assert not guard("sg_ok2")[1]
-    with open(MC.mesh_path(sid, root / "mesh_dl"), "ab") as f:
+    with open(MC.mesh_path(sid, root / "mesh"), "ab") as f:
         f.write(b"x")
     r, stopped = guard("sg_mesh")
     assert stopped and "mesh check failed" in r.stderr and "changed since validation" in r.stderr, r.stderr

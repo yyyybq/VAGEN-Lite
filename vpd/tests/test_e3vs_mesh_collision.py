@@ -9,6 +9,9 @@ PYTHONPATH.  Two backends run the same synthetic scenes:
     metrics.py code (executed from the pinned checkout) and our wiring around it without open3d;
   - "open3d": the real library on the same boxes written as triangle meshes (pytest.importorskip: skipped only
     when OUT/envs/e3vs-o3d is not on PYTHONPATH).
+The box meshes are written in the layout of the real files, the semantic version the user downloaded (2026-11-13;
+per vertex x/y/z float, rgb uchar, label int): the official loader must read the same geometry from them as from a
+geometry-only file, and the official check must give the same answers (geometry only, the official code unchanged).
 Tiny synthetic meshes only.  Embree / TBB sizes its thread pool from the CPU affinity, so importing this module
 pins the test process to one CPU (the first of its affinity).
 
@@ -22,6 +25,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -45,6 +49,7 @@ from vpd.e3vs import geometry as G  # noqa: E402
 from vpd.e3vs import mesh_collision as MC  # noqa: E402
 from vpd.e3vs import mesh_verify as MV  # noqa: E402
 from vpd.e3vs import render as RD  # noqa: E402
+from vpd.tests.test_e3vs_mesh_verify import data_listing, write_semantic_ply  # noqa: E402
 
 JOBS = paths.VPD_PKG / "jobs"
 
@@ -79,20 +84,34 @@ _FACES = [(0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1), (2, 
           (0, 6, 4), (1, 5, 7), (1, 7, 3)]
 
 
-def write_box_mesh(path: Path, boxes) -> Path:
-    """Binary little-endian PLY of the surfaces of axis-aligned boxes (12 triangles each)."""
+def box_geometry(boxes) -> tuple[list, list]:
+    """(vertices, triangles) of the surfaces of axis-aligned boxes (8 vertices, 12 triangles each)."""
     verts, faces = [], []
     for lo, hi in boxes:
         base = len(verts)
         for i in range(8):
             verts.append(tuple((hi if i >> (2 - k) & 1 else lo)[k] for k in range(3)))
         faces += [tuple(base + j for j in f) for f in _FACES]
+    return verts, faces
+
+
+def write_plain_ply(path: Path, verts, faces) -> Path:
+    """Binary little-endian PLY with x/y/z only (a geometry-only file, like mesh_aligned_0.05.ply)."""
     hdr = (f"ply\nformat binary_little_endian 1.0\nelement vertex {len(verts)}\nproperty float x\n"
            f"property float y\nproperty float z\nelement face {len(faces)}\n"
            "property list uchar int vertex_indices\nend_header\n").encode()
     body = b"".join(struct.pack("<fff", *v) for v in verts) + b"".join(struct.pack("<Biii", 3, *f) for f in faces)
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(hdr + body)
+    return path
+
+
+def write_box_mesh(path: Path, boxes, semantic: bool = True) -> Path:
+    """Binary little-endian PLY of the surfaces of axis-aligned boxes: by default in the layout of the real semantic
+    files (rgb and label columns); semantic=False: x/y/z only."""
+    verts, faces = box_geometry(boxes)
+    (write_semantic_ply if semantic else write_plain_ply)(path, verts, faces)
     MV.check_mesh(path)  # a valid mesh for mesh_verify
     return path
 
@@ -289,8 +308,10 @@ def test_pinned_official_collision_code():
             in ev)
     cfg = (REPO / "e3vs" / "configs" / "qwen_3.0_vl_8B_instruct" / "single_frame.yaml").read_text()
     assert re.search(r"""action_setting:\s*["']?restrict_collision""", cfg)
-    assert re.search(r"collision_mesh_path:.*\{scene_id\}/scans/mesh_aligned_0\.05\.ply", cfg)
-    assert str(MV.MESH_REL) == "scans/mesh_aligned_0.05.ply"
+    assert re.search(r"collision_mesh_path:.*\{scene_id\}/scans/mesh_aligned_0\.05\.ply", cfg)  # the official name
+    assert str(MV.OFFICIAL_MESH_REL) == "scans/mesh_aligned_0.05.ply"
+    # the user downloaded the semantic version (2026-11-13): the same geometry plus label columns, geometry only
+    assert str(MV.MESH_REL) == "scans/mesh_aligned_0.05_semantic.ply"
     # N2: the official open3d pin
     assert f'"open3d=={MC.O3D_VERSION}"' in (REPO / "pyproject.toml").read_text()
 
@@ -442,6 +463,84 @@ def test_a_mesh_without_triangles_is_refused(backend, tmp_path):
 
 
 # ------------------------------------------------------------------------------------------------------------
+# the semantic mesh files (user 2026-11-13): copies in OUT/e3vs/mesh, geometry only, the official loader unchanged
+# ------------------------------------------------------------------------------------------------------------
+def test_default_locations(monkeypatch):
+    """The collision meshes are the copies in OUT/e3vs/mesh; MANIFEST.json, validation.json and frame_ack.json live
+    there too (mesh_verify does not count them as scenes); the env overrides still win."""
+    for k in ("VPD_E3VS_MESH_ROOT", "VPD_E3VS_MESH_MANIFEST", "VPD_E3VS_MESH_VAL_DIR"):
+        monkeypatch.delenv(k, raising=False)
+    mesh = paths.E3VS_OUT / "mesh"
+    assert MC.mesh_root() == mesh and MC.manifest_path() == mesh / "MANIFEST.json" and MC.val_dir() == mesh
+    assert MC.validation_path() == mesh / "validation.json" and MC.frame_ack_path() == mesh / "frame_ack.json"
+    assert MC.mesh_path("511061232") == mesh / "511061232" / "scans" / "mesh_aligned_0.05_semantic.ply"
+    assert {MC.validation_path().name, MC.FRAME_ACK, MV.MANIFEST, MV.SHA_LIST} <= set(MV.ROOT_FILES)
+    assert "mesh_aligned_0.05_semantic.ply (geometry only" in MC.DEFINITION
+    monkeypatch.setenv("VPD_E3VS_MESH_ROOT", "/x/m")
+    monkeypatch.setenv("VPD_E3VS_MESH_MANIFEST", "/x/m/M.json")
+    monkeypatch.setenv("VPD_E3VS_MESH_VAL_DIR", "/x/v")
+    assert (MC.mesh_root(), MC.manifest_path(), MC.validation_path(), MC.frame_ack_path()) == (
+        Path("/x/m"), Path("/x/m/M.json"), Path("/x/v/validation.json"), Path("/x/v/frame_ack.json"))
+    assert MC.mesh_path("s") == Path("/x/m/s") / MV.MESH_REL
+
+
+def _real_open3d():
+    o3d = pytest.importorskip("open3d")
+    if getattr(o3d, "IS_STUB", False):
+        pytest.skip("the open3d stand-in is installed")
+    return MC.open3d()  # the official pin 0.19.0 (refuses any other)
+
+
+def test_official_loader_reads_the_semantic_geometry(tmp_path):
+    """The official loader call (o3d.io.read_triangle_mesh, as in Collisions.load_scene_mesh) on a file in the real
+    semantic layout returns exactly the fixture's x/y/z (float32) and triangles, as from a geometry-only file of the
+    same geometry; the label column is not geometry; mesh_verify accepts the file."""
+    o3d = _real_open3d()
+    rng = np.random.default_rng(1)
+    verts, faces = box_geometry([ROOM, PILLAR])
+    verts = [tuple(float(x) for x in np.float32(np.asarray(v) + rng.uniform(-0.01, 0.01, 3))) for v in verts]
+    colors = [tuple(int(c) for c in rng.integers(0, 256, 3)) for _ in verts]
+    labels = [int(x) for x in rng.integers(-1, 1500, len(verts))]
+    p = write_semantic_ply(tmp_path / "s" / MV.MESH_REL, verts, faces, colors=colors, labels=labels)
+    info = MV.check_mesh(p)
+    assert info["vertex_props"][-1] == "label" and info["size"] == info["expected_size_triangles"]
+    m = o3d.io.read_triangle_mesh(str(p))
+    xyz = np.asarray(verts, dtype=np.float32).astype(np.float64)
+    assert np.array_equal(np.asarray(m.vertices), xyz) and np.array_equal(np.asarray(m.triangles), np.asarray(faces))
+    assert m.has_vertex_colors() and not m.has_vertex_normals()  # as Open3D reports on the real files
+    assert np.allclose(np.asarray(m.vertex_colors), np.asarray(colors) / 255.0)  # the columns are parsed in order
+    plain = o3d.io.read_triangle_mesh(str(write_plain_ply(tmp_path / "plain.ply", verts, faces)))
+    assert np.array_equal(np.asarray(plain.vertices), xyz) and np.array_equal(np.asarray(plain.triangles),
+                                                                             np.asarray(m.triangles))
+
+
+@needs_repo
+def test_official_check_on_the_semantic_file_equals_geometry_only(tmp_path, monkeypatch):
+    """Geometry only: the official Collisions built from a semantic file answers every check and distance exactly as
+    the one built from a geometry-only file of the same vertices and triangles, whatever the labels and colours."""
+    _real_open3d()
+    monkeypatch.setattr(MC, "_OFFICIAL", {})
+    verts, faces = box_geometry([ROOM, PILLAR])
+    n = len(verts)
+    files = {"sem": write_semantic_ply(tmp_path / "sem" / MV.MESH_REL, verts, faces),
+             "sem2": write_semantic_ply(tmp_path / "sem2" / MV.MESH_REL, verts, faces, colors=[(255, 0, 0)] * n,
+                                        labels=[7] * n),
+             "plain": write_plain_ply(tmp_path / "plain" / "mesh.ply", verts, faces)}
+    cols = {k: MC.MeshCollider(k, p, repo=REPO) for k, p in files.items()}
+    rng = np.random.default_rng(2)
+    a = rng.uniform([-0.5, -0.5, -0.5], [4.5, 4.5, 3.5], size=(2000, 3))
+    b = a + rng.normal(size=(2000, 3)) * 0.4
+    hits = {k: c.collides_many(a, b) for k, c in cols.items()}
+    assert 0 < hits["plain"].sum() < len(a)
+    assert np.array_equal(hits["sem"], hits["plain"]) and np.array_equal(hits["sem2"], hits["plain"])
+    d = {k: c.distance(a) for k, c in cols.items()}
+    assert np.array_equal(d["sem"], d["plain"]) and np.array_equal(d["sem2"], d["plain"])
+    segs = FREE + HIT
+    want = [False] * len(FREE) + [True] * len(HIT)
+    assert cols["sem"].collides_many([s[0] for s in segs], [s[1] for s in segs]).tolist() == want
+
+
+# ------------------------------------------------------------------------------------------------------------
 # validation
 # ------------------------------------------------------------------------------------------------------------
 class PlaneCollider:
@@ -511,15 +610,19 @@ def test_validate_scene_and_pooled():
 
 
 def _mesh_tree(tmp_path, scenes: dict, write) -> tuple[Path, Path]:
-    """mesh_dl/<scene>/scans/mesh_aligned_0.05.ply for {scene: boxes} + the mesh_verify manifest."""
-    root = tmp_path / "mesh_dl"
+    """mesh/<scene>/scans/mesh_aligned_0.05_semantic.ply for {scene: boxes}, byte copies of a tmp source (mesh_dl),
+    a tmp data listing, and the mesh_verify manifest mesh/MANIFEST.json (the production layout under tmp_path)."""
+    root, src = tmp_path / "mesh", tmp_path / "mesh_dl"
     for s, boxes in scenes.items():
-        write(MC.mesh_path(s, root), boxes)
+        p = write(MC.mesh_path(s, root), boxes)
+        (src / s / MV.MESH_REL).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p, src / s / MV.MESH_REL)
     ids = tmp_path / "ids.txt"
     ids.write_text("".join(f"{s}\n" for s in scenes))
-    res = MV.verify(root, ids, tmp_path, expected=list(scenes))
+    res = MV.verify(root, ids, root, expected=list(scenes), source=src,
+                    data_dir=data_listing(tmp_path / "data", scenes))
     assert res["ok"], res["problems"]
-    return root, tmp_path / MV.MANIFEST
+    return root, root / MV.MANIFEST
 
 
 def test_validate_refuses_unverified_meshes(tmp_path, monkeypatch):
@@ -591,6 +694,7 @@ def test_validate_check_and_factory(backend, tmp_path, monkeypatch):
     assert res["official"]["open3d_version"] == MC.O3D_VERSION
     # the E3VS code's sha256 (recording only; user 2026-11-13)
     assert list(res["code"]["e3vs_files"]) == list(E.CODE_FILES) and res["code"]["e3vs_files"] == E.code_files_sha256()
+    assert res["scenes"]["s1"]["path"] == str(root / "s1" / MV.MESH_REL)
     assert res["iphone_convention"] == {"convention": "opencv", "source": "given (--convention)",
                                         "note": res["iphone_convention"]["note"]}
     assert not MC.definition_problems(v) and res["frame_ok"] and res["frame_warnings"] == []

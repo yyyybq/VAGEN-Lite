@@ -23,7 +23,7 @@
 # that is redone pays its vLLM start (~0.03-0.05 GPU-h) and its 21 test PLY + mesh loads again.
 #   guard       PREREG_E3VS_PILOT.md committed and clean (from a code snapshot RUN/code: the job's copy equals the file
 #               of the snapshot's commit, vpd_snapshot_file); prep finished (OUT/e3vs/PREP_DONE), the mesh validation
-#               (OUT/e3vs/mesh_val/validation.json) and every parity file pass, the SFT and floor files exist;
+#               (OUT/e3vs/mesh/validation.json) and every parity file pass, the SFT and floor files exist;
 #               `mesh_collision check --scenes all` passes (same definition, every mesh unchanged, key == the
 #               manifest's) and its mesh_set_sha256 == the prep stamps prep_state/floors and prep_state/sft (the
 #               key J5 validated and built the floor and the demos with; any other mesh set is refused); a
@@ -63,8 +63,8 @@
 #      VPD_JOB_DEADLINE_S (default 9600), VPD_MIN_STEP_S (default 60).
 #      Test hooks honoured ONLY with VPD_DRYRUN=1: VPD_FAKE_FREE_GIB="/tmp=N,/dev/shm=M" (the free-space probe),
 #      VPD_DRY_FAIL=STEP,STEP (the printed commands of those steps fail, to test the keep-going rule),
-#      VPD_E3VS_ROOT (instead of OUT/e3vs: PREP_DONE, sft, floors, parity, prep_state, meshes, manifest, mesh_val,
-#      runs; the guard's mesh-key comparison then runs against it).
+#      VPD_E3VS_ROOT (instead of OUT/e3vs: PREP_DONE, sft, floors, parity, prep_state, meshes, manifest and
+#      validation in mesh/, runs; the guard's mesh-key comparison then runs against it).
 # Cost model (estimate, unmeasured until the prep job reports PLY load times; GPU-h per start job):
 #   setup + probe 0.05, train 0W 0.1, train 100 0.2-0.3, 2 CPU merges 0.1-0.2, raw/u 0.35-0.55 (never-stop raw
 #   models: 377 x 25 decisions), 0W/u 0.25-0.45, 100/u+c one session 0.25-0.45; each eval adds a vLLM start
@@ -101,8 +101,8 @@ SEED=1001
 E3VS=$VPD_OUT/e3vs
 if [[ $DRY == 1 && -n ${VPD_E3VS_ROOT:-} ]]; then  # test hook: the guard's checks against a test tree
   E3VS=$VPD_E3VS_ROOT
-  export VPD_E3VS_MESH_ROOT=$E3VS/mesh_dl VPD_E3VS_MESH_MANIFEST=$E3VS/mesh_manifest.json
-  export VPD_E3VS_MESH_VAL_DIR=$E3VS/mesh_val
+  export VPD_E3VS_MESH_ROOT=$E3VS/mesh VPD_E3VS_MESH_MANIFEST=$E3VS/mesh/MANIFEST.json
+  export VPD_E3VS_MESH_VAL_DIR=$E3VS/mesh
 fi
 SFT=$E3VS/sft
 PILOT=$E3VS/runs/pilot/$START
@@ -246,14 +246,14 @@ guard() {
     echo "$c" > "$RUN/prereg_commit.txt"
   fi
   for f in "$E3VS/PREP_DONE" "$SFT/warmup20.jsonl" "$SFT/seed$SEED/demos_100.jsonl" "$E3VS/floors/floors_mesh.json" \
-           "$E3VS/mesh_val/validation.json"; do
+           "$E3VS/mesh/validation.json"; do
     [[ -s $f ]] || { echo "[e3vs] missing $f" >&2; bad=1; }
   done
   if ! "$PY_Q3" - "$E3VS" <<'PY'
 import json, sys
 from pathlib import Path
 e3 = Path(sys.argv[1])
-v = e3 / "mesh_val" / "validation.json"
+v = e3 / "mesh" / "validation.json"
 ok = v.exists() and json.loads(v.read_text()).get("pass") is True
 par = sorted((e3 / "parity").glob("parity_*.json"))
 ok = ok and bool(par) and all(json.loads(p.read_text()).get("pass") is True for p in par)

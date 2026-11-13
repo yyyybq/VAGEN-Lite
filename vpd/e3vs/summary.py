@@ -16,8 +16,9 @@ Writes RUN/results.json (or results_invalid.json) and RUN/per_episode.jsonl.
 
 gate(root) for the pilot (OUT/e3vs/runs/pilot/<START>/evals/pilot__<START>__<tier>__<mode>/results.json):
   E0 mechanism: parity (every OUT/e3vs/parity/parity_*.json min PSNR >= 40), the collision-model validation
-     passes (OUT/e3vs/mesh_val/validation.json, the official mesh model since the PREREG section-16 row of
-     2026-11-12; the occupancy grid before), all 12 required evals valid with all 377 test episodes, every one
+     passes (OUT/e3vs/mesh/validation.json, the official mesh model since the PREREG section-16 row of
+     2026-11-12, on copies of the semantic mesh files since the user's decision of 2026-11-13; the occupancy grid
+     before), all 12 required evals valid with all 377 test episodes, every one
      with an audit.json whose image tokens are exactly [258] (a missing / failed / empty audit is an E0 problem,
      B4), every one run with the frozen collider on the validated meshes (manifest collides ==
      vpd.e3vs.mesh_collision:load_collider, each scene's mesh_sha256 == validation.json's, and the manifest's

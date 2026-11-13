@@ -34,11 +34,13 @@
 #                 their own probe for the eval manifests)
 #   parity        render --parity $VPD_PARITY_SCENE -> OUT/e3vs/parity/parity_<scene>.json; min PSNR >= 40 or stop
 #                 (skipped when that file has pass true)
-#   mesh_val      mesh_collision validate --scenes all -> OUT/e3vs/mesh_val/validation.json: the official E3VS
+#   mesh_val      mesh_collision validate --scenes all -> OUT/e3vs/mesh/validation.json: the official E3VS
 #                 Collisions (Open3D ray casting) on the 99 user-downloaded ScanNet++ meshes (PREREG section 16,
-#                 user 2026-11-12); one process pinned to one CPU.  Every rc but 0 STOPS the job:
+#                 user 2026-11-12; since 2026-11-13 the semantic version, geometry only, read from the copies
+#                 OUT/e3vs/mesh/<scene>/scans/mesh_aligned_0.05_semantic.ply of the download OUT/e3vs/mesh_dl);
+#                 one process pinned to one CPU.  Every rc but 0 STOPS the job:
 #                   1 a gating metric >= 1 % (iPhone segments colliding, template viewpoints in obstacle): to the user
-#                   2 refused: OUT/e3vs/mesh_manifest.json (mesh_verify) missing / not ok, or a mesh sha256 differs
+#                   2 refused: OUT/e3vs/mesh/MANIFEST.json (mesh_verify) missing / not ok, or a mesh sha256 differs
 #                   3 an error, no validation result (e.g. open3d missing, an InsScene file missing)
 #                   4 gating passed, possible frame mismatch (iPhone or template viewpoints outside the mesh AABB):
 #                     stop and ask the user; going on needs `mesh_collision ack-frame --note ...` (user's decision)
@@ -61,7 +63,7 @@
 #      VPD_PREP_PROCS (default 12), VPD_PARITY_SCENE (default 00dd871005, the first val scene),
 #      VPD_JOB_DEADLINE_S (default 6720), VPD_MIN_STEP_S (default 60).
 #      Test hooks honoured ONLY with VPD_DRYRUN=1: VPD_E3VS_ROOT (instead of OUT/e3vs: parity, torch_ext, meshes,
-#      manifest, mesh_val, outputs), VPD_PREP_SCENES (instead of all, for the mesh check).
+#      manifest and validation in mesh/, outputs), VPD_PREP_SCENES (instead of all, for the mesh check).
 # gsplat JIT (B18): CUDA_HOME / PATH / CC / CXX point at the eval-external env (nvcc + conda gcc);
 # TORCH_EXTENSIONS_DIR = OUT/e3vs/torch_ext so the start jobs can copy the built extension instead of rebuilding.
 # A SIGTERM / SIGINT / SIGHUP (sco delete, the outer timeout) is forwarded to the running step's process group;
@@ -94,8 +96,8 @@ unset VPD_E3VS_OCC_DIR  # the occupancy grid is not used any more
 if [[ $DRY == 1 ]]; then
   if [[ -n ${VPD_E3VS_ROOT:-} ]]; then
     E3VS=$VPD_E3VS_ROOT
-    export VPD_E3VS_MESH_ROOT=$E3VS/mesh_dl VPD_E3VS_MESH_MANIFEST=$E3VS/mesh_manifest.json
-    export VPD_E3VS_MESH_VAL_DIR=$E3VS/mesh_val
+    export VPD_E3VS_MESH_ROOT=$E3VS/mesh VPD_E3VS_MESH_MANIFEST=$E3VS/mesh/MANIFEST.json
+    export VPD_E3VS_MESH_VAL_DIR=$E3VS/mesh
   fi
   MESH_SCENES=${VPD_PREP_SCENES:-all}
 else

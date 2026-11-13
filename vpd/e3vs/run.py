@@ -15,7 +15,7 @@ mode still gets its own run dir, manifest, audit and results (identical to two s
 Scene objects (renderer, collider) live in a refcounted cache: an episode holds its scene's objects from its
 first to its last decision, a scene with an episode in flight is never evicted, and at most SCENE_CACHE idle
 scenes stay resident; so a scene-major run loads every scene exactly once (manifest scene_loads).
-Preflight, before any server starts: with the frozen collider the mesh validation (OUT/e3vs/mesh_val/
+Preflight, before any server starts: with the frozen collider the mesh validation (OUT/e3vs/mesh/
 validation.json) must pass and every scene needs its collision mesh with the validated sha256 (a mesh set other
 than the validated one is refused), with gsplat every scene needs a non-empty PLY; otherwise the run is refused
 (SystemExit), no GPU time is spent.
@@ -570,7 +570,7 @@ def preflight(prov: dict, renderer: str, collides: str | None, coll: dict | None
         miss = [s for s, e in prov.items() if e["mesh_sha256"] is None]
         if miss:
             bad.append(f"{len(miss)} scenes without a collision mesh (e.g. {miss[:3]}; the user downloads them, "
-                       "mesh_verify)")
+                       "copied to OUT/e3vs/mesh, mesh_verify)")
         other = [s for s, e in prov.items() if e["mesh_sha256"] and e["mesh_sha256"] != e["mesh_validated_sha256"]]
         if other:
             bad.append(f"{len(other)} scenes whose mesh is not the validated one (e.g. {other[:3]}; the mesh set "
