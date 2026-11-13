@@ -621,10 +621,39 @@ class TrainingLayoutTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             res, _ = write_run(tmp, "run", [item()], 1)
-            ep = R.list_episodes([res])[0][0]
+            episodes = R.list_episodes([res])[0]
             with self.assertRaises(R.Mismatch) as ctx:
-                R.episode_inputs(ep, Thinking())
-        self.assertIn("first prompt differs", str(ctx.exception))
+                R.episode_inputs(episodes[0], Thinking())
+            self.assertIn("first prompt differs", str(ctx.exception))
+            # the arguments reach the layout: without enable_thinking (a run's ppo.yaml) the first prompts agree
+            inp = R.episode_inputs(episodes[0], Thinking(), template_kwargs={})
+            self.assertEqual(inp["prompt_checked"], 3)
+            sdir = Path(tmp) / "f" / "shard_000_of_001"
+            man = R.extract_shard(episodes, sdir, Thinking(), fake_read, {**MANIFEST, "shard": [0, 1],
+                                                                          "template_kwargs": {}}, template_kwargs={})
+            self.assertEqual(man["status"], "done")
+            with self.assertRaises(SystemExit):  # a shard keeps its arguments
+                R.extract_shard(episodes, sdir, Thinking(), fake_read,
+                                {**MANIFEST, "shard": [0, 1], "template_kwargs": dict(R.TEMPLATE_KWARGS)})
+
+    def test_template_settings(self):
+        self.assertEqual(R.template_settings(None), (dict(R.TEMPLATE_KWARGS), R.TEMPLATE_KWARGS_SOURCE))
+        with tempfile.TemporaryDirectory() as tmp:
+            ppo = Path(tmp) / "ppo.yaml"
+            ppo.write_text("data:\n  max_prompt_length: 8192\n  apply_chat_template_kwargs:\n"
+                           "    enable_thinking: false\n    add_vision_id: true\n")
+            kwargs, source = R.template_settings(str(ppo))
+            self.assertEqual(kwargs, {"enable_thinking": False, "add_vision_id": True})
+            self.assertIn("ppo.yaml data.apply_chat_template_kwargs", source)
+            ppo.write_text("data:\n  max_prompt_length: 8192\n")  # GymAgentLoop: data.get(..., {})
+            self.assertEqual(R.template_settings(str(ppo))[0], {})
+            for text in ("data:\n  apply_chat_template_kwargs: [1]\n",
+                         "data:\n  apply_chat_template_kwargs:\n    enable_thinking: ${oc.select:x,false}\n"):
+                ppo.write_text(text)
+                with self.assertRaises(SystemExit):
+                    R.template_settings(str(ppo))
+            with self.assertRaises(SystemExit):
+                R.template_settings(str(Path(tmp) / "missing.yaml"))
 
 
 class ChatAndCheckTest(unittest.TestCase):
@@ -987,9 +1016,40 @@ class ExtractFitTest(unittest.TestCase):
             self.assertIn("non-finite", str(ctx.exception))
             self.assertEqual(list(sdir.glob("chunk_*")), [])
 
+    def test_a_bad_episode_after_good_ones(self):
+        """A non-finite value in a later reading of the chunk's second episode: SystemExit (not the chunk's row-count
+        error), the first episode written whole, nothing of the second kept."""
+        calls = []
+
+        def late_nan(batch, positions):
+            calls.append(1)
+            out = fake_read(batch, positions)
+            if len(calls) == 2:
+                out["final_norm"][1, 0] = np.inf  # after layer9 .. layer36 of the same episode
+            return out
+
+        with tempfile.TemporaryDirectory() as tmp:
+            res, _ = write_run(tmp, "run", [item()], 3)
+            episodes, _ = R.list_episodes([res])
+            sdir = Path(tmp) / "f" / "shard_000_of_001"
+            with self.assertRaises(SystemExit) as ctx:
+                R.extract_shard(episodes, sdir, FakeProcessor(), late_nan, {**MANIFEST, "shard": [0, 1]})
+            self.assertIn("final_norm", str(ctx.exception))
+            rows = [json.loads(l) for l in (sdir / "chunk_00000.jsonl").read_text().splitlines()]
+            self.assertEqual({r["key"] for r in rows}, {episodes[0]["key"]})
+            with np.load(sdir / "chunk_00000.npz") as z:
+                self.assertEqual({len(z[name]) for name in R.READINGS}, {len(rows)})
+            man = json.loads((sdir / "manifest.json").read_text())
+            self.assertEqual((man["counts"]["episodes_written"], man["counts"]["turns_written"]), (1, len(rows)))
+            done = R.extract_shard(episodes, sdir, FakeProcessor(), fake_read, {**MANIFEST, "shard": [0, 1]})
+            self.assertEqual((done["status"], done["counts"]["episodes_written"]), ("done", 3))  # resumes after it
+
     def test_fit_reading(self):
         """fit_all on planted readings: layer36 carries G_t, the others noise; the reading follows the best one."""
         metas = synthetic_metas(100, 10)
+        for k, m in enumerate(metas):  # offsets in RL's response: turn 3 lies past the 4096-token budget
+            m.update(response_offset=1500 * m["turn"], finish_reason="length" if k % 17 == 0 else "stop")
+        metas[5]["response_offset"] = None
         rng = np.random.default_rng(0)
         n = len(metas)
         arrays = {name: rng.normal(size=(n, 6)).astype(np.float32) for name in R.READINGS}
@@ -1023,6 +1083,18 @@ class ExtractFitTest(unittest.TestCase):
         self.assertIn("grid's edge", md)
         self.assertIn("grouped_gated", md)
         self.assertIn("training concat layout", md)
+        ro = res["reported_only"]  # next to the pre-registered numbers, not replacing them
+        self.assertEqual((ro["rl_response_budget_tokens"], ro["eval_answer_cap_tokens"]), (4096, 384))
+        self.assertEqual(ro["turns_past_budget"], sum(1 for m in metas if m["turn"] == 3))
+        self.assertEqual(ro["turns_offset_unknown"], 1)
+        self.assertEqual(ro["answers_cut_at_eval_cap"], len(range(0, n, 17)))
+        within = [m for m in metas if m["critic_features"] is not None and m["response_offset"] is not None
+                  and m["response_offset"] < 4096]
+        self.assertEqual(ro["kept_turns_within_budget"], len(within))
+        self.assertGreater(ro["best_reading_ev_G_t_within_budget"], 0.9)
+        self.assertIn("Reported only (not part of the pre-registered reading)", md)
+        self.assertEqual(res["verdict"], R.reading_of(res["best_ev_G_t"]))  # the reading stays the full set's
+        self.assertNotIn("_oof_G_t", json.dumps(res))
 
 
 TOKENIZER = "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-1232"

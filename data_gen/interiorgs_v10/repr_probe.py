@@ -52,7 +52,12 @@ reads a turn's value, how much value-relevant ground truth is linearly decodable
    the same three-layer MLP with its success-logit and turns-left heads, the read-out a*p + b*turns_left + c + e*phi
    fitted on the training fold's G_t; MLP_EPOCHS passes) and ridge on the turn index and family one-hot.
    The reading (pre-registered): the best reading's out-of-fold EV of G_t >= 0.3 "linearly readable", < 0.1 "not
-   readable", otherwise "weak"; the other targets numbers only.  results.json, results.md.
+   readable", otherwise "weak"; the other targets numbers only.  results.json, results.md.  Next to it, reported only:
+   the turns past RL's concat response budget, the answers cut at the eval's token cap, and the best reading's EV of
+   G_t on the turns within the budget (budget_report).
+
+The agent loop's chat-template arguments: extract --ppo-config PPO_YAML reads the run's data.apply_chat_template_kwargs,
+else TEMPLATE_KWARGS (the PPO template's); the manifest records them and their source, and a shard keeps one.
 
 Every turn with the env's truth enters the probes; a turn whose features the env could not compute
 (critic_features None) is left out of every probe and counted.
@@ -350,10 +355,11 @@ def load_png(path: Path) -> Any:
 
 
 def episode_inputs(episode: Dict[str, Any], processor: Any, load_image: Callable[[Path], Any] = load_png,
-                   run_check: bool = True) -> Dict[str, Any]:
-    """The episode's training-layout sequence (model_batch), each turn's position, the eval-layout prompt checks
-    (``run_check`` False: the run's record of its prompts is not compared, every turn counted unchecked) and the
-    first prompt's agreement between the layouts (always checked)."""
+                   run_check: bool = True, template_kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The episode's training-layout sequence (model_batch; ``template_kwargs``: the chat-template arguments of the
+    agent loop, None: TEMPLATE_KWARGS), each turn's position, the eval-layout prompt checks (``run_check`` False: the
+    run's record of its prompts is not compared, every turn counted unchecked) and the first prompt's agreement
+    between the layouts (always checked)."""
     row, model, result = episode["row"], episode["model"], Path(episode["result"])
     traj = row.get("trajectory") or []
     if not traj:
@@ -371,7 +377,7 @@ def episode_inputs(episode: Dict[str, Any], processor: Any, load_image: Callable
     else:
         prompts = [encode(processor, conversation(row["system"], turns, 0), images[:1], True)[0]]
         checks = {"prompt_checked": 0, "prompt_unchecked": len(turns)}
-    layout = training_layout(processor, row["system"], turns, [t.get("finish_reason") for t in traj])
+    layout = training_layout(processor, row["system"], turns, [t.get("finish_reason") for t in traj], template_kwargs)
     if layout["input_ids"][:layout["prompt0_len"]] != prompts[0] or layout["prompt0_len"] != len(prompts[0]):
         raise Mismatch("the first prompt differs between the training and the eval layout")
     return {"batch": model_batch(layout["input_ids"], layout["parts"]), "positions": layout["positions"],
@@ -460,9 +466,11 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
                   read: Callable[[Any, List[int]], Dict[str, np.ndarray]], manifest: Dict[str, Any],
                   on_mismatch: str = "fail", limit: Optional[int] = None, chunk_episodes: int = CHUNK_EPISODES,
                   load_image: Callable[[Path], Any] = load_png, log: Callable[[str], None] = print,
-                  run_check: bool = True) -> Dict[str, Any]:
+                  run_check: bool = True, template_kwargs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Extract one shard's episodes not yet written; ``read(batch, positions)`` gives each reading's [turns, hidden]
-    array (the GPU forward in cmd_extract).  Writes chunks, skipped.jsonl and manifest.json; returns the counts."""
+    array (the GPU forward in cmd_extract); ``template_kwargs`` the agent loop's chat-template arguments (None:
+    TEMPLATE_KWARGS; a shard keeps the manifest's).  Writes chunks, skipped.jsonl and manifest.json; returns the
+    counts."""
     sdir = Path(sdir)
     sdir.mkdir(parents=True, exist_ok=True)
     have = scan_shard(sdir)
@@ -476,6 +484,9 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
         raise SystemExit(f"{sdir}: written by {old.get('version')!r}, this is {manifest.get('version')!r}")
     if old and old.get("model") != manifest.get("model"):
         raise SystemExit(f"{sdir}: written from {old.get('model')!r}, this run reads {manifest.get('model')!r}")
+    if old and old.get("template_kwargs") != manifest.get("template_kwargs"):  # one layout per shard
+        raise SystemExit(f"{sdir}: written with the chat-template arguments {old.get('template_kwargs')!r}, this run "
+                         f"gives {manifest.get('template_kwargs')!r}")
     old_counts = old.get("counts") or {}
     counts = {"episodes_written": len(have["written"]), "turns_written": have["turns"],
               "skipped": len(have["skipped"]),
@@ -505,7 +516,7 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
         row = ep["row"]
         try:
             targets = episode_targets(row)
-            inputs = episode_inputs(ep, processor, load_image, run_check)
+            inputs = episode_inputs(ep, processor, load_image, run_check, template_kwargs)
         except Mismatch as exc:
             if on_mismatch != "skip":
                 flush()
@@ -514,15 +525,18 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
             counts["skipped"] += 1
             continue
         got = read(inputs["batch"], inputs["positions"])
-        for name in READINGS:
-            a = np.asarray(got[name])
+        readings = {name: np.asarray(got[name]) for name in READINGS}
+        for name, a in readings.items():  # every reading checked before any of the episode's is kept
             if a.shape[0] != len(targets):
                 raise RuntimeError(f"episode {ep['key']}: {a.shape[0]} rows of {name} for {len(targets)} turns")
-            if not np.all(np.isfinite(a)):  # never stored
-                flush()
-                raise SystemExit(f"episode {ep['key']}: {int((~np.isfinite(a)).sum())} non-finite values in {name}")
+        bad = {name: int((~np.isfinite(a)).sum()) for name, a in readings.items() if not np.all(np.isfinite(a))}
+        if bad:  # never stored; the episodes before it are written
+            flush()
+            raise SystemExit(f"episode {ep['key']}: non-finite values in {bad}")
+        for name, a in readings.items():
             arrays[name].append(a)
         eval_lens = inputs.get("eval_prompt_lens") or [None] * len(targets)
+        traj = row.get("trajectory") or []
         for tg, pos, plen, elen in zip(targets, inputs["positions"], inputs["prompt_lens"], eval_lens):
             metas.append({"key": ep["key"], "result": str(Path(ep["result"]).resolve()), "index": row["index"],
                           "sample": row.get("sample"), "task_id": row.get("task_id"), "scene_id": row.get("scene_id"),
@@ -530,6 +544,7 @@ def extract_shard(episodes: Sequence[Dict[str, Any]], sdir: Path, processor: Any
                           "position": pos, "prompt_tokens": plen, "seq_len": inputs["seq_len"],
                           # the turn's place in RL's response budget (the response starts after the first prompt)
                           "response_offset": pos + 1 - inputs["prompt0_len"], "eval_prompt_tokens": elen,
+                          "finish_reason": traj[tg["turn"]].get("finish_reason"),
                           "episode_turns": len(targets)})
         for key in EPISODE_COUNTS:
             counts[key] += int(inputs[key])
@@ -549,6 +564,31 @@ def _atomic_append(path: Path, record: Dict[str, Any]) -> None:
     with open(path, "a") as f:
         f.write(json.dumps(record) + "\n")
         f.flush()
+
+
+TEMPLATE_KWARGS_SOURCE = ("repr_probe.TEMPLATE_KWARGS (data.apply_chat_template_kwargs of "
+                          "data_gen/interiorgs_v10/configs/ppo_template_v10.yaml)")
+
+
+def template_settings(ppo_config: Optional[str] = None) -> Tuple[Dict[str, Any], str]:
+    """The agent loop's chat-template arguments and where they come from: with ``ppo_config`` (a run's ppo.yaml) its
+    data.apply_chat_template_kwargs, as GymAgentLoop.init_class reads it (a missing key: {}), else TEMPLATE_KWARGS."""
+    if not ppo_config:
+        return dict(TEMPLATE_KWARGS), TEMPLATE_KWARGS_SOURCE
+    import yaml
+
+    path = Path(ppo_config)
+    if not path.is_file():
+        raise SystemExit(f"--ppo-config {ppo_config}: no such file")
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    kwargs = (cfg.get("data") or {}).get("apply_chat_template_kwargs", {})
+    kwargs = {} if kwargs is None else kwargs
+    if not isinstance(kwargs, dict):
+        raise SystemExit(f"--ppo-config {ppo_config}: data.apply_chat_template_kwargs is not a mapping: {kwargs!r}")
+    if any(isinstance(v, str) and "${" in v for v in kwargs.values()):
+        raise SystemExit(f"--ppo-config {ppo_config}: data.apply_chat_template_kwargs has unresolved interpolations "
+                         f"{kwargs!r} (give the resolved config)")
+    return dict(kwargs), f"{path.resolve()} data.apply_chat_template_kwargs"
 
 
 def threads_of(given: Optional[int], default: int) -> int:
@@ -670,6 +710,7 @@ def cmd_extract(args: argparse.Namespace) -> None:  # pragma: no cover - needs a
     if layers != NUM_LAYERS:
         raise SystemExit(f"{model_path}: config num_hidden_layers {layers}, the probe reads a {NUM_LAYERS}-layer model")
     i, n = parse_shard(args.shard)
+    template_kwargs, template_source = template_settings(args.ppo_config)
     torch.set_num_threads(threads_of(args.threads, 8))
     processor = AutoProcessor.from_pretrained(model_path)
     eos_id = int(processor.tokenizer.convert_tokens_to_ids(END_OF_TURN))
@@ -685,7 +726,8 @@ def cmd_extract(args: argparse.Namespace) -> None:  # pragma: no cover - needs a
                 "layers": list(LAYERS), "num_layers": NUM_LAYERS, "hidden_size": cfg.text_config.hidden_size,
                 "forward_dtype": "bfloat16", "stored_dtype": "float16", "attn_implementation": args.attn,
                 "layout": "training concat (vagen/agent_loop/gym_agent_loop.py GymAgentLoop, mirrored by "
-                          "training_layout)", "template_kwargs": TEMPLATE_KWARGS,
+                          "training_layout)", "template_kwargs": template_kwargs,
+                "template_kwargs_source": template_source,
                 "end_of_turn": {"token": END_OF_TURN, "id": eos_id, "generation_eos": gen_eos},
                 "position": "the ids before turn t's answer - 1: the last token of its generation prompt",
                 "sft_text_runs": [f["path"] for f in info["folders"] if f.get("sft_text")],  # refused: always []
@@ -696,7 +738,8 @@ def cmd_extract(args: argparse.Namespace) -> None:  # pragma: no cover - needs a
                 "diagnosis": diag}
     sdir = shard_dir(Path(args.out), i, n)
     man = extract_shard(shard_of(episodes, i, n), sdir, processor, make_reader(model, "cuda", diag), manifest,
-                        args.on_mismatch, args.limit, int(args.chunk_episodes), run_check=not args.skip_run_check)
+                        args.on_mismatch, args.limit, int(args.chunk_episodes), run_check=not args.skip_run_check,
+                        template_kwargs=template_kwargs)
     print(json.dumps({k: man[k] for k in ("status", "counts", "diagnosis", "shard_episodes")}, indent=1))
 
 
@@ -987,6 +1030,7 @@ def probe_reading(x: np.ndarray, metas: Sequence[Dict[str, Any]], folds: np.ndar
         per = [_num(explained_variance(y[folds == f], r["oof"][folds == f, j])) for f in range(int(folds.max()) + 1)]
         out[name] = {"n": int(len(y)), "ev": _num(explained_variance(y, r["oof"][:, j])), "ev_per_fold": per,
                      "alpha_per_fold": [a[j] if a else None for a in r["alphas"]]}
+    out["_oof_G_t"] = r["oof"][:, 0]  # fit_all's reported-only subset (taken out before results.json)
     dm = np.array([m["d"] is not None for m in metas])
     if dm.sum() >= OUTER_FOLDS:
         d = np.array([m["d"] for m in metas if m["d"] is not None], dtype=np.float64)
@@ -1066,9 +1110,11 @@ def fit_all(metas: Sequence[Dict[str, Any]], arrays: Dict[str, np.ndarray], max_
         "G_t": {"mean": _num(np.mean([m["G_t"] for m in kept])), "var": _num(np.var([m["G_t"] for m in kept]))},
         "success_rate_turns": _num(np.mean([bool(m["success"]) for m in kept])),
         "readings": {}}
+    oof_g: Dict[str, np.ndarray] = {}
     for name in READINGS:
         t0 = time.time()
         res["readings"][name] = probe_reading(arrays[name][keep], kept, folds, groups, seed, device, max_iter)
+        oof_g[name] = res["readings"][name].pop("_oof_G_t")
         res["readings"][name]["seconds"] = round(time.time() - t0, 1)
     tf = ridge_cv(turn_family_design(kept, max_turns), np.array([m["G_t"] for m in kept]), folds, groups, seed=seed,
                   device=device)
@@ -1083,7 +1129,35 @@ def fit_all(metas: Sequence[Dict[str, Any]], arrays: Dict[str, np.ndarray], max_
                rule=("docs/PREREG_PPO2.md gate 0 (frozen): the best reading's out-of-fold EV of G_t >= 0.3 "
                      "'linearly readable', < 0.1 'not readable', otherwise 'weak'; the other targets numbers only"),
                grid_edges=grid_edges(res))
+    res["reported_only"] = budget_report(metas, kept, oof_g.get(best) if best else None)
     return res
+
+
+EVAL_ANSWER_CAP = 384  # evaluation.VllmPolicy's max_tokens per answer
+
+
+def budget_report(metas: Sequence[Dict[str, Any]], kept: Sequence[Dict[str, Any]], oof_best: Optional[np.ndarray]
+                  ) -> Dict[str, Any]:
+    """Reported only (not part of the pre-registered reading): the turns past RL's response budget (their first answer
+    token at response offset >= the concat budget: RL's sequence never holds them), the answers the eval's token cap
+    cut (finish_reason length), over every extracted turn; and the best reading's out-of-fold EV of G_t on the kept
+    turns within the budget (the main fit's predictions, restricted)."""
+    from data_gen.interiorgs_v10.training_prep import CONCAT_RESPONSE_LENGTH as budget
+
+    def past(m):
+        return m.get("response_offset") is not None and int(m["response_offset"]) >= budget
+
+    within = np.array([m.get("response_offset") is not None and not past(m) for m in kept], dtype=bool)
+    g = np.array([m["G_t"] for m in kept], dtype=np.float64)
+    ev = (explained_variance(g[within], oof_best[within]) if oof_best is not None and within.sum() >= 2 else None)
+    return {"note": "reported only, not part of the pre-registered reading",
+            "rl_response_budget_tokens": int(budget), "eval_answer_cap_tokens": EVAL_ANSWER_CAP,
+            "turns": len(metas), "turns_past_budget": sum(past(m) for m in metas),
+            "turns_offset_unknown": sum(m.get("response_offset") is None for m in metas),
+            "answers_cut_at_eval_cap": sum(m.get("finish_reason") == "length" for m in metas),
+            "answers_finish_unknown": sum(m.get("finish_reason") is None for m in metas),
+            "kept_turns_within_budget": int(within.sum()),
+            "best_reading_ev_G_t_within_budget": _num(ev)}
 
 
 def grid_edges(res: Dict[str, Any]) -> List[str]:
@@ -1127,6 +1201,15 @@ def results_md(res: Dict[str, Any]) -> str:
     edges = res.get("grid_edges") or []
     lines += ["", f"Penalty at the grid's edge (ridge alpha {min(ALPHAS):g}..{max(ALPHAS):g}, logistic C = 1 / alpha): "
                   + ("none." if not edges else "")] + [f"- {e}" for e in edges]
+    ro = res.get("reported_only")
+    if ro:
+        lines += ["", "Reported only (not part of the pre-registered reading):",
+                  f"- turns past RL's {ro['rl_response_budget_tokens']}-token response budget: {ro['turns_past_budget']} "
+                  f"of {ro['turns']} (offset unknown: {ro['turns_offset_unknown']});",
+                  f"- answers cut at the eval's {ro['eval_answer_cap_tokens']}-token cap: {ro['answers_cut_at_eval_cap']} "
+                  f"(finish unknown: {ro['answers_finish_unknown']});",
+                  f"- best reading ({res['best_reading']}) out-of-fold EV of G_t on the {ro['kept_turns_within_budget']} "
+                  f"turns within the budget: {f(ro['best_reading_ev_G_t_within_budget'])}."]
     lines += ["", "Notes: the hidden states are read in the training concat layout (vagen/agent_loop/gym_agent_loop.py) "
                   "at the last token of each turn's generation prompt.  The episodes ran in V4's env (evaluation run "
                   "--critic-probe), so the result rows' progress fields (progress, failed_gates) are its grouped_gated "
@@ -1170,6 +1253,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="do not compare the rebuilt eval-layout prompts with the run's record (prompt_tokens, "
                         "prompt_ids_sha256); the first prompt's agreement between the layouts stays; recorded in the "
                         "manifest (default: compared)")
+    x.add_argument("--ppo-config", default=None,
+                   help="the RL run's ppo.yaml: the agent loop's chat-template arguments from its "
+                        "data.apply_chat_template_kwargs (default: TEMPLATE_KWARGS, the PPO template's); recorded in "
+                        "the manifest")
     x.add_argument("--chunk-episodes", type=int, default=CHUNK_EPISODES)
     x.add_argument("--attn", default="sdpa", help="attn_implementation of the forward")
     x.add_argument("--threads", type=int, default=None,
