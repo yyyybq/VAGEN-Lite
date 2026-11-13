@@ -166,9 +166,40 @@ def test_payloads_never_mkdir_a_shared_parent():
             assert bad not in text, (s, bad)
 
 
+# ------------------------------------------------------------------------------------------ the pilot's trainer
+def pilot_trainer_root(root: Path) -> Path:
+    """ROOT = a copy of the trainer's CODE_FILES with the pilot's vpd/starts.json (this tree's without the Q3SG entry,
+    re-serialised: the bytes the pilot and RL adapters were trained with; PREREG section 17, row 2026-11-13)."""
+    from vpd.train import n2_train_vpd as T
+
+    for rel in T.CODE_FILES:
+        dst = Path(root) / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if rel == PT.STARTS_JSON:
+            dst.write_bytes(PT.starts_json_without(T.WORKTREE / rel))
+        else:
+            shutil.copyfile(T.WORKTREE / rel, dst)
+    return Path(root)
+
+
+def use_pilot_trainer(monkeypatch, root: Path) -> dict:
+    """The tests of the pilot and RL jobs run under the trainer fingerprint those jobs were registered with
+    (PILOT_TRAINER_SHA256, 0865dd75f1ee): n2_train_vpd.code_fingerprint() of this tree answers the fingerprint of
+    pilot_trainer_root (this tree's own is Q3SG_TRAINER_SHA256, under which those jobs refuse: test_tvr_q3sg)."""
+    from vpd.train import n2_train_vpd as T
+
+    real = T.code_fingerprint
+    fp = real(pilot_trainer_root(root))
+    assert fp["code_sha256"] == PT.PILOT_TRAINER_SHA256, fp["code_sha256"]
+    monkeypatch.setattr(T, "code_fingerprint",
+                        lambda root=T.WORKTREE: fp if Path(root) == T.WORKTREE else real(root))
+    return fp
+
+
 # ------------------------------------------------------------------------------------------ layout + fakes for prepare
 @pytest.fixture
 def lay(tmp_path, monkeypatch):
+    use_pilot_trainer(monkeypatch, tmp_path / "pilot_trainer")
     L = PT.Layout(tmp_path / "out")
     monkeypatch.setattr(PT, "LAYOUT", L)
     monkeypatch.setenv("VPD_LEDGER", str(tmp_path / "out" / "ledger.jsonl"))
@@ -1045,7 +1076,9 @@ def write_merge_correctness(L: PT.Layout, cfg: dict, starts=pilot_cfg.STARTS) ->
 
 def make_gate_root(tmp_path, monkeypatch, per_task: bool = True):
     """A complete, consistent fake pilot (3 starts, N_top ALL, 8 eval tasks) in run_tvr's results.json layout: every
-    gate passes.  Each eval also gets its per_task.jsonl (6.4 columns; power_sim's input, POWER.json's shas)."""
+    gate passes.  Each eval also gets its per_task.jsonl (6.4 columns; power_sim's input, POWER.json's shas).  The
+    pilot's trainer fingerprint (use_pilot_trainer)."""
+    use_pilot_trainer(monkeypatch, tmp_path / "pilot_trainer")
     monkeypatch.setattr(PT, "EVAL500_N", N_EVAL)
     monkeypatch.setattr(PT, "prereg_state", lambda: {"commit": "c0ffee", "committed": True, "status": "",
                                                      "clean": True})

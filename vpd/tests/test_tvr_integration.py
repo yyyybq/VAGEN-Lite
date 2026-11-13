@@ -88,12 +88,21 @@ def test_prereg_block_equals_pilot_cfg():
     assert PT.check_prereg() == []  # pilot_tvr's prepare guard uses the same parser on the same file
 
 
-def test_trainer_fingerprint_prefix():
+def test_trainer_fingerprint_prefix(tmp_path):
+    """The frozen recipe prefix is still the pilot's 0865dd75f1ee, which this tree's trainer files give with the
+    pilot's starts.json (this tree's without the Q3SG entry); this tree's own fingerprint is the Q3SG one under the
+    invariant (5 .py shas unchanged, starts.json only gains Q3SG; PREREG section 17, row 2026-11-13), so the pilot
+    jobs' trainer check refuses here (intended: the pilot is closed)."""
+    from vpd.tests import test_tvr_jobs as TJ
     from vpd.train import n2_train_vpd as T
 
     want = pilot_cfg.FROZEN["recipe"]["trainer_code_sha256_prefix"]
-    assert want == "0865dd75f1ee" and T.code_fingerprint()["code_sha256"].startswith(want)
-    assert PT.trainer_problems() == []
+    assert want == "0865dd75f1ee" and PT.PILOT_TRAINER_SHA256.startswith(want)
+    assert T.code_fingerprint(TJ.pilot_trainer_root(tmp_path / "pilot"))["code_sha256"] == PT.PILOT_TRAINER_SHA256
+    fp = T.code_fingerprint()
+    assert fp["code_sha256"] == PT.Q3SG_TRAINER_SHA256 and PT.q3sg_trainer_problems() == []
+    assert {k: v for k, v in fp["code_files"].items() if k != PT.STARTS_JSON} == PT.TRAINER_PY_SHA256
+    assert PT.trainer_problems() == [f"trainer code_sha256 {PT.Q3SG_TRAINER_PREFIX} != frozen prefix {want}"]
 
 
 def test_readme_mentions_every_wave2_file():
@@ -364,7 +373,9 @@ def pipe(tmp_path_factory):
         for f in ("config.json", "tokenizer_config.json"):
             (mdir / f).write_text("{}")
         (mdir / "preprocessor_config.json").write_text(json.dumps({"size": {"shortest_edge": 65536}}))
-        code_sha = TR.code_fingerprint()["code_sha256"]
+        # the pilot adapters' trainer: this tree's trainer files with the pilot's starts.json (0865dd75f1ee; this
+        # tree's own fingerprint is the Q3SG one, PREREG section 17 row 2026-11-13)
+        code_sha = TR.code_fingerprint(TJ.pilot_trainer_root(tmp / "pilot_trainer"))["code_sha256"]
         w.served = {}
         for s in pilot_cfg.STARTS:
             _adapters(L, s, cfg, tman, code_sha)

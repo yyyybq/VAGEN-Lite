@@ -38,17 +38,29 @@ from vpd.tvr import pilot_tvr as PT  # noqa: E402
 
 JOBS_DIR = paths.VPD_PKG / "jobs"
 wj, fsha, sha = TJ.wj, TJ.fsha, TJ.sha
-XS = PT.EXPLORE_STARTS
+XS = PT.RL_STARTS  # the RL starts (row 2026-11-12); the third explore start Q3SG: test_tvr_q3sg.py
 KNOBS = TJ._KNOBS + ("VPD_TVR_ROOT",)
 
 
 # ------------------------------------------------------------------------------------------ fixtures / builders
 @pytest.fixture
 def xlay(lay, monkeypatch):  # noqa: F811
-    """test_tvr_jobs' layout (fake sco, fake prereg state) plus an explore-start check that needs no checkpoint dir
-    (x_start_problems is tested on its own below)."""
-    monkeypatch.setattr(PT, "x_start_problems", lambda s: [] if s in XS else [f"start {s!r} not explore"])
+    """test_tvr_jobs' layout (fake sco, fake prereg state, the pilot's trainer fingerprint: the RL jobs' registered
+    one) plus an explore-start check that needs no checkpoint dir (x_start_problems is tested on its own below)."""
+    monkeypatch.setattr(PT, "x_start_problems", lambda s: [] if s in PT.EXPLORE_STARTS else [f"start {s!r} not "
+                                                                                              "explore"])
     return lay
+
+
+def trainer_code(s: str) -> dict:
+    """The trainer code an adapter of explore start S records: the RL starts the pilot's (PILOT_TRAINER_SHA256, the
+    pilot's code_files), Q3SG this tree's (Q3SG_TRAINER_SHA256)."""
+    files = dict(PT.TRAINER_PY_SHA256)
+    if s in PT.Q3SG_STARTS:
+        return {"code_sha256": PT.Q3SG_TRAINER_SHA256, "code_files": dict(files, **{
+            PT.STARTS_JSON: PT.STARTS_JSON_SHA256_Q3SG})}
+    return {"code_sha256": PT.PILOT_TRAINER_SHA256, "code_files": dict(files, **{
+        PT.STARTS_JSON: PT.STARTS_JSON_SHA256_PILOT})}
 
 
 def build_tiers(L: PT.Layout, cfg: dict) -> dict:
@@ -78,14 +90,14 @@ def xverdict(L: PT.Layout, v="PASS", name="tvr-xsmoke-202611121000") -> Path:
 
 def build_xadapters(L: PT.Layout, s: str, cfg: dict, files: dict, root: Path = None) -> None:
     """The explore adapters of start s as the trainer writes their meta (seed 1001, the manifest's data sha, the init
-    chain); under root/<S>/adapters (default L.xroot)."""
+    chain, the start's registered trainer code: trainer_code); under root/<S>/adapters (default L.xroot)."""
     root = Path(root or L.xroot)
     for tier, init in PT.train_tiers(s, cfg):
         d = root / s / "adapters" / tier
         d.mkdir(parents=True, exist_ok=True)
         (d / "adapter.pt").write_bytes(f"{s}-{tier}".encode())
         meta = {"start": s, "seed": 1001, "phase": PT.PHASE[tier], "optimizer_steps": 30,
-                "optimizer_steps_planned": 30, "code_sha256": TJ.code_sha(), "attn": "sdpa",
+                "optimizer_steps_planned": 30, **trainer_code(s), "attn": "sdpa",
                 "data_sha256": files[PT.TIER_FILE[tier]], "init_adapter": None}
         if init:
             meta["init_adapter"] = {"sha256": fsha(root / s / "adapters" / init / "adapter.pt"), "start": s,
@@ -103,10 +115,14 @@ def _edit(p: Path, fn) -> None:
 def test_explore_job_table_names_and_sco_rules():
     from vpd import ledger, sco
 
-    assert PT.EXPLORE_STARTS == ("Q3RD", "Q3RS150") and not set(XS) & set(pilot_cfg.STARTS)
+    assert PT.RL_STARTS == ("Q3RD", "Q3RS150") and not set(PT.EXPLORE_STARTS) & set(pilot_cfg.STARTS)
+    assert PT.EXPLORE_STARTS == PT.RL_STARTS + ("Q3SG",)  # the third explore start (row 2026-11-13)
     assert len(PT.JOBS) == 13 and not set(PT.XJOBS) & set(PT.JOBS)  # the pilot table is unchanged
     assert sorted(PT.XJOBS) == sorted(["tvr-xsmoke", "tvr-xtrain-q3rd", "tvr-xtrain-q3rs150", "tvr-xeval-q3rd-top",
-                                       "tvr-xeval-q3rd-low", "tvr-xeval-q3rs150-top", "tvr-xeval-q3rs150-low"])
+                                       "tvr-xeval-q3rd-low", "tvr-xeval-q3rs150-top", "tvr-xeval-q3rs150-low",
+                                       "tvr-xsmoke-q3sg", "tvr-xtrain-q3sg", "tvr-xeval-q3sg-top",
+                                       "tvr-xeval-q3sg-low"])
+    assert PT.XJOBS["tvr-xsmoke"]["starts"] == PT.RL_STARTS and PT.XJOBS["tvr-xsmoke"]["xlist"] is None
     for job, spec in PT.XJOBS.items():
         assert spec["name"] == "vpd-" + job and spec["as_root"] is True
         sco.validate_name(spec["name"])
@@ -412,8 +428,11 @@ def test_guard_in_job_writes_facts(xlay):
     rep = PT.guard("tvr-xsmoke", run, xlay, cfg)
     assert rep["ok"], rep["problems"]
     g = json.loads((run / "guard.json").read_text())
-    assert g["facts"]["explore"] is True and g["facts"]["trainer_code_sha256"].startswith("0865dd75f1ee")
-    assert g["facts"]["harness_code_sha256"].startswith("64edd575f36b")
+    # under the RL jobs' registered trainer (xlay: the pilot's fingerprint; this tree's own is the Q3SG one, under
+    # which tvr-xsmoke refuses: test_tvr_q3sg.test_pilot_and_rl_jobs_refuse_on_this_tree)
+    assert g["facts"]["explore"] is True and g["facts"]["trainer_code_sha256"] == PT.PILOT_TRAINER_SHA256
+    assert g["facts"]["trainer_code_sha256"].startswith(pilot_cfg.FROZEN["recipe"]["trainer_code_sha256_prefix"])
+    assert g["facts"]["harness_code_sha256"].startswith("64edd575f36b") and "trainer_rule" not in g["facts"]
 
 
 def test_cli_explore_flags(xlay, capsys):
@@ -432,9 +451,9 @@ def test_cli_explore_flags(xlay, capsys):
 
 
 # ------------------------------------------------------------------------------------------ xsmoke verdict
-def build_xsmoke(L: PT.Layout, sm: Path, cfg: dict, files: dict) -> None:
+def build_xsmoke(L: PT.Layout, sm: Path, cfg: dict, files: dict, starts=XS) -> None:
     rend = TJ.renderer_block(cfg)
-    for s in XS:
+    for s in starts:
         sd = sm / s
         wj(sd / "load" / "load.json", {"ok": True, "problems": [], "dtype": "bfloat16", "tensor_checks_ok": True})
         wj(sd / "dry" / "dry_run.json", {"per_conversation": [
@@ -461,7 +480,7 @@ def build_xsmoke(L: PT.Layout, sm: Path, cfg: dict, files: dict) -> None:
         wj(ad / "meta.json", {"start": s, "seed": 1001, "phase": "0W", "optimizer_steps": 2,
                               "optimizer_steps_planned": 2, "conversations": 16, "epochs": 1,
                               "data_sha256": files["warmup0w20.jsonl"], "attn": "sdpa", "init_adapter": None,
-                              "code_sha256": TJ.code_sha(), "loss_first": 0.9, "loss_last": 0.8,
+                              **trainer_code(s), "loss_first": 0.9, "loss_last": 0.8,
                               "lora": {"wrapped": 252}})
         wj(sd / "parity" / "merge_0W.json", {"pass": False, "adapter_sha256": asha, "n_demos": 20,
                                              "mean_abs_dce": 0.0091, "reply_agreement": 0.96, "n_replies": 267,
@@ -653,8 +672,8 @@ def test_payload_dry_xeval(tmp_path, start, part):
 @pytest.mark.parametrize("job", sorted(PT.XJOBS))
 def test_explore_dry_run_records_every_required_step(tmp_path, job):
     spec = PT.XJOBS[job]
-    args = [a for a in (spec["start"], spec["part"]) if a]
-    res, lines, run = xdry(tmp_path, spec["script"], *args, root=None if job == "tvr-xsmoke" else "explore/rl",
+    args = [a for a in (spec["xlist"], spec["start"], spec["part"]) if a]  # as payload_for passes them
+    res, lines, run = xdry(tmp_path, spec["script"], *args, root=None if spec["kind"] == "xsmoke" else "explore/rl",
                            VPD_DRY_NTOP="ALL")
     names = [json.loads(s)["name"] for s in (run / "steps.jsonl").read_text().splitlines()]
     absent = [r for r in PT.required_steps(job, TJ.filled_cfg()) if not any(n == r or n.startswith(r + ":")

@@ -579,10 +579,17 @@ def test_render_values_equal_the_probe_summary():
     assert s["font"]["parent"]["sha256"] == r["badge_font_sha256"]
 
 
-def test_trainer_fingerprint_prefix():
+def test_trainer_fingerprint_prefix(tmp_path):
+    """The frozen recipe prefix = this tree's trainer files with the pilot's starts.json (this tree's without the
+    Q3SG entry: "5 个 .py 文件 sha 不变、starts.json 只多这一条", PREREG section 17, row 2026-11-13); this tree's own
+    fingerprint is the Q3SG one."""
+    from vpd.tests import test_tvr_jobs as TJ
     from vpd.train import n2_train_vpd as T
+    from vpd.tvr import pilot_tvr as PT
 
-    assert T.code_fingerprint()["code_sha256"].startswith(F["recipe"]["trainer_code_sha256_prefix"])
+    old = T.code_fingerprint(TJ.pilot_trainer_root(tmp_path / "pilot"))["code_sha256"]
+    assert old.startswith(F["recipe"]["trainer_code_sha256_prefix"]) and old == PT.PILOT_TRAINER_SHA256
+    assert T.code_fingerprint()["code_sha256"].startswith(PT.Q3SG_TRAINER_PREFIX) and PT.q3sg_trainer_problems() == []
 
 
 REPO = paths.TVR_REPO
