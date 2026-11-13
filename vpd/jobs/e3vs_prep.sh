@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # sco payload of job vpd-e3vs-prep (non-root; one card for gsplat; PY_Q3 = eval-external-q3, which has gsplat 1.5.3,
-# plyfile and ply_gaussian_loader through its system site packages; open3d for the official collision model comes
-# from O3D_DIR = OUT/envs/e3vs-o3d, appended to PYTHONPATH here and in e3vs_start.sh only):
+# plyfile and ply_gaussian_loader through its system site packages; open3d 0.19.0 for the official collision model
+# comes from O3D_DIR = OUT/envs/e3vs-o3d, appended to PYTHONPATH only for the calls that need it: mesh_val, bfs_*,
+# floors here, the collider smoke and run.py in e3vs_start.sh; `mesh_collision o3d-check` first refuses (exit 2) any
+# top-level module in O3D_DIR that PY_Q3 imports itself):
 #     timeout -k 120 6900 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/e3vs_prep.sh RUN
 # Prepared by the orchestrator only after the user's OK, the PREREG commit, the repo and the splat download:
 #     python -m vpd.sco prepare --run OUT/jobs/e3vs-prep-<yyyymmddHHMM> --name vpd-e3vs-prep --est-gph 2.0 -- \
@@ -32,16 +34,19 @@
 #                 (skipped when that file has pass true)
 #   mesh_val      mesh_collision validate --scenes all -> OUT/e3vs/mesh_val/validation.json: the official E3VS
 #                 Collisions (Open3D ray casting) on the 99 user-downloaded ScanNet++ meshes (PREREG section 16,
-#                 user 2026-11-12).  Refused (exit 2) when OUT/e3vs/mesh_manifest.json (mesh_verify) is missing or
-#                 not ok or a mesh sha256 differs; a gating metric >= 1 % (iPhone segments colliding, template
-#                 viewpoints in obstacle) exits 1: the job STOPS and the user decides.  Skipped when
-#                 `mesh_collision check --scenes all` passes (validation pass, same definition, every mesh
-#                 unchanged, key == the manifest's).  KEY = mesh_set_sha256 of the 99 meshes.
-#                 (Until 2026-11-12 this step was "occupancy", the splat occupancy grid of occupancy.py.)
+#                 user 2026-11-12); one process pinned to one CPU.  Every rc but 0 STOPS the job:
+#                   1 a gating metric >= 1 % (iPhone segments colliding, template viewpoints in obstacle): to the user
+#                   2 refused: OUT/e3vs/mesh_manifest.json (mesh_verify) missing / not ok, or a mesh sha256 differs
+#                   3 an error, no validation result (e.g. open3d missing, an InsScene file missing)
+#                   4 gating passed, possible frame mismatch (iPhone or template viewpoints outside the mesh AABB):
+#                     stop and ask the user; going on needs `mesh_collision ack-frame --note ...` (user's decision)
+#                 Skipped when `mesh_collision check --scenes all` passes (validation pass, same definition, no
+#                 unacknowledged frame warning, every mesh unchanged, key == the manifest's).  KEY = mesh_set_sha256
+#                 of the 99 meshes.  (Until 2026-11-12 this step was "occupancy", the splat grid of occupancy.py.)
 #   bfs_<split>   bfs_demos --split S --procs $VPD_PREP_PROCS --collides vpd.e3vs.mesh_collision:load_collider
-#                 --tag mesh (1 thread per process) -> OUT/e3vs/bfs/mesh/<split>/ (train: demo_pool.jsonl;
-#                 val/test: opt_len)
-#   floors        floors --collides vpd.e3vs.mesh_collision:load_collider --tag mesh ->
+#                 --tag mesh (1 thread, and 1 CPU of affinity, per worker; the parent hashes the meshes before the
+#                 fork) -> OUT/e3vs/bfs/mesh/<split>/ (train: demo_pool.jsonl; val/test: opt_len)
+#   floors        floors --collides vpd.e3vs.mesh_collision:load_collider --tag mesh (one process, one CPU) ->
 #                 OUT/e3vs/floors/floors_mesh.json (the frozen gate floor = its gate_floor.rate, DECISIONS B8)
 #   sft           make_sft all --seed 1001 --tiers 100 --overwrite -> OUT/e3vs/sft/{warmup20.jsonl,
 #                 order_seed1001.json, seed1001/demos_100.jsonl, images/}
@@ -49,7 +54,8 @@
 #                 skipped when that stamp equals the current KEY and their output exists (other meshes = rerun).
 #                 The gate (summary gate, E0) requires prep_state/floors and prep_state/sft == mesh_set_sha256.
 #   DONE          OUT/e3vs/PREP_DONE and RUN/DONE
-# Env: VPD_DRYRUN=1 prints the commands (guard and inputs are evaluated but do not stop the dry run);
+# Env: VPD_DRYRUN=1 prints the commands, a "  # +o3d" suffix marks those with O3D_DIR on PYTHONPATH (guard, inputs
+#      and o3d-check are evaluated but do not stop the dry run);
 #      VPD_PREP_PROCS (default 12), VPD_PARITY_SCENE (default 00dd871005, the first val scene),
 #      VPD_JOB_DEADLINE_S (default 6720), VPD_MIN_STEP_S (default 60).
 #      Test hooks honoured ONLY with VPD_DRYRUN=1: VPD_E3VS_ROOT (instead of OUT/e3vs: parity, torch_ext, meshes,
@@ -99,19 +105,20 @@ COLL=vpd.e3vs.mesh_collision:load_collider
 TAG=mesh
 ENV_PREFIX=$(dirname "$(dirname "$PY_EVAL")")
 KEY=
-# open3d for the official collision model (== vpd.e3vs.mesh_collision.O3D_DIR; test_e3vs_mesh_collision checks).
-# Appended: PYTHONPATH still starts with the code tree.  A numpy / torch copy in it would shadow the env's.
+# open3d for the official collision model (== vpd.e3vs.mesh_collision.O3D_DIR; test_e3vs_mesh_collision checks):
+# NOT exported job-wide; the calls that need it run with PYTHONPATH="$O3D_PP" (the code tree first).
 O3D_DIR=$VPD_OUT/envs/e3vs-o3d
-for d in numpy torch; do
-  if [[ -e $O3D_DIR/$d ]]; then
-    echo "[e3vs] $O3D_DIR/$d would shadow PY_Q3's $d (install open3d there with --no-deps)" >&2
-    exit 2
-  fi
-done
-export PYTHONPATH="$PYTHONPATH:$O3D_DIR"
+O3D_PP="$PYTHONPATH:$O3D_DIR"
 
 mkdir -p "$RUN"
 cd "$VPD_WORKTREE"
+if ! "$PY" -m vpd.e3vs.mesh_collision o3d-check; then  # a module of O3D_DIR that PY_Q3 has would be shadowed
+  if [[ $DRY == 1 ]]; then
+    echo "[dry] o3d-check would stop the job here"
+  else
+    exit 2
+  fi
+fi
 
 # >>> timed-run helpers (identical text in e3vs_prep.sh and e3vs_start.sh; tested by test_e3vs_loop.py)
 VPD_CHILD=
@@ -160,9 +167,9 @@ trap 'on_term INT' INT
 trap 'on_term HUP' HUP
 # <<< timed-run helpers
 
-x() {  # run under the deadline, or print under VPD_DRYRUN=1
+x() {  # run under the deadline, or print under VPD_DRYRUN=1 ("  # +o3d": the command gets O3D_DIR on PYTHONPATH)
   if [[ $DRY == 1 ]]; then
-    echo "[dry] $*"
+    echo "[dry] $*$([[ :$PYTHONPATH: == *":$O3D_DIR:"* ]] && echo "  # +o3d")"
   else
     tx "$@"
   fi
@@ -259,12 +266,21 @@ mesh_step() {
     skip mesh_val
     return 0
   fi
-  x "$PY" -m vpd.e3vs.mesh_collision validate --scenes all || rc=$?
-  if ((rc)); then
-    echo "[e3vs] mesh validation failed (rc $rc; 1 = a gating metric >= 1 %, 2 = mesh inputs refused): the job" \
-         "stops here; to the user (PREREG_E3VS_PILOT section 5, user 2026-11-12)" >&2
-    return "$rc"
-  fi
+  PYTHONPATH="$O3D_PP" x "$PY" -m vpd.e3vs.mesh_collision validate --scenes all || rc=$?
+  case $rc in
+    0) ;;
+    1) echo "[e3vs] mesh validation FAILED a gating metric (>= 1 %): the job stops here; stop and ask the user" \
+            "(PREREG_E3VS_PILOT section 5, user 2026-11-12: 验证不过就停下问我)" >&2 ;;
+    2) echo "[e3vs] mesh inputs REFUSED (manifest missing / not ok, or a mesh sha256 differs; nothing validated):" \
+            "the job stops here; rerun mesh_verify on the user's download, then resubmit" >&2 ;;
+    3) echo "[e3vs] mesh validation ERROR, no validation result (see the log above: open3d, InsScene files, the" \
+            "official code checks): the job stops here; fix it and resubmit" >&2 ;;
+    4) echo "[e3vs] mesh validation: gating passed, but stop and ask the user: possible frame mismatch (iPhone or" \
+            "template viewpoints outside the mesh AABB, see validation.json frame_warnings); the job stops here;" \
+            "going on needs the user's decision recorded with mesh_collision ack-frame" >&2 ;;
+    *) echo "[e3vs] mesh validation exited $rc (not started, cut, or killed): the job stops here" >&2 ;;
+  esac
+  ((rc == 0)) || return "$rc"
   if [[ $DRY == 1 ]]; then
     KEY=dry
     return 0
@@ -273,20 +289,20 @@ mesh_step() {
   [[ -n $KEY ]] || { echo "[e3vs] mesh check failed after the validation" >&2; return 1; }
 }
 
-bfs_split() {  # 1 thread per process, $PROCS processes
+bfs_split() {  # $PROCS worker processes, 1 thread and 1 CPU of affinity each (bfs_demos pins them)
   local sp=$1
   if stamped "bfs_$sp" "$E3VS/bfs/$TAG/$sp/summary.json" "$E3VS/bfs/$TAG/$sp/opt_len.json"; then
     skip "bfs_$sp"
     return 0
   fi
-  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONPATH="$O3D_PP" \
     x "$PY" -m vpd.e3vs.bfs_demos --split "$sp" --procs "$PROCS" --collides "$COLL" --tag "$TAG" || return $?
   stamp "bfs_$sp"
 }
 
-floors_step() {
+floors_step() {  # one process; floors pins itself to one CPU
   if stamped floors "$E3VS/floors/floors_$TAG.json"; then skip floors; return 0; fi
-  x "$PY" -m vpd.e3vs.floors --collides "$COLL" --tag "$TAG" || return $?
+  PYTHONPATH="$O3D_PP" x "$PY" -m vpd.e3vs.floors --collides "$COLL" --tag "$TAG" || return $?
   stamp floors
 }
 

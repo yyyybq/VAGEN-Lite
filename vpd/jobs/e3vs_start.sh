@@ -28,11 +28,18 @@
 #               manifest's) and its mesh_set_sha256 == the prep stamps prep_state/floors and prep_state/sft (the
 #               key J5 validated and built the floor and the demos with; any other mesh set is refused); a
 #               job-local merge base with >= 40 GiB free (DECISIONS B11: /tmp/vpd_merged, else /dev/shm/vpd_merged;
-#               chosen once, before any training).  open3d (the official collision model) comes from O3D_DIR =
-#               OUT/envs/e3vs-o3d, appended to PYTHONPATH; run.py re-checks every test scene's mesh sha256.
+#               chosen once, before any training).  open3d 0.19.0 (the official collision model) comes from O3D_DIR =
+#               OUT/envs/e3vs-o3d, appended to PYTHONPATH only for collider_smoke and the run.py evals (not for
+#               training, merges, or the vLLM server, from whose env run.py removes it); run.py re-checks every
+#               test scene's mesh sha256.  Before the guard, `mesh_collision o3d-check` refuses (exit 2) a module of
+#               O3D_DIR that PY_Q3 imports itself.
 #   gsplat      copy OUT/e3vs/torch_ext (the prep job's build) to job-local $TORCH_EXTENSIONS_DIR, then the B18 probe
 #               -> RUN/gsplat_probe.json (as root: does gsplat rebuild, how long); every eval copies it into its
 #               manifest (run.py --gsplat-probe)
+#   collider_smoke  one PY_Q3 process with the evals' PYTHONPATH imports torch and gsplat, loads the first test
+#               scene's validated mesh (load_collider) and runs one official check on a 5 cm segment
+#               (mesh_collision smoke); a failure ends the job before any training (after gsplat, so that gsplat
+#               imports the copied build instead of compiling)
 #   train_0W    PY_TRAIN n2_train_vpd.py --start S --data sft/warmup20.jsonl --out A/0W --epochs auto (12)
 #               --seed 1001 --phase 0W (retrained in every start job: DECISIONS B7)
 #   train_100   ... --data sft/seed1001/demos_100.jsonl --out A/100 --init-adapter A/0W --epochs auto (3)
@@ -50,11 +57,14 @@
 # force one of the two (its free space is still checked).  merge.py gets --out MERGE_BASE/START__TAG, refuses
 # /mnt/umm and re-checks the free space.  Merged folders are removed after their evals and at EXIT (also after
 # SIGTERM / SIGINT / SIGHUP, which are forwarded to the running command's process group first), under both bases.
-# Env: VPD_DRYRUN=1 (print only; the guard is evaluated but does not stop), VPD_OPTIONAL, VPD_MERGE_DIR,
+# Env: VPD_DRYRUN=1 (print only, "  # +o3d" marks the commands with O3D_DIR on PYTHONPATH; the guard and o3d-check
+#      are evaluated but do not stop), VPD_OPTIONAL, VPD_MERGE_DIR,
 #      VPD_E3VS_CONCURRENCY (default 24), VPD_LIMIT (episodes per eval; smoke only, never in the pilot),
 #      VPD_JOB_DEADLINE_S (default 9600), VPD_MIN_STEP_S (default 60).
 #      Test hooks honoured ONLY with VPD_DRYRUN=1: VPD_FAKE_FREE_GIB="/tmp=N,/dev/shm=M" (the free-space probe),
-#      VPD_DRY_FAIL=STEP,STEP (the printed commands of those steps fail, to test the keep-going rule).
+#      VPD_DRY_FAIL=STEP,STEP (the printed commands of those steps fail, to test the keep-going rule),
+#      VPD_E3VS_ROOT (instead of OUT/e3vs: PREP_DONE, sft, floors, parity, prep_state, meshes, manifest, mesh_val,
+#      runs; the guard's mesh-key comparison then runs against it).
 # Cost model (estimate, unmeasured until the prep job reports PLY load times; GPU-h per start job):
 #   setup + probe 0.05, train 0W 0.1, train 100 0.2-0.3, 2 CPU merges 0.1-0.2, raw/u 0.35-0.55 (never-stop raw
 #   models: 377 x 25 decisions), 0W/u 0.25-0.45, 100/u+c one session 0.25-0.45; each eval adds a vLLM start
@@ -73,16 +83,10 @@ export RUN
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common_env.sh"
 unset VPD_E3VS_REPO
 unset VPD_E3VS_OCC_DIR VPD_E3VS_MESH_ROOT VPD_E3VS_MESH_MANIFEST VPD_E3VS_MESH_VAL_DIR  # OUT/e3vs only
-# open3d for the official collision model (== vpd.e3vs.mesh_collision.O3D_DIR; test_e3vs_mesh_collision checks).
-# Appended: PYTHONPATH still starts with the code tree.  A numpy / torch copy in it would shadow the env's.
+# open3d for the official collision model (== vpd.e3vs.mesh_collision.O3D_DIR; test_e3vs_mesh_collision checks):
+# NOT exported job-wide; collider_smoke and the run.py evals run with PYTHONPATH="$O3D_PP" (the code tree first).
 O3D_DIR=$VPD_OUT/envs/e3vs-o3d
-for d in numpy torch; do
-  if [[ -e $O3D_DIR/$d ]]; then
-    echo "[e3vs] $O3D_DIR/$d would shadow PY_Q3's $d (install open3d there with --no-deps)" >&2
-    exit 2
-  fi
-done
-export PYTHONPATH="$PYTHONPATH:$O3D_DIR"
+O3D_PP="$PYTHONPATH:$O3D_DIR"
 
 DRY=${VPD_DRYRUN:-0}
 OPTIONAL=${VPD_OPTIONAL:-0}
@@ -95,6 +99,11 @@ RESERVE=120
 MIN_FREE_GIB=40
 SEED=1001
 E3VS=$VPD_OUT/e3vs
+if [[ $DRY == 1 && -n ${VPD_E3VS_ROOT:-} ]]; then  # test hook: the guard's checks against a test tree
+  E3VS=$VPD_E3VS_ROOT
+  export VPD_E3VS_MESH_ROOT=$E3VS/mesh_dl VPD_E3VS_MESH_MANIFEST=$E3VS/mesh_manifest.json
+  export VPD_E3VS_MESH_VAL_DIR=$E3VS/mesh_val
+fi
 SFT=$E3VS/sft
 PILOT=$E3VS/runs/pilot/$START
 A=$PILOT/adapters
@@ -147,6 +156,13 @@ FREE_FACTS="/tmp $(free_gib /tmp) GiB, /dev/shm $(free_gib /dev/shm) GiB availab
 mkdir -p "$RUN"
 [[ $DRY == 1 ]] || mkdir -p "$A" "$E"
 cd "$VPD_WORKTREE"
+if ! "$PY_Q3" -m vpd.e3vs.mesh_collision o3d-check; then  # a module of O3D_DIR that PY_Q3 has would be shadowed
+  if [[ $DRY == 1 ]]; then
+    echo "[dry] o3d-check would stop the job here"
+  else
+    exit 2
+  fi
+fi
 vpd_chown_trap "$RUN" "$PILOT"
 # a timeout or signal must not leave merged weights on the node: both bases, fixed names only
 [[ $DRY == 1 ]] || vpd_on_exit "for d in /tmp/vpd_merged/${START}__0W /tmp/vpd_merged/${START}__100 /dev/shm/vpd_merged/${START}__0W /dev/shm/vpd_merged/${START}__100; do rm -rf -- \"\$d\"; done"
@@ -198,9 +214,10 @@ trap 'on_term INT' INT
 trap 'on_term HUP' HUP
 # <<< timed-run helpers
 
-x() {  # run under the deadline, or print under VPD_DRYRUN=1 (VPD_DRY_FAIL=STEP,...: those steps' commands fail)
+x() {  # run under the deadline, or print under VPD_DRYRUN=1 (VPD_DRY_FAIL=STEP,...: those steps' commands fail;
+       # "  # +o3d": the command gets O3D_DIR on PYTHONPATH)
   if [[ $DRY == 1 ]]; then
-    echo "[dry] $*"
+    echo "[dry] $*$([[ :$PYTHONPATH: == *":$O3D_DIR:"* ]] && echo "  # +o3d")"
     if [[ -n $VPD_CUR_STEP && ,${VPD_DRY_FAIL:-}, == *",$VPD_CUR_STEP,"* ]]; then
       echo "[dry] (test hook) step $VPD_CUR_STEP fails" >&2
       return 3
@@ -320,6 +337,10 @@ train() {  # TAG DATA [INIT]
   x "$PY_TRAIN" vpd/train/n2_train_vpd.py "${args[@]}"
 }
 
+collider_smoke() {  # the evals' process setup, before any training (S3): fail fast
+  PYTHONPATH="$O3D_PP" x "$PY_Q3" -m vpd.e3vs.mesh_collision smoke --split test --imports torch,gsplat
+}
+
 merged_dir() {  # TAG -> MERGE_BASE/START__TAG, only under the two job-local bases
   case $MERGE_BASE in
     /tmp/vpd_merged|/dev/shm/vpd_merged) echo "$MERGE_BASE/${START}__$1" ;;
@@ -376,7 +397,7 @@ evaluate() {  # TIER "MODE..." [ADAPTER_TAG]: one run.py session for the listed 
               --gsplat-probe "$RUN/gsplat_probe.json")
   [[ -n $LIMIT ]] && args+=(--limit "$LIMIT")
   [[ -n $tag ]] && args+=(--model-dir "$MERGE_BASE/${START}__$tag" --adapter-meta "$A/$tag/meta.json")
-  x "$PY_Q3" -m vpd.e3vs.run "${args[@]}"
+  PYTHONPATH="$O3D_PP" x "$PY_Q3" -m vpd.e3vs.run "${args[@]}"  # run.py drops O3D_DIR for its vLLM server
 }
 
 MODES_RAW="u"
@@ -402,6 +423,7 @@ vpd_node_facts "$RUN/node.txt"
 gsplat_env
 step guard guard          # a failure ends the job (set -e)
 step gsplat gsplat_setup  # a failure ends the job: no eval can render without gsplat
+step collider_smoke collider_smoke  # a failure ends the job: torch + gsplat + open3d and the test-scene mesh
 OK_0W=1
 OK_100=1
 step train_0W train 0W "$SFT/warmup20.jsonl" || { FAILS+=(train_0W); OK_0W=0; OK_100=0; }

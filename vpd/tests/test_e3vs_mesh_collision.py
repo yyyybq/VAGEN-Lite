@@ -201,13 +201,21 @@ def test_constants_and_job_paths():
 
 
 def test_jobs_append_the_open3d_dir():
-    """Only the two E3VS jobs put O3D_DIR on PYTHONPATH (appended, after the code tree), and both name the
-    module's path."""
+    """Only the two E3VS jobs use O3D_DIR (the module's path), appended after the code tree and only for the PY_Q3
+    calls that load colliders (not job-wide: no training, merge or vLLM server gets it); both run o3d-check."""
     out = re.search(r"^export VPD_OUT=(\S+)$", (JOBS / "common_env.sh").read_text(), re.M).group(1)
     assert Path(out) == paths.OUT
-    for job in ("e3vs_prep.sh", "e3vs_start.sh"):
+    calls = {"e3vs_prep.sh": ["-m vpd.e3vs.mesh_collision validate", "-m vpd.e3vs.bfs_demos", "-m vpd.e3vs.floors"],
+             "e3vs_start.sh": ["-m vpd.e3vs.mesh_collision smoke", "-m vpd.e3vs.run"]}
+    for job, want in calls.items():
         t = (JOBS / job).read_text()
-        assert "\nO3D_DIR=$VPD_OUT/envs/e3vs-o3d\n" in t and 'export PYTHONPATH="$PYTHONPATH:$O3D_DIR"' in t, job
+        assert "\nO3D_DIR=$VPD_OUT/envs/e3vs-o3d\nO3D_PP=\"$PYTHONPATH:$O3D_DIR\"\n" in t, job
+        assert not re.search(r"export PYTHONPATH=.*O3D", t), job
+        assert '"$PY' in t and "-m vpd.e3vs.mesh_collision o3d-check; then" in t, job
+        lines = [ln for ln in t.splitlines() if 'PYTHONPATH="$O3D_PP"' in ln and not ln.lstrip().startswith("#")]
+        joined = [ln + (t.splitlines()[i + 1] if ln.rstrip().endswith("\\") else "")
+                  for i, ln in enumerate(t.splitlines()) if ln in lines]
+        assert len(joined) == len(want) and all(any(w in j for j in joined) for w in want), (job, joined)
         assert "vpd.e3vs.occupancy" not in t, job
     assert not any("e3vs-o3d" in j.read_text() for j in sorted(JOBS.glob("*.sh")) if not j.name.startswith("e3vs_"))
 
