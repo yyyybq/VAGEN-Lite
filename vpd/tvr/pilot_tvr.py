@@ -1,6 +1,6 @@
 """TVR pilot orchestration (CONTRACT_wave2 sections 5.3.1, 7; DECISIONS G3, G10; mirrors vpd/walkerbench/pilot.py).
 
-    PY_EVAL -m vpd.tvr.pilot_tvr plan [--explore]   # --explore: the EXPLORATORY RL jobs (XJOBS) and the block budget
+    PY_EVAL -m vpd.tvr.pilot_tvr plan [--explore]   # --explore: the EXPLORATORY jobs (XJOBS) and the block budget
     PY_EVAL -m vpd.tvr.pilot_tvr prepare JOB [--pool zoetrope|h800|auto] [--new]
     PY_EVAL -m vpd.tvr.pilot_tvr submit JOB
     PY_EVAL -m vpd.tvr.pilot_tvr status [--explore]
@@ -11,7 +11,7 @@
   in-job helpers (pure; called by vpd/jobs/tvr_*.sh):
     ... pilot_tvr expect JOB --run RUN            # RUN/expect.json; exit 0 iff every expected item holds
     ... pilot_tvr smoke-verdict --smoke DIR       # DIR/smoke_verdict.json (mechanism only, never an SR)
-    ... pilot_tvr xsmoke-verdict --smoke DIR      # the explore smoke's DIR/smoke_verdict.json (mechanism only)
+    ... pilot_tvr xsmoke-verdict --smoke DIR [--job tvr-xsmoke-q3sg]  # an explore smoke's DIR/smoke_verdict.json
     ... pilot_tvr cal-decide --cal-root DIR       # DIR/cal_decision.json (EXPLORATORY, Q3B only, dev200 only)
     ... pilot_tvr guard JOB --run RUN             # the job's guard step (RUN/guard.json); exit 0 ok, 2 refused
     ... pilot_tvr cfg KEY [KEY ...]               # pilot_cfg values for the payload; exit 2 if one is None
@@ -59,7 +59,7 @@ Guards (prepare and submit; in-job again by `guard`, where the prereg's committe
 Shared parents: before vsco.prepare of ANY job, prepare creates OUT/tvr/runs, runs/explore/cal/Q3B, runs/smoke,
 runs/pilot and runs/pilot/<S> as the login user, so an as_root job never creates (and owns) them.
 
-EXPLORATORY RL starts (PREREG_TVR_PILOT.md section 17, row 2026-11-12; DECISIONS G18): EXPLORE_STARTS = (Q3RD,
+EXPLORATORY RL starts (PREREG_TVR_PILOT.md section 17, row 2026-11-12; DECISIONS G18): RL_STARTS = (Q3RD,
 Q3RS150) through the same recipe (seed 1001, tiers/v1, 0W warm-up, N_top, eval500, frozen protocol, the section-16
 est_high and timeout rules, as_root, zoetrope), outputs under OUT/tvr/runs/explore/rl/<S> (adapters/, evals/
 xrl__<S>__<tier>__<arm>, parity/, canary/), never runs/pilot.  Not gated: outside the decision table, A4 and the
@@ -81,6 +81,34 @@ spent - BLOCK_BASELINE_GPUH) + the est of the open ledger jobs + the new est_hig
 three numbers (RUN/prepared.json["block_budget"]); the round-200 check above applies too.  Merge parity in the
 explore evals is report only (DECISIONS G16 (1)): its json must exist for the served adapter; its pass is recorded,
 not judged (steps_check excuses merge_parity_<x> followed by merge_parity_<x>:report_only).
+
+EXPLORATORY third start Q3SG (genc0, registry code sft_q3genc0_e8; PREREG_TVR_PILOT.md section 17, row 2026-11-13;
+DECISIONS G20): EXPLORE_STARTS = RL_STARTS + Q3SG_STARTS.  Q3SG uses the same explore root (outputs under
+OUT/tvr/runs/explore/rl/Q3SG: adapters/, evals/xrl__Q3SG__<tier>__<arm>, parity/, canary/; "rl" is only the directory
+name), the same recipe, guards, est_high rules and block budget (BLOCK_BASELINE_GPUH 48.5136, BLOCK_CAP_GPUH 25.0)
+as the RL starts.  Its jobs (XJOBS; the RL jobs and their payloads are unchanged):
+    tvr-xsmoke-q3sg       as_root   tvr_xsmoke.sh Q3SG RUN (Q3SG only)            est_high 0.7 (constant, XEST_HIGH)
+    tvr-xtrain-q3sg       as_root   VPD_TVR_ROOT=explore/rl tvr_train.sh Q3SG RUN        est_high DERIVED (as train)
+    tvr-xeval-q3sg-top|low as_root  VPD_TVR_ROOT=explore/rl tvr_eval.sh Q3SG top|low RUN est_high DERIVED (as eval)
+Per-start rules (only the Q3SG jobs differ):
+  registration row: Q3RD / Q3RS150 need exactly one section-17 row of 2026-11-12 (XROW_NEEDLE), Q3SG exactly one of
+  2026-11-13 (Q3SG_ROW_NEEDLE).
+  trainer fingerprint: vpd/starts.json gained the Q3SG entry and no trainer byte changed, so the fingerprint of this
+  tree is Q3SG_TRAINER_SHA256 (119da3c84b8d), not the pilot's PILOT_TRAINER_SHA256 (0865dd75f1ee).  The Q3SG jobs
+  (prepare, submit, the in-job guard, xsmoke-verdict, expect, the xeval adapter checks) require code_sha256 starting
+  with Q3SG_TRAINER_PREFIX and the invariant: the 5 .py entries of code_files == TRAINER_PY_SHA256 (the pilot / RL
+  adapters' recorded shas) and vpd/starts.json without the Q3SG entry, re-serialised as json.dumps(table, indent=1)
+  + "\n", has the pilot's sha STARTS_JSON_SHA256_PILOT (an adapter's code_files: starts.json ==
+  STARTS_JSON_SHA256_Q3SG).  Every other job (pilot and RL) still requires recipe.trainer_code_sha256_prefix
+  0865dd75f1ee (pilot_cfg, unchanged), so on this tree they refuse to run.  Intended: the TVR pilot is closed and the
+  RL block is done; their adapters and results are unaffected.  x_adapter_check judges an explore adapter by its
+  start's registered trainer code (RL: the recipe prefix; Q3SG: the Q3SG prefix and the invariant), not by the
+  current tree, so compare_rl still validates the RL adapters.
+  smoke verdict: tvr-xtrain-q3sg / tvr-xeval-q3sg-* need the newest smoke_verdict.json under runs/explore/rl/smoke/
+  whose "starts" include Q3SG to be PASS (the RL starts: the newest tvr-xsmoke verdict, unchanged).
+tvr-xsmoke-q3sg est_high: one start ~1,815 s (XEST_HIGH's per-start figure with the calibration's slowest vLLM start
+and merge) + 300 + 180 s = 2,295 s = 0.64 h -> 0.7 GPU-h (rounded up to 0.1 h as for tvr-xsmoke's 1.2): outer 2220 s,
+soft 2040 s, kill 60 s.
 """
 
 from __future__ import annotations
@@ -145,19 +173,40 @@ DATA_FILES = {  # pilot_cfg data.<key> -> the file it is the sha256 of (relative
     "floors_eval500_sha256": "floors/floors_eval500.json"}
 DROP_REASONS = ("move_failed", "pose_mismatch", "no_stop", "stop_not_last", "final_not_target")
 
-# EXPLORATORY RL starts (PREREG section 17, row 2026-11-12; DECISIONS G18); see the module docstring
-EXPLORE_STARTS = ("Q3RD", "Q3RS150")
+# EXPLORATORY starts (PREREG section 17, rows 2026-11-12 and 2026-11-13; DECISIONS G18, G20); see the module docstring
+RL_STARTS = ("Q3RD", "Q3RS150")   # the RL starts (row 2026-11-12)
+Q3SG_STARTS = ("Q3SG",)           # the third explore start, genc0 (row 2026-11-13)
+EXPLORE_STARTS = RL_STARTS + Q3SG_STARTS
 XRL_ROOT = "explore/rl"      # the explore payloads' VPD_TVR_ROOT: outputs under OUT/tvr/runs/explore/rl/<S>
 XRL_PREFIX = "xrl"           # explore eval dirs <root>/<S>/evals/xrl__<S>__<tier>__<arm>
 HARNESS_SHA256_PREFIX = "64edd575f36b"   # run_tvr.code_sha256() of the pilot evals (the registered harness)
 XROW_DATE = "2026-11-12"
 XROW_NEEDLE = "两个 RL 起点按试点完全相同的配方训练和评测"
+Q3SG_ROW_DATE = "2026-11-13"
+Q3SG_ROW_NEEDLE = "第三个探索起点 Q3SG 按试点完全相同的配方训练和评测"
 BLOCK_BASELINE_GPUH = 48.5136   # ledger total spent when this block started (DECISIONS G18)
 BLOCK_CAP_GPUH = 25.0           # the user's cap of this block (DECISIONS G18): above it, stop and ask
+# the trainer fingerprint per start (row 2026-11-13; DECISIONS G20).  n2_train_vpd.CODE_FILES = the 5 .py files below
+# + vpd/starts.json; the pilot and RL adapters recorded PILOT_TRAINER_SHA256 (meta.code_files: TRAINER_PY_SHA256 and
+# STARTS_JSON_SHA256_PILOT, e.g. OUT/tvr/runs/explore/rl/Q3RD/adapters/0W/meta.json); starts.json + the Q3SG entry
+# (STARTS_JSON_SHA256_Q3SG) gives Q3SG_TRAINER_SHA256
+PILOT_TRAINER_SHA256 = "0865dd75f1ee51b889cce3c5b9f9e8d4df62fd4a70343532ea47eb9120e12a76"
+Q3SG_TRAINER_SHA256 = "119da3c84b8dfd79aa22b2c7fd5c5641a1cf390b47deae3e8e852268dc46f4bf"
+Q3SG_TRAINER_PREFIX = Q3SG_TRAINER_SHA256[:12]
+STARTS_JSON = "vpd/starts.json"
+STARTS_JSON_SHA256_PILOT = "86bb356e61d64f9f15ab8a8e25bc334eb3e6eaf37dfaa369bbc2243378d39cfb"
+STARTS_JSON_SHA256_Q3SG = "8cd21cfa60769614cd86bcd18c42ca4d8e4e1cdf6ba6b1db589cda65225f9cbc"
+TRAINER_PY_SHA256 = {
+    "vpd/train/n2_train_vpd.py": "6c2b4056b337b0bcabb1d731976bec4d31f08baafe2ba8e0f0d841c337be6a97",
+    "downstream/train/lora.py": "54e9a52b1cab63d23902d53dc30dacd11a44c62d3be6ba6a46af4cf03d4afce4",
+    "vpd/starts.py": "727701fc58771fba9144f6f80910091de72756f2156769a59e8c3e1e7c982fcd",
+    "vpd/paths.py": "4d16d91dd789d5d726341af0ef358e99ea3c4f798aff1724508ea8b49df1e91e",
+    "vpd/walkerbench/history.py": "178c0b889fa78383bf204cd0d3152365fde6d4cdd9c4f148fe5eb79dab563af8"}
 # tvr-xsmoke (both starts, one job): per start ~1,290 s typical (bf16 load + save 150, dry 45, HF parity 45, raw
 # session 330, train 110, merge 150, merge parity 160, merged smoke4 session 300; tvr-msmoke / tvr-cal step times),
-# ~1,815 s with the calibration's slowest vLLM start (505 s) and merge (186 s): 2 x 1,815 s + 300 + 180 -> 1.2 GPU-h
-XEST_HIGH = {"tvr-xsmoke": 1.2}
+# ~1,815 s with the calibration's slowest vLLM start (505 s) and merge (186 s): 2 x 1,815 s + 300 + 180 -> 1.2 GPU-h.
+# tvr-xsmoke-q3sg (Q3SG only): 1 x 1,815 s + 300 + 180 = 2,295 s = 0.64 h -> 0.7 GPU-h (rounded up to 0.1 h)
+XEST_HIGH = {"tvr-xsmoke": 1.2, "tvr-xsmoke-q3sg": 0.7}
 XSMOKE_LIMIT, XSMOKE_EPOCHS = 16, 1   # the smoke trains the first 16 0W demos for one epoch (the trainer has no step
 XSMOKE_STEPS = 2                      # cap): ceil(16 x 1 / 8) = 2 optimizer steps
 XSMOKE_RAW_SET, XSMOKE_MERGED_SET = "smoke8", "smoke4"
@@ -305,22 +354,28 @@ JOBS = _jobs()
 
 
 def _xjobs() -> Dict[str, dict]:
-    """The EXPLORATORY RL jobs (DECISIONS G18); "base" = the pilot_cfg REQUIRED entry missing() checks."""
-    j = {"tvr-xsmoke": {"name": "vpd-tvr-xsmoke", "script": "tvr_xsmoke.sh", "as_root": True, "kind": "xsmoke",
-                        "start": None, "part": None, "base": "tvr-msmoke"}}
-    for s in EXPLORE_STARTS:
-        sl = s.lower()
-        j[f"tvr-xtrain-{sl}"] = {"name": f"vpd-tvr-xtrain-{sl}", "script": "tvr_train.sh", "as_root": True,
-                                 "kind": "xtrain", "start": s, "part": None, "base": "tvr-train"}
-        for part in ("top", "low"):
-            j[f"tvr-xeval-{sl}-{part}"] = {"name": f"vpd-tvr-xeval-{sl}-{part}", "script": "tvr_eval.sh",
-                                           "as_root": True, "kind": "xeval", "start": s, "part": part,
-                                           "base": "tvr-eval"}
+    """The EXPLORATORY jobs (DECISIONS G18, G20); "base" = the pilot_cfg REQUIRED entry missing() checks; "starts" =
+    the explore starts the job covers; "xlist" = tvr_xsmoke.sh's start-list argument (None: its default, the RL
+    starts)."""
+    j = {}
+    for smoke, starts, xlist in (("tvr-xsmoke", RL_STARTS, None), ("tvr-xsmoke-q3sg", Q3SG_STARTS, "Q3SG")):
+        j[smoke] = {"name": f"vpd-{smoke}", "script": "tvr_xsmoke.sh", "as_root": True, "kind": "xsmoke",
+                    "start": None, "part": None, "base": "tvr-msmoke", "starts": starts, "xlist": xlist}
+        for s in starts:
+            sl = s.lower()
+            j[f"tvr-xtrain-{sl}"] = {"name": f"vpd-tvr-xtrain-{sl}", "script": "tvr_train.sh", "as_root": True,
+                                     "kind": "xtrain", "start": s, "part": None, "base": "tvr-train", "starts": (s,),
+                                     "xlist": None}
+            for part in ("top", "low"):
+                j[f"tvr-xeval-{sl}-{part}"] = {"name": f"vpd-tvr-xeval-{sl}-{part}", "script": "tvr_eval.sh",
+                                               "as_root": True, "kind": "xeval", "start": s, "part": part,
+                                               "base": "tvr-eval", "starts": (s,), "xlist": None}
     return j
 
 
 XJOBS = _xjobs()
-KILL_S["tvr-xsmoke"] = 60  # a smoke (PREREG section 16: kill window 60 s for data and smoke jobs)
+# the smokes (PREREG section 16: kill window 60 s for data and smoke jobs)
+KILL_S.update({j: 60 for j, spec in XJOBS.items() if spec["kind"] == "xsmoke"})
 
 
 def job_spec(job: str) -> dict:
@@ -355,6 +410,8 @@ def payload_for(job: str, run, est_high: float, cfg=None) -> List[str]:
     spec = job_spec(job)
     t = job_timeouts(job, est_high, cfg)
     args = []
+    if spec.get("xlist"):  # tvr_xsmoke.sh's start list (tvr-xsmoke: none, the script's default)
+        args.append(spec["xlist"])
     if spec["start"]:
         args.append(spec["start"])
     if spec["part"]:
@@ -580,9 +637,89 @@ def trainer_prefix() -> str:
 
 
 def trainer_problems(cfg=None) -> List[str]:
+    """The pilot's and the RL starts' rule: this tree's trainer code_sha256 starts with
+    recipe.trainer_code_sha256_prefix (0865dd75f1ee; the Q3SG jobs use q3sg_trainer_problems instead)."""
     want = pilot_cfg.get("recipe.trainer_code_sha256_prefix", cfg)
     got = trainer_prefix()
     return [] if got.startswith(want) else [f"trainer code_sha256 {got[:12]} != frozen prefix {want}"]
+
+
+# --- the Q3SG trainer rule (PREREG section 17, row 2026-11-13; DECISIONS G20) ------------------------------------
+
+def trainer_fingerprint(root: Path = None) -> dict:
+    """n2_train_vpd.code_fingerprint of ROOT (default: the trainer's own tree, as the trainer records it)."""
+    from vpd.train import n2_train_vpd as T
+
+    return T.code_fingerprint(T.WORKTREE if root is None else Path(root))
+
+
+def starts_json_without(path: Path, drop=Q3SG_STARTS) -> bytes:
+    """starts.json (PATH) without the DROP entries, re-serialised as json.dumps(table, indent=1) + "\\n" (the
+    pilot's starts.json bytes when DROP = the Q3SG entry; the key order of the file is kept)."""
+    table = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(table, dict):
+        raise ValueError(f"{path}: not a json object")
+    return (json.dumps({k: v for k, v in table.items() if k not in drop}, indent=1) + "\n").encode()
+
+
+def code_files_problems(files, starts_sha256: str = STARTS_JSON_SHA256_Q3SG) -> List[str]:
+    """A trainer fingerprint's code_files (an adapter's meta.code_files) under the Q3SG invariant: exactly the 6
+    CODE_FILES, the 5 .py shas == TRAINER_PY_SHA256 (the pilot / RL adapters' records), starts.json == starts_sha256."""
+    if not isinstance(files, dict):
+        return [f"code_files {type(files).__name__}, not the trainer's per-file shas"]
+    bad = [f"code_files {rel} {str(files.get(rel))[:12]} != the pilot's {want[:12]}"
+           for rel, want in TRAINER_PY_SHA256.items() if files.get(rel) != want]
+    if files.get(STARTS_JSON) != starts_sha256:
+        bad.append(f"code_files {STARTS_JSON} {str(files.get(STARTS_JSON))[:12]} != {starts_sha256[:12]}")
+    other = sorted(set(files) - set(TRAINER_PY_SHA256) - {STARTS_JSON})
+    if other:
+        bad.append(f"code_files has other files {other}")
+    return bad
+
+
+def q3sg_trainer_problems(fp: dict = None, root: Path = None) -> List[str]:
+    """The Q3SG jobs' trainer rule on this tree (ROOT: default the trainer's own tree): code_sha256 starts with
+    Q3SG_TRAINER_PREFIX; code_files_problems(code_files) == []; vpd/starts.json without the Q3SG entry, re-serialised,
+    has the pilot's sha STARTS_JSON_SHA256_PILOT ("5 个 .py 文件 sha 不变、starts.json 只多这一条")."""
+    from vpd.train import n2_train_vpd as T
+
+    root = Path(T.WORKTREE if root is None else root)
+    fp = trainer_fingerprint(root) if fp is None else fp
+    got = str(fp.get("code_sha256"))
+    bad = [] if got.startswith(Q3SG_TRAINER_PREFIX) else [
+        f"trainer code_sha256 {got[:12]} != the Q3SG prefix {Q3SG_TRAINER_PREFIX} (PREREG section 17, 2026-11-13)"]
+    bad += [f"trainer {b}" for b in code_files_problems(fp.get("code_files"))]
+    try:
+        old = hashlib.sha256(starts_json_without(root / STARTS_JSON)).hexdigest()
+    except (OSError, ValueError) as e:
+        bad.append(f"{root / STARTS_JSON}: unreadable ({e})")
+    else:
+        if old != STARTS_JSON_SHA256_PILOT:
+            bad.append(f"{root / STARTS_JSON} without {list(Q3SG_STARTS)} re-serialised: sha256 {old[:12]} != the "
+                       f"pilot's {STARTS_JSON_SHA256_PILOT[:12]} (starts.json changed beyond the Q3SG entry)")
+    return bad
+
+
+def x_code_problems(s: str, meta: dict, cfg=None) -> List[str]:
+    """An explore adapter's (or the explore smoke's) recorded trainer code, by its start's registered rule: Q3SG
+    code_sha256 starting with Q3SG_TRAINER_PREFIX and code_files_problems(meta.code_files) == []; the RL starts
+    code_sha256 starting with recipe.trainer_code_sha256_prefix (0865dd75f1ee)."""
+    got = str((meta or {}).get("code_sha256") or "")
+    if s in Q3SG_STARTS:
+        bad = [] if got.startswith(Q3SG_TRAINER_PREFIX) else [
+            f"trained with code {got[:12] or None}, not the Q3SG prefix {Q3SG_TRAINER_PREFIX}"]
+        return bad + code_files_problems((meta or {}).get("code_files"))
+    want = pilot_cfg.get("recipe.trainer_code_sha256_prefix", cfg)
+    return [] if want and got.startswith(want) else [f"trained with code {got[:12] or None}, not the registered "
+                                                     f"prefix {want}"]
+
+
+def x_trainer_problems(job: str, cfg=None) -> List[str]:
+    """An explore job's trainer rule on this tree: the Q3SG jobs q3sg_trainer_problems(); the RL jobs
+    trainer_problems(cfg) (0865dd75f1ee, so they refuse on a tree whose starts.json has the Q3SG entry)."""
+    if set(XJOBS[job]["starts"]) & set(Q3SG_STARTS):
+        return q3sg_trainer_problems()
+    return trainer_problems(cfg)
 
 
 def train_tiers(start: str, cfg=None) -> List[Tuple[str, Optional[str]]]:
@@ -951,7 +1088,8 @@ def plan(L: Layout = None, cfg=None, out=None, explore: bool = False) -> dict:
     p = lambda *a: print(*a, file=out)  # noqa: E731
     if explore:
         p(f"VPD TVR EXPLORATORY RL plan ({utc()}; PREREG section 17, {XROW_DATE}; DECISIONS G18); starts "
-          f"{list(EXPLORE_STARTS)}, outputs {L.xroot}; n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
+          f"{list(EXPLORE_STARTS)} (Q3SG: row {Q3SG_ROW_DATE}, DECISIONS G20), outputs {L.xroot}; n_top "
+          f"{pilot_cfg.get('tiers.n_top', cfg)!r}")
     else:
         p(f"VPD TVR pilot plan ({utc()}); n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
     rows = {}
@@ -1234,7 +1372,7 @@ def guard(job: str, run: Path, L: Layout = None, cfg=None) -> dict:
     bad = prerequisites(job, L, cfg, in_job=True)
     facts = {}
     if job in XJOBS:
-        facts.update(x_facts())
+        facts.update(x_facts(job))
     if job_spec(job)["kind"] == "data":
         repo = paths.TVR_REPO
         for rel, want in pilot_cfg.get("tvrbench.files_sha256", cfg).items():
@@ -1484,20 +1622,31 @@ def x_start_problems(s: str) -> List[str]:
     return bad
 
 
-def xrow(text: str) -> Optional[str]:
-    """The single section-17 row of 2026-11-12 registering the explore RL starts (None unless exactly one)."""
-    rows = [ln for ln in text.splitlines() if ln.startswith(f"| {XROW_DATE} |") and XROW_NEEDLE in ln]
+def xrow(text: str, date: str = XROW_DATE, needle: str = XROW_NEEDLE) -> Optional[str]:
+    """The single section-17 row of DATE containing NEEDLE (None unless exactly one); default the 2026-11-12 row
+    registering the explore RL starts."""
+    rows = [ln for ln in text.splitlines() if ln.startswith(f"| {date} |") and needle in ln]
     return rows[0] if len(rows) == 1 else None
 
 
-def xrow_problems() -> List[str]:
+def xrow_key(s: str) -> Tuple[str, str]:
+    """(date, needle) of the section-17 row registering explore start S: Q3SG 2026-11-13, the RL starts 2026-11-12."""
+    return (Q3SG_ROW_DATE, Q3SG_ROW_NEEDLE) if s in Q3SG_STARTS else (XROW_DATE, XROW_NEEDLE)
+
+
+def xrow_problems(starts=RL_STARTS) -> List[str]:
+    """Exactly one registration row per start of STARTS (default the RL starts: the 2026-11-12 row)."""
     try:
         text = prereg_path().read_text(encoding="utf-8")
     except OSError:
         text = ""
-    return [] if xrow(text) is not None else [
-        f"{PREREG} has no single section-17 row '| {XROW_DATE} | ... {XROW_NEEDLE} ...' (the registration of the "
-        "explore RL starts)"]
+    bad = []
+    for date, needle in dict.fromkeys(xrow_key(s) for s in starts):
+        if xrow(text, date, needle) is None:
+            what = "the third explore start Q3SG" if date == Q3SG_ROW_DATE else "the explore RL starts"
+            bad.append(f"{PREREG} has no single section-17 row '| {date} | ... {needle} ...' (the registration of "
+                       f"{what})")
+    return bad
 
 
 def tier_manifest_files(L: Layout) -> dict:
@@ -1519,15 +1668,30 @@ def tier_file_problems(L: Layout, names) -> List[str]:
 
 def x_adapter_check(s: str, tier: str, init: Optional[str], L: Layout, cfg=None,
                     adapter_root: Optional[Path] = None) -> Tuple[int, str]:
-    """adapter_check of an explore adapter (complete, current trainer code, from INIT/adapter.pt as it is now) plus its
-    meta: start, seed 1001, phase, data_sha256 == the tiers manifest's (L.tiers); 0W from the fresh LoRA, 100 / TOP
-    from this start's 0W.  Adapters under adapter_root/<S>/adapters (default L.xroot).  (0, ok) or (rc, why)."""
+    """An explore adapter: adapter_check's rules (complete; from INIT/adapter.pt as it is now) with the trainer code of
+    its start's registered rule (x_code_problems: RL the recipe prefix 0865dd75f1ee; Q3SG the Q3SG prefix and the
+    code_files invariant; DECISIONS G20) instead of this tree's current code, plus its meta: start, seed 1001, phase,
+    data_sha256 == the tiers manifest's (L.tiers); 0W from the fresh LoRA, 100 / TOP from this start's 0W.  Adapters
+    under adapter_root/<S>/adapters (default L.xroot).  (0, ok) or (rc, why): 1 missing / unfinished / other init,
+    3 other trainer code (adapter_check's codes)."""
     ar = Path(adapter_root) if adapter_root is not None else L.xroot
     d = ar / s / "adapters" / tier
-    rc, msg = adapter_check(d, None if init is None else ar / s / "adapters" / init)
-    if rc != 0:
-        return rc, msg
-    m = read_json(d / "meta.json") or {}
+    m = read_json(d / "meta.json")
+    if m is None or not (d / "adapter.pt").is_file():
+        return 1, f"{d}: no adapter.pt + meta.json"
+    steps, planned = m.get("optimizer_steps"), m.get("optimizer_steps_planned")
+    if not steps or (planned is not None and steps != planned):
+        return 1, f"{d}: unfinished ({steps} of {planned} optimizer steps)"
+    code = x_code_problems(s, m, cfg)
+    if code:
+        return 3, f"{d}: " + "; ".join(code)
+    if init is not None:
+        ip = ar / s / "adapters" / init / "adapter.pt"
+        want = sha256_file(ip) if ip.is_file() else None
+        got = (m.get("init_adapter") or {}).get("sha256")
+        if want is None or got != want:
+            return 1, f"{d}: started from init adapter {got}, {ip} is now {want}: retrain"
+    msg = f"{d}: complete ({steps} steps, code {str(m.get('code_sha256'))[:12]})"
     want = {"start": s, "seed": int(pilot_cfg.SEED), "phase": PHASE[tier],
             "data_sha256": tier_manifest_files(L).get(TIER_FILE[tier])}
     bad = [f"meta {k} {m.get(k)!r} != {v!r}" for k, v in want.items() if m.get(k) != v or v is None]
@@ -1557,8 +1721,25 @@ def xsmoke_verdicts(L: Layout = None) -> List[Path]:
                    and (p / "smoke_verdict.json").is_file()), key=lambda p: p.parent.name)
 
 
-def latest_xverdict(L: Layout = None) -> Tuple[Optional[Path], Optional[dict]]:
-    vs = xsmoke_verdicts(L)
+def xsmoke_verdicts_with(s: str, L: Layout = None) -> List[Path]:
+    """Every smoke_verdict.json under runs/explore/rl/smoke/<RUN>/ (any job's RUN name) whose "starts" include S,
+    oldest first (by the RUN name's stamp, then name)."""
+    L = L or LAYOUT
+    if not L.xsmoke_root.is_dir():
+        return []
+    out = []
+    for p in L.xsmoke_root.iterdir():
+        m = STAMP_RE.match(p.name)
+        v = read_json(p / "smoke_verdict.json") if m else None
+        if isinstance(v, dict) and isinstance(v.get("starts"), list) and s in v["starts"]:
+            out.append((m.group("stamp"), p.name, p / "smoke_verdict.json"))
+    return [x[2] for x in sorted(out)]
+
+
+def latest_xverdict(L: Layout = None, s: Optional[str] = None) -> Tuple[Optional[Path], Optional[dict]]:
+    """The explore smoke verdict an xtrain / xeval job of start S needs: Q3SG the newest one whose "starts" include
+    Q3SG (xsmoke_verdicts_with); otherwise (the RL starts) the newest tvr-xsmoke verdict."""
+    vs = xsmoke_verdicts_with(s, L) if s in Q3SG_STARTS else xsmoke_verdicts(L)
     return (vs[-1], read_json(vs[-1])) if vs else (None, None)
 
 
@@ -1569,12 +1750,12 @@ def x_prerequisites(job: str, L: Layout = None, cfg=None, in_job: bool = False) 
     kind, s = spec["kind"], spec["start"]
     bad = [f"pilot_cfg value missing for {job}: {k}" for k in pilot_cfg.missing(spec["base"], cfg)]
     bad += payload_constant_problems(cfg)
-    bad += trainer_problems(cfg)
+    bad += x_trainer_problems(job, cfg)
     bad += harness_problems()
-    for st in ([s] if s else list(EXPLORE_STARTS)):
+    for st in spec["starts"]:
         bad += x_start_problems(st)
     bad += prereg_problems(in_job, cfg)
-    bad += xrow_problems()
+    bad += xrow_problems(spec["starts"])
     bad += data_problems(L, cfg)
     bad += n_top_problems(L, cfg)
     if kind in ("xsmoke", "xtrain"):
@@ -1586,9 +1767,10 @@ def x_prerequisites(job: str, L: Layout = None, cfg=None, in_job: bool = False) 
     else:
         bad += tier_file_problems(L, [TIER_FILE[t] for t, _ in train_tiers(s, cfg)])
     if kind in ("xtrain", "xeval"):
-        vp, v = latest_xverdict(L)
+        vp, v = latest_xverdict(L, s)
         if v is None:
-            bad.append(f"no smoke_verdict.json under {L.xsmoke_root} (job tvr-xsmoke)")
+            bad.append(f"no smoke_verdict.json under {L.xsmoke_root} " + (
+                f"whose starts include {s} (job tvr-xsmoke-{s.lower()})" if s in Q3SG_STARTS else "(job tvr-xsmoke)"))
         elif v.get("verdict") != "PASS":
             bad.append(f"{vp}: verdict {v.get('verdict')!r}, not PASS ({', '.join(v.get('failed') or [])})")
     if kind == "xeval":
@@ -1619,16 +1801,23 @@ def make_x_shared_parents(L: Layout) -> List[str]:
     return out
 
 
-def x_facts() -> dict:
-    from vpd.train import n2_train_vpd as T
-
+def x_facts(job: str = "tvr-xsmoke") -> dict:
+    """The facts an explore job's prepared.json / guard.json record: the harness and trainer fingerprints, the sha256
+    of the job's registration row; the Q3SG jobs also the trainer rule and its problems (q3sg_trainer_problems)."""
+    starts = XJOBS[job]["starts"]
+    date, needle = xrow_key(starts[0])
     try:
-        row = xrow(prereg_path().read_text(encoding="utf-8"))
+        row = xrow(prereg_path().read_text(encoding="utf-8"), date, needle)
     except OSError:
         row = None
-    return {"explore": True, "harness_code_sha256": harness_sha256(),
-            "trainer_code_sha256": T.code_fingerprint()["code_sha256"],
-            "prereg_row_sha256": None if row is None else hashlib.sha256(row.encode()).hexdigest()}
+    fp = trainer_fingerprint()
+    out = {"explore": True, "harness_code_sha256": harness_sha256(), "trainer_code_sha256": fp["code_sha256"],
+           "prereg_row_sha256": None if row is None else hashlib.sha256(row.encode()).hexdigest()}
+    if set(starts) & set(Q3SG_STARTS):
+        out.update(prereg_row_date=date, trainer_rule=f"Q3SG: prefix {Q3SG_TRAINER_PREFIX}, 5 .py shas == the "
+                   "pilot's, starts.json == the pilot's + the Q3SG entry",
+                   trainer_code_files=fp.get("code_files"), trainer_problems=q3sg_trainer_problems(fp))
+    return out
 
 
 def _budget_checks(job: str, hi: float, events, cfg) -> Tuple[dict, dict]:
@@ -1681,9 +1870,9 @@ def x_prepare(job: str, pool: str = "zoetrope", new: bool = False, now=None, L: 
     payload = payload_for(job, run, hi, cfg)
     info = {"job": job, "utc": utc(), "exploratory": True, "est": est, "est_high": hi, "timeouts": t,
             "payload": payload, "round_budget": rb, "block_budget": bb, "shared_parents": parents,
-            "as_root": spec["as_root"], "pool": pool, "prereg": prereg_state(), "facts": x_facts()}
+            "as_root": spec["as_root"], "pool": pool, "prereg": prereg_state(), "facts": x_facts(job)}
     if spec["kind"] in ("xtrain", "xeval"):
-        vp, v = latest_xverdict(L)
+        vp, v = latest_xverdict(L, spec["start"])
         info["smoke_verdict"] = {"path": str(vp), "sha256": sha256_file(vp), "verdict": v.get("verdict")}
     if L.cal_decision.is_file():
         info["cal_decision"] = {"path": str(L.cal_decision), "sha256": sha256_file(L.cal_decision)}
@@ -1719,7 +1908,7 @@ def x_required_steps(job: str, cfg=None) -> List[str]:
     kind, s = spec["kind"], spec["start"]
     if kind == "xsmoke":
         out = ["guard", "prereg_committed", "merge_disk"]
-        for st in EXPLORE_STARTS:
+        for st in spec["starts"]:
             out += [f"{x}_{st}" for x in ("load", "dry", "hfparity", "session", "train", "merge", "merge_parity",
                                           "eval")]
         return out + ["verdict"]
@@ -1751,8 +1940,10 @@ def x_expect_items(job: str, run: Path, L: Layout, cfg=None, files_only: bool = 
     out: List[dict] = []
     if kind == "xsmoke":
         v = read_json(L.xsmoke_dir(run) / "smoke_verdict.json")
-        out.append(_chk("smoke_verdict", bool(v) and v.get("verdict") == "PASS",
-                        None if not v else {"verdict": v.get("verdict"), "failed": v.get("failed")},
+        out.append(_chk("smoke_verdict", bool(v) and v.get("verdict") == "PASS"
+                        and v.get("starts") == list(spec["starts"]),
+                        None if not v else {"verdict": v.get("verdict"), "failed": v.get("failed"),
+                                            "starts": v.get("starts")},
                         L.xsmoke_dir(run) / "smoke_verdict.json"))
     elif kind == "xtrain":
         for tier, init in train_tiers(s, cfg):
@@ -1850,23 +2041,27 @@ def _finite(x) -> bool:
     return _num(x) is not None
 
 
-def xsmoke_verdict(smoke: Path, L: Layout = None, cfg=None) -> dict:
-    """SMOKE/smoke_verdict.json of tvr-xsmoke (EXPLORATORY; DECISIONS G18): PASS iff every mechanism check passes.
-    Per explore start S (SMOKE/S/): load (the bf16 conversion of the trainer's loader, load/load.json), dry run (grid
-    [1,22,40], 222 tokens per image), HF parity, vLLM prompt parity and the pilot smoke's session checks on the raw
-    start (smoke8: c, u, blind), the smoke training (meta: XSMOKE_STEPS optimizer steps of the first XSMOKE_LIMIT 0W
-    demos, seed 1001, current trainer code, the manifest's 0W sha), the merge (merge_parity's record of
+def xsmoke_verdict(smoke: Path, L: Layout = None, cfg=None, job: str = "tvr-xsmoke") -> dict:
+    """SMOKE/smoke_verdict.json of an explore smoke JOB (tvr-xsmoke: the RL starts; tvr-xsmoke-q3sg: Q3SG; EXPLORATORY;
+    DECISIONS G18, G20): PASS iff every mechanism check passes.
+    Per explore start S of the job (SMOKE/S/): load (the bf16 conversion of the trainer's loader, load/load.json), dry
+    run (grid [1,22,40], 222 tokens per image), HF parity, vLLM prompt parity and the pilot smoke's session checks on
+    the raw start (smoke8: c, u, blind), the smoke training (meta: XSMOKE_STEPS optimizer steps of the first
+    XSMOKE_LIMIT 0W demos, seed 1001, the start's registered trainer code (x_code_problems: RL the recipe prefix;
+    Q3SG the Q3SG prefix and the code_files invariant), the manifest's 0W sha), the merge (merge_parity's record of
     vpd_merge.json: every wrapped module merged, from this adapter), merge parity (report only: it ran on this
     adapter; its pass is recorded, never judged), and the merged smoke4 c session (vLLM prompt parity, session
     checks, the served adapter).  Never reads a success / SR field (run_tvr --mechanism-only also nulls them)."""
     L = L or LAYOUT
     smoke = Path(smoke)
+    if job not in XJOBS or XJOBS[job]["kind"] != "xsmoke":
+        raise Refused(f"{job!r} is not an explore smoke job")
+    starts = XJOBS[job]["starts"]
     checks, measured = [], {}
     raw_n = len(pilot_cfg.CATEGORIES) * int(pilot_cfg.get("dev.smoke_per_category", cfg))
     merged_n = SHAKE_N
-    prefix = pilot_cfg.get("recipe.trainer_code_sha256_prefix", cfg)
     w0 = tier_manifest_files(L).get(TIER_FILE["0W"])
-    for s in EXPLORE_STARTS:
+    for s in starts:
         sd = smoke / s
         ld = read_json(sd / "load" / "load.json")
         checks.append(_chk(f"load_{s}", bool(ld) and ld.get("ok") is True, None if not ld else {
@@ -1892,12 +2087,12 @@ def xsmoke_verdict(smoke: Path, L: Layout = None, cfg=None) -> dict:
                 "optimizer_steps_planned": XSMOKE_STEPS, "conversations": XSMOKE_LIMIT, "epochs": XSMOKE_EPOCHS,
                 "data_sha256": w0, "attn": "sdpa", "init_adapter": None}
         got = {k: (m or {}).get(k) for k in want}
-        tok = bool(m) and sha is not None and got == want and w0 is not None and str(
-            (m or {}).get("code_sha256") or "").startswith(prefix) and _finite((m or {}).get("loss_first")) and \
-            _finite((m or {}).get("loss_last"))
+        code = x_code_problems(s, m or {}, cfg)
+        tok = bool(m) and sha is not None and got == want and w0 is not None and not code and _finite(
+            (m or {}).get("loss_first")) and _finite((m or {}).get("loss_last"))
         checks.append(_chk(f"train_{s}", tok, dict(got, adapter_sha256=sha, code_sha256=str(
-            (m or {}).get("code_sha256"))[:12], loss_finite=bool(m) and _finite(m.get("loss_first"))
-            and _finite(m.get("loss_last")))))
+            (m or {}).get("code_sha256"))[:12], code_problems=code, loss_finite=bool(m) and _finite(
+                m.get("loss_first")) and _finite(m.get("loss_last")))))
         pj = sd / "parity" / "merge_0W.json"
         pr = read_json(pj) or {}
         mg = pr.get("merged") if isinstance(pr.get("merged"), dict) else {}
@@ -1922,8 +2117,8 @@ def xsmoke_verdict(smoke: Path, L: Layout = None, cfg=None) -> dict:
                            {"served_adapter_sha256": served, "adapter_sha256": sha}))
         measured[s] = {"raw": rinfo["measured"], "merged": minfo["measured"]}
     failed = [c["name"] for c in checks if not c["ok"]]
-    v = {"schema": "vpd.tvr.xsmoke_verdict/1", "exploratory": True, "utc": utc(), "smoke": str(smoke),
-         "starts": list(EXPLORE_STARTS), "verdict": "PASS" if not failed else "FAIL", "failed": failed,
+    v = {"schema": "vpd.tvr.xsmoke_verdict/1", "exploratory": True, "utc": utc(), "smoke": str(smoke), "job": job,
+         "starts": list(starts), "verdict": "PASS" if not failed else "FAIL", "failed": failed,
          "checks": checks, "measured": measured,
          "note": "mechanism only: no success rate is read or reported; merge parity is reported, not judged"}
     write_json(smoke / "smoke_verdict.json", v)
@@ -1936,7 +2131,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     all_jobs = sorted(JOBS) + sorted(XJOBS)  # the explore jobs (DECISIONS G18) after the pilot's
-    sub.add_parser("plan").add_argument("--explore", action="store_true", help="the EXPLORATORY RL jobs (XJOBS)")
+    sub.add_parser("plan").add_argument("--explore", action="store_true", help="the EXPLORATORY jobs (XJOBS)")
     p = sub.add_parser("prepare")
     p.add_argument("job", choices=all_jobs)
     p.add_argument("--pool", default="zoetrope", choices=("zoetrope", "h800", "auto"))
@@ -1957,6 +2152,8 @@ def main(argv=None) -> int:
     p.add_argument("--smoke", type=Path, required=True)
     p = sub.add_parser("xsmoke-verdict")
     p.add_argument("--smoke", type=Path, required=True)
+    p.add_argument("--job", default="tvr-xsmoke", choices=[j for j, s in XJOBS.items() if s["kind"] == "xsmoke"],
+                   help="the explore smoke job (default tvr-xsmoke: the RL starts)")
     p = sub.add_parser("cal-decide")
     p.add_argument("--cal-root", type=Path, required=True)
     p.add_argument("--floors", type=Path, default=None, help="default OUT/tvr/floors/floors_dev200.json")
@@ -2004,7 +2201,7 @@ def main(argv=None) -> int:
             print(json.dumps({"verdict": v["verdict"], "failed": v["failed"]}))
             return 0 if v["verdict"] == "PASS" else 1
         elif args.cmd == "xsmoke-verdict":
-            v = xsmoke_verdict(args.smoke)
+            v = xsmoke_verdict(args.smoke, job=args.job)
             print(json.dumps({"verdict": v["verdict"], "failed": v["failed"]}))
             return 0 if v["verdict"] == "PASS" else 1
         elif args.cmd == "cal-decide":
