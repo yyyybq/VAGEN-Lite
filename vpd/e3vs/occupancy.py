@@ -1,5 +1,9 @@
 """E3VS collision model: a per-scene voxel occupancy grid built from rendered splat depth (PREREG section 5).
 
+SUPERSEDED (PREREG_E3VS_PILOT section 16, user 2026-11-12): its validation failed (DECISIONS G19b / G19c), and the
+pilot now uses the official ScanNet++ mesh + Open3D ray casting, vpd.e3vs.mesh_collision.  This module stays in
+the tree for the record (the J5 grids under OUT/e3vs/occ/); the prep and start jobs no longer use it.
+
 The official benchmark ray-casts the ScanNet++ mesh (eval/metrics.py: a move collides when the ray from the old
 to the new position hits the mesh at tolerance < t < length - tolerance).  We have no mesh, so (report v2 section
 3.2, plan 3.8, frozen in PREREG_E3VS_PILOT section 5):

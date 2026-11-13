@@ -1,8 +1,10 @@
 """E3VS-Bench pilot (gate 3): episode files, the pinned repo and the action vocabulary.
 
 E3VS-Bench: https://github.com/K0uya/E3VS-BENCH, pinned at commit bb7e603ccdcf2dd77fbeedd15660a09310a8a881
-(paths.E3VS_COMMIT).  Only ``dataset/episode_info_{train,val,test}.jsonl`` and, in the tests,
-``e3vs/environments/camera_geometry.py`` are read from it; nothing in the repo is imported by production code.
+(paths.E3VS_COMMIT).  Read from it: ``dataset/episode_info_{train,val,test}.jsonl``; the official collision code
+``e3vs/eval/metrics.py`` (class Collisions), which mesh_collision.py executes by file path after asserting the
+commit and the file's sha256; for parity, render.py's official loader / renderer; in the tests,
+``e3vs/environments/camera_geometry.py`` and the prompt files.  Nothing is imported as a package (no __init__).
 
 Where the repo is read from (``repo_dir()``):
   1. ``$VPD_E3VS_REPO`` if set (an explicit choice, e.g. the earlier-fetched read-only copy
