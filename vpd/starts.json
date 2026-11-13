@@ -52,5 +52,11 @@
   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/qa_sft_ctrl_20261103/model/checkpoint-155",
   "family": "qwen3",
   "note": "QA SFT control, checkpoint-155 (UNVERIFIED as the intended weights); no registry code"
+ },
+ "Q3SG": {
+  "code": "sft_q3genc0_e8",
+  "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/gen3b_sft_20261107/c0g/model/checkpoint-3976",
+  "family": "qwen3",
+  "note": "genc0: C0 action SFT trajectories (the same trajectory_train file as Q3S, sha 511ff945) + 22,000 general VQA rows, epoch 8 / 3,976 steps, from Qwen3-VL-8B-Instruct 0c351dd; upstream image_max_pixels 65536; no eval view; EXPLORATORY TVR start (user 2026-11-12 / 11-13)"
  }
 }
