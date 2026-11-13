@@ -1,0 +1,4 @@
+base: L1_plan.yaml
+run: {name: L2_plan_check}
+modules:
+  check: {enabled: true, impl: llm, provider: astra, prompt_version: v1, params: {min_confidence: 0.6}}

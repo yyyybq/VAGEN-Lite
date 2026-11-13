@@ -1,0 +1,31 @@
+# Skill catalog for /nas/baiqiao/checkpoints/pi05_turn_on_the_radio (single-task pi0.5,
+# openpi config pi05_b1k, prompt "Turn on the radio receiver that's on the table in the living room.").
+# Only the full-task skill is available. Sub-skill instructions are listed for the Step-5 diagnosis
+# (does the executor respond to them?) and stay unavailable until that diagnosis says otherwise.
+executor: pi05_turning_on_radio
+skills:
+  - name: __full_task__
+    tasks: ["*"]
+    instruction_template: "{task_prompt}"
+    description: Run the executor on the whole task with its trained task prompt.
+    available: true
+    verified: false
+    evidence: "pending Step 3 (one real episode)"
+  - name: approach_object
+    tasks: ["*"]
+    instruction_template: "Go to the {object}."
+    description: Drive the base until the object is within arm's reach.
+    inputs: [object]
+    ends_when: the object is close in front of the robot
+    available: false
+    verified: false
+    evidence: "untested; candidate for the Step-5 skill-instruction diagnosis"
+  - name: press_button
+    tasks: ["*"]
+    instruction_template: "Press the power button of the {object}."
+    description: Press a button / toggle a switch on the object.
+    inputs: [object]
+    ends_when: the object visibly turns on
+    available: false
+    verified: false
+    evidence: "untested; candidate for the Step-5 skill-instruction diagnosis"

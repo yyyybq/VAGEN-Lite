@@ -1,0 +1,51 @@
+# Example Dev ladder (CLAUDE.md "Experiment discipline"): L0..L4 plus the L0-direct passthrough reference,
+# on Dev instances only (public_test indices 10-19 = instance ids 311-320). Report instances 0-9 are never
+# used for tuning. Each instance is its own evaluator run (group_instances: false): on 2026/eval a
+# single-port run gets ONE wall-clock budget of max_steps seconds for the whole group of envs.
+#
+# L1+ call the strong-model provider: ASTRA_BASE_URL / ASTRA_API_KEY / ASTRA_MODEL must be set in the
+# environment of `python -m eval.batch` (inherited by the agent servers; never written to any file).
+# Every job starts its own executor server (pi0.5 checkpoint load per run) on its own GPU pair.
+#
+# Status: example spec, expanded by tests/test_eval_run_batch.py; not yet run on 105.
+#   python -m eval.batch configs/batches/dev_ladder_example.yaml --dry-run
+#   nohup python -m eval.batch configs/batches/dev_ladder_example.yaml --max-parallel 2 > dev_ladder.out 2>&1 &
+batch: dev_ladder_example
+mode: public_test
+wrapper: rgbd
+seeds: [0]
+tasks: [turning_on_radio]
+instances: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+group_instances: false
+retries_on_infra_error: 2
+ports: {executor: 8000, agent: 8100, stride: 10}
+max_parallel: 1
+launch:
+  write_video: true
+jobs:
+  - name: L0_direct
+    config: configs/L0_exec_only.yaml
+    direct: true
+    note: "reference: evaluator -> executor server (no agent); L0 should match it"
+  - name: L0
+    config: configs/L0_exec_only.yaml
+    note: "executor only, through the agent server"
+  - name: L1
+    config: configs/L1_plan.yaml
+    note: "+ M-plan"
+  - name: L2
+    config: configs/L2_plan_check.yaml
+    note: "+ M-check"
+  - name: L3
+    config: configs/L3_goal.yaml
+    note: "+ M-goal"
+  - name: L4
+    config: configs/L4_recover.yaml
+    note: "+ M-recover"
+  # Train instances are Dev too (mode train takes raw instance ids). Fill in ids that exist under
+  # <data_root>/2026-challenge-task-instances/scenes/<scene>/json/<scene>_task_turning_on_radio_instances/:
+  # - name: L0_train
+  #   config: configs/L0_exec_only.yaml
+  #   mode: train
+  #   instances: [<id>, <id>]
+  #   note: "executor only, train instances"

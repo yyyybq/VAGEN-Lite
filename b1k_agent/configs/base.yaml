@@ -1,0 +1,85 @@
+# Base config. Every module is OFF here; L0 (executor only) = this file.
+# Paths are for server 105; override with -o key=value or a derived config.
+run:
+  name: base
+  seed: 0
+  log_root: /nas/baiqiao/b1k_runs/logs          # NAS: run manifest + per-episode summaries
+  local_log_root: ~/b1k_local_logs              # local disk: per-step logs and frames
+  frame_every: 300
+  save_frames: true
+
+paths:
+  b1k_root: /nas/baiqiao/BEHAVIOR-1K
+  openpi_root: /nas/baiqiao/openpi
+
+task_metadata:
+  # same file the official evaluator uses for task_id <-> name (eval_utils._load_challenge_task_misc)
+  task_misc_csv: /nas/baiqiao/BEHAVIOR-1K/datasets/2026-challenge-task-instances/metadata/B100_task_misc.csv
+  catalog_tsv: configs/tasks/task_catalog_2026.tsv   # fallback snapshot (ids, max_steps); official CSV wins
+  tasks_jsonl: configs/tasks/tasks_2026.jsonl         # NL instructions for all 100 tasks (meta/tasks.jsonl copy)
+  bddl_root: /nas/baiqiao/BEHAVIOR-1K/bddl3/bddl/activity_definitions
+
+server:
+  host: 127.0.0.1
+  port: 8100
+  on_error: fallback          # fallback (executor with task prompt, else hold) | raise
+
+budget:
+  seconds_per_step: 1.0       # 2026 rule: episode budget = max_steps x 1 s (first query not charged)
+  enforce: true               # gate strong-model calls on the remaining budget
+
+loop:
+  exec_horizon: 1
+  check_interval_steps: 150
+  max_retries_per_subtask: 2
+  max_replans: 6
+  max_rejections_per_round: 2
+  regression_risk_threshold: 0.5
+  on_plan_exhausted: full_task
+  provider_min_remaining_s: 60.0
+  retrieve_k: 3
+  check_after_scripted: true
+
+executor:
+  impl: openpi_ws
+  skill_catalog: configs/skills/pi05_turning_on_radio.yaml
+  params:
+    host: 127.0.0.1
+    port: 8000
+    mode: passthrough
+    allow_prompt_override: true
+    recv_timeout_s: 120
+    checkpoint_dir: /nas/baiqiao/checkpoints/pi05_turn_on_the_radio
+
+providers:
+  astra:
+    # "Astra" = the user's preferred model name. Search snippets (2026-10-22) point to OpenAI GPT-6 Astra,
+    # id gpt-6-astra (https://developers.openai.com/api/docs/models/gpt-6-astra) -- unverified. Set
+    # ASTRA_BASE_URL (e.g. https://api.openai.com/v1), ASTRA_API_KEY, ASTRA_MODEL after GET /v1/models,
+    # then run python -m providers.probe. Nothing here assumes the id.
+    kind: openai_compat
+    label: astra
+    base_url_env: ASTRA_BASE_URL
+    api_key_env: ASTRA_API_KEY
+    model_env: ASTRA_MODEL
+    structured_output: json_schema
+    max_tokens_field: max_completion_tokens
+    vision: true
+  claude:                      # substitute provider; results must be labelled "claude", not "astra"
+    kind: anthropic
+    label: claude-substitute
+    model: claude-opus-5-5
+    effort: low
+    price_in_per_mtok: 4.0
+    price_out_per_mtok: 20.0
+
+modules:
+  plan:    {enabled: false}
+  check:   {enabled: false}
+  goal:    {enabled: false}
+  recover: {enabled: false}
+  approach: {enabled: false}
+  memory:  {enabled: false}
+  score:   {enabled: false}
+  spatial: {enabled: false}
+  explore: {enabled: false}
