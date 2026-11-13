@@ -14,9 +14,9 @@ from vagen import feature_critic as FC
 from vagen import turn_gae as TG
 
 
-def feat(d=3, bearing="front", condition=None, family="fov_inclusion", near=False, table=True):
+def feat(d=3, bearing="front", condition=None, family="fov_inclusion", near=False, table=True, phi=None):
     return {"v": FC.FEATURE_VERSION, "d": d, "near": near, "table": table, "bearing": bearing,
-            "condition": condition, "family": family}
+            "condition": condition, "family": family, "phi": phi}
 
 
 def test_encoding():
@@ -124,6 +124,76 @@ def test_values_update_and_learning():
     assert torch.isfinite(adv).all() and (ret[:, 0] != TG.IGNORE_VALUE).all()
 
 
+def test_door_a_reading_path():
+    """Door A's reading as the trainer takes it: the feature critic's values in the batch, turn_gae through verl's
+    compute_advantage, then compute_valid_return_metrics (the trainer logs it as critic/all/... on the batch before
+    the filter): the explained variance of the values against the lambda-returns at the turn anchors."""
+    from omegaconf import OmegaConf
+
+    from vagen.ray_trainer import compute_advantage, compute_valid_return_metrics
+
+    critic = FC.FeatureCritic({"max_turns": 12, "epochs": 10}, seed=1)
+    for k in range(4):
+        critic.update(_proto(64, seed=k))
+    data = _proto(64, seed=42)
+    values, _ = critic.values(data)
+    data.batch["values"] = values
+    out = compute_advantage(data, "turn_gae", gamma=1.0, lam=0.95, config=OmegaConf.create({"use_kl_in_reward": False}))
+    m = compute_valid_return_metrics(out)
+    anchors = torch.zeros_like(values, dtype=torch.bool)
+    anchors[:, [0, 5, 10]] = True
+    v, r = values[anchors], out.batch["returns"][anchors]
+    assert m["critic/returns/valid_count"] == 192
+    assert m["critic/values/explained_var_valid"] == pytest.approx(FC.explained_variance(v, r), abs=1e-5)
+    assert m["critic/values/explained_var_valid"] > 0.5
+
+
+def _proto_phi(n_ep, seed):
+    """As _proto, with the return-to-go 5 * success - 3 * phi_t (phi_t a random potential per turn, as a dense reward's
+    return carries -scale * phi_t)."""
+    from verl import DataProto
+
+    rng = np.random.default_rng(seed)
+    mask = torch.zeros(n_ep, 12)
+    mask[:, 0:3] = 1; mask[:, 5:8] = 1; mask[:, 10:12] = 1
+    recs = np.empty(n_ep, dtype=object)
+    rewards = torch.zeros(n_ep, 12)
+    for i in range(n_ep):
+        d0 = int(rng.integers(1, 9))
+        ok = d0 <= 4
+        phi = rng.uniform(0, 1, 3)
+        g = [5.0 * ok - 3.0 * p for p in phi]
+        rw = [g[0] - g[1], g[1] - g[2], g[2]]
+        rec = TG.turn_record([[0, 3], [5, 8], [10, 12]], rw)
+        ds = [d0, max(d0 - 2, 0), max(d0 - 4, 0)]
+        FC.add_to_record(rec, [feat(d=d, phi=float(p)) for d, p in zip(ds, phi)], ok)
+        recs[i] = rec
+        rewards[i, 11] = sum(rw)
+    return DataProto.from_dict(tensors={"response_mask": mask, "token_level_rewards": rewards,
+                                        "responses": torch.zeros(n_ep, 12, dtype=torch.long)},
+                               non_tensors={TG.RECORD_KEY: recs})
+
+
+def test_readout_phi_and_ceiling():
+    ev = {}
+    for on in (False, True):
+        critic = FC.FeatureCritic({"max_turns": 12, "epochs": 20, "mini_batch": 64, "readout_phi": on}, seed=2)
+        for k in range(8):
+            m = critic.update(_proto_phi(64, seed=k))
+        assert (m["critic/feature/readout_e"] != 0.0) == on
+        assert m["critic/feature/ceiling_ev_buffer"] >= m["critic/feature/ev_mc_buffer_after"] - 1e-3
+        test = _proto_phi(64, seed=77)
+        values, vm = critic.values(test)
+        assert vm["critic/feature/phi_missing_rate"] == 0.0
+        rows = critic.batch_rows(test)
+        v = torch.tensor([float(values[i, a]) for i, r in enumerate(rows) for a in r["anchors"]])
+        g = torch.tensor([x for r in rows for x in r["returns"]])
+        ev[on] = FC.explained_variance(v, g)
+        if on:
+            assert m["critic/feature/readout_e"] == pytest.approx(-3.0, abs=0.3)
+    assert ev[True] > 0.97 and ev[False] < ev[True] - 0.03, ev
+
+
 def test_checkpoint_round_trip_and_determinism():
     a = FC.FeatureCritic({"max_turns": 12}, seed=5)
     b = FC.FeatureCritic({"max_turns": 12}, seed=5)
@@ -142,6 +212,9 @@ def test_checkpoint_round_trip_and_determinism():
         assert c.updates == a.updates == 4
         with pytest.raises(ValueError, match="cfg"):
             FC.FeatureCritic({"max_turns": 12, "hidden": 64}, seed=5).load(path)
+        with pytest.raises(ValueError, match="cfg"):
+            FC.FeatureCritic({"max_turns": 12, "readout_phi": True}, seed=5).load(path)
+        FC.FeatureCritic({"max_turns": 12, "threads": 2}, seed=5).load(path)  # threads may change on a resume
     # the driver's global RNG is untouched by building and training a critic
     torch.manual_seed(123)
     want = torch.rand(3)
@@ -158,7 +231,8 @@ def test_settings_and_config_refusals():
     assert s == dict(FC.DEFAULTS, max_turns=12)
     for bad, word in (({}, "max_turns"), ({"max_turns": 12, "depth": 2}, "unknown"), ({"max_turns": 12, "epochs": 0}, "epochs"),
                       ({"max_turns": 12, "hidden": 2.5}, "hidden"), ({"max_turns": 12, "lr": 0}, "lr"),
-                      ({"max_turns": 12, "ridge": -1}, "ridge"), ({"max_turns": True}, "max_turns")):
+                      ({"max_turns": 12, "ridge": -1}, "ridge"), ({"max_turns": 12, "ridge": 0}, "ridge"),
+                      ({"max_turns": 12, "readout_phi": 1}, "readout_phi"), ({"max_turns": True}, "max_turns")):
         with pytest.raises(ValueError, match=word):
             FC.settings(bad)
 
@@ -179,7 +253,9 @@ def test_settings_and_config_refusals():
     assert isinstance(critic, FC.FeatureCritic) and critic.seed == 7
     assert FC.from_config(cfg(trainer__critic_source="model", trainer__feature_critic=None)) is None
     assert FC.from_config(OmegaConf.create({"trainer": {}})) is None  # every existing config
+    assert FC.from_config(cfg(algorithm__gamma=1.0)) is not None
     for over, word in (({"algorithm__adv_estimator": "gae"}, "turn_gae"), ({"critic__enable": True}, "critic.enable"),
+                       ({"algorithm__gamma": 0.95}, "gamma"),
                        ({"critic__enable": None}, "critic.enable"), ({"trainer__critic_all_candidates": False}, "every candidate"),
                        ({"filter__enable": False}, "filter"), ({"trainer__critic_replay_updates": 8}, "critic_replay"),
                        ({"trainer__critic_overfit_steps": 50}, "critic_overfit"), ({"trainer__critic_source": "table"}, "one of"),
@@ -216,11 +292,11 @@ def test_env_features_from_a_table():
         DT.save(DT.table_path(Path(tmp), "t_fc"), {"keys": np.array([key], dtype=np.int64), "dist": np.array([3]),
                                                    "depth_of": np.array([0]), "task_id": "t_fc"})
         CF._TABLES.clear()
-        f = CF.features(item, here, tmp)
-        gt = truth(item, here)
+        f = CF.features(item, here, tmp, phi=0.25)
+        # 2.8 m to the box's near side against 2.5 m required (tolerance max(0.25 m, 10%) = 0.25 m): too far
         assert f == {"v": CF.VERSION, "d": 3, "near": False, "table": True, "bearing": "front",
-                     "condition": gt["condition"], "family": "absolute_positioning"}
-        assert gt["bearing"] == "front" and f["condition"] in FC.CONDITIONS
+                     "condition": "too_far", "family": "absolute_positioning", "phi": 0.25}
+        assert truth(item, here)["condition"] == "too_far"
         # 1 cm off the table's cell: the neighbour's distance
         shifted = here.copy()
         shifted[0, 3] += 0.01
@@ -238,6 +314,18 @@ def test_env_features_from_a_table():
         assert FC.encode(f, 0, 12)[:2] == [0.25, 0.0]  # the encoding reads what the env gives
         with pytest.raises(ValueError, match="critic_feature_tables_dir"):
             CF.features(item, here, None)
+        # safe(): a table that cannot be read gives (None, the error), the configuration error still raises
+        (Path(tmp) / "t_bad.npz").write_bytes(b"not a table")
+        feats, err = CF.safe(dict(item, task_id="t_bad"), here, tmp, 0.1)
+        assert feats is None and err and "Error" in err
+        assert CF.safe(item, here, tmp, 0.1) == (dict(f, phi=0.1), None)
+        with pytest.raises(ValueError, match="critic_feature_tables_dir"):
+            CF.safe(item, here, None)
+        # the cache keeps at most _CACHE_SIZE tables, the newest
+        CF._TABLES.clear()
+        for k in range(CF._CACHE_SIZE + 3):
+            CF.table_for(tmp, f"missing_{k}")
+        assert len(CF._TABLES) == CF._CACHE_SIZE and (str(tmp), f"missing_{CF._CACHE_SIZE + 2}") in CF._TABLES
     CF._TABLES.clear()
 
 
@@ -256,11 +344,32 @@ def test_env_reset_and_step_wiring():
 
     for fn in (ActiveSpatialEnv.reset, ActiveSpatialEnv.step):
         src = inspect.getsource(fn)
-        assert src.count('info["critic_features"] = self._critic_features()') == 1, fn
+        assert src.count("self._add_critic_features(info)") == 1, fn
         assert 'if self.config.get("critic_features", False):' in src, fn
+
+    # the method itself, on a stand-in env: the features, or None and the error; the step's info is otherwise kept
+    from types import SimpleNamespace
+
+    class Cfg(dict):
+        def get(self, key, default=None):
+            return dict.get(self, key, default)
+
+    fake = SimpleNamespace(current_item={"task_id": "x", "task_type": "fov_inclusion",
+                                         "target_object": {"objects": [_box(3.0, 0.0)]}},
+                           view_engine=SimpleNamespace(get_pose=lambda: _c2w(0.0, 0.0, 0.0)),
+                           config=Cfg(critic_feature_tables_dir="/nonexistent_tables"), prev_potential_score=0.3)
+    info = {"success": False}
+    ActiveSpatialEnv._add_critic_features(fake, info)
+    assert info["critic_features"]["table"] is False and info["critic_features"]["phi"] == 0.3
+    assert "critic_features_error" not in info and info["success"] is False
+    fake.current_item = {"task_id": "x", "task_type": "fov_inclusion", "target_object": {"objects": []}}  # truth fails
+    info = {"success": True}
+    ActiveSpatialEnv._add_critic_features(fake, info)
+    assert info["critic_features"] is None and "ValueError" in info["critic_features_error"] and info["success"] is True
 
 
 def test_agent_loop_records_the_features():
+    import asyncio
     import inspect
 
     from vagen.agent_loop.gym_agent_loop import AgentData, GymAgentLoop
@@ -269,8 +378,40 @@ def test_agent_loop_records_the_features():
     assert d.obs_features == []
     src = inspect.getsource(GymAgentLoop.run)
     assert 'if info and "critic_features" in info:' in src and "add_to_record(" in src
-    assert 'agent_data.obs_features.append((info or {}).get("critic_features"))' in inspect.getsource(
-        GymAgentLoop._handle_env_state)
+
+    class Env:
+        def __init__(self, raise_at=None):
+            self.n, self.raise_at = 0, raise_at
+
+        async def step(self, action):
+            self.n += 1
+            if self.n == self.raise_at:
+                raise RuntimeError("renderer down")
+            return {"obs_str": "o"}, 0.5, self.n >= 2, {"critic_features": feat(d=3 - self.n), "success": False}
+
+    # the env step only: a response limit of 3 tokens ends every call before the next user turn is tokenised (no
+    # model, no tokenizer here), so a second step is driven by hand
+    loop = GymAgentLoop.__new__(GymAgentLoop)
+    loop.env_max_turns, loop.response_length = None, 3
+    for raise_at, want in ((None, [5, 2, 1]), (1, [5, None])):
+        ad = AgentData(messages=[], image_data=[], metrics={}, request_id="r", env=Env(raise_at), response_limit=100,
+                       env_name="e")
+        ad.obs_features.append(feat(d=5))  # reset's
+        ad.add_generated_turn(3)
+        state = asyncio.run(loop._handle_env_state(ad))
+        if raise_at is None:  # the env went on (done False at step 1): step it again
+            ad.add_generated_turn(2)
+            state = asyncio.run(loop._handle_env_state(ad))
+        assert state.name == "TERMINATED"
+        assert [None if f is None else f["d"] for f in ad.obs_features] == want
+        rec = TG.turn_record(ad.turn_spans, ad.env_rewards)
+        FC.add_to_record(rec, ad.obs_features, ad.traj_success)
+        assert len(rec["features"]) == len(rec["spans"]) and rec["features"][0]["d"] == 5
+    # an env without the switch: nothing is recorded
+    ad = AgentData(messages=[], image_data=[], metrics={}, request_id="r", env=Env(), response_limit=100, env_name="e")
+    ad.add_generated_turn(3)
+    asyncio.run(loop._handle_env_state(ad))
+    assert ad.obs_features == []
 
 
 def test_trainer_wiring():

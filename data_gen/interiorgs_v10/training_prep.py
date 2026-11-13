@@ -456,14 +456,15 @@ OPT_PACKAGES: Dict[str, Dict[str, Any]] = {
     # batch, filter, warm-up 30 and every-candidate value data, with the value from a three-layer MLP in the trainer
     # on the env's ground truth instead of the value network (vagen/feature_critic.py: the remaining minimum number of
     # actions from the task's distance table, the bearing sector, the distance condition, the turn's index, the
-    # family; success cross-entropy plus the turns-left regression, a least-squares read-out to the return; a buffer
-    # of the last 8 updates, 4 passes an update): no critic worker (critic.enable false); the env gives the truth
-    # (critic_features on, its tables from --critic-feature-tables, usually the standard's).  gamma 1 / lam 0.95
+    # family; success cross-entropy plus the turns-left regression, a least-squares read-out to the return with the
+    # env's potential phi as one more read-out term (readout_phi: a dense reward's return-to-go carries -scale * phi);
+    # a buffer of the last 8 updates, 4 passes an update): no critic worker (critic.enable false); the env gives the
+    # truth (critic_features on, its tables from --critic-feature-tables, usually the standard's).  gamma 1 / lam 0.95
     "p1tgae_fc": {"rollouts": 8, "candidates": 24, "target_groups": 12, "lr": 2e-6, "kl_loss_coef": 0.05,
                   "entropy_coeff": 0.01, "adv_estimator": "turn_gae", "critic_warmup": 30, "gamma": 1.0, "lam": 0.95,
                   "critic_all_candidates": True, "critic_source": "features",
                   "feature_critic": {"hidden": 128, "lr": 1e-3, "epochs": 4, "mini_batch": 256, "buffer_updates": 8,
-                                     "steps_weight": 1.0, "ridge": 1e-4, "threads": 4}},
+                                     "steps_weight": 1.0, "ridge": 1e-4, "threads": 4, "readout_phi": True}},
 }
 NO_VALUE_CLIP = 1.0e6  # critic.cliprange_value of a package without value clipping (far beyond any return)
 CRITIC_KEYS = ("critic_lr", "critic_value_clip", "critic_ppo_epochs")  # a package's value-network settings
@@ -1053,6 +1054,12 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         report["critic_source"] = "features"
         report["critic_feature_tables"] = feature_env["critic_feature_tables_dir"]
         report["critic_feature_tables_checked"] = len(parts["train"])
+        # provenance of the tables (another line's folder, read live): the hashes of its build records when present
+        import hashlib
+
+        report["critic_feature_tables_records"] = {
+            name: hashlib.sha256((Path(feature_tables) / name).read_bytes()).hexdigest()
+            for name in ("DONE.json", "final_ids.txt", "summary.jsonl") if (Path(feature_tables) / name).is_file()}
     (out / "rl_config_report.json").write_text(json.dumps(report, indent=1))
     print(json.dumps(report, indent=1))
 

@@ -810,16 +810,21 @@ class ActiveSpatialEnv(BaseEnv):
             "collision_convention": self.current_collision_convention,
         }
         if self.config.get("critic_features", False):  # the privileged critic (2026-11-13), default off
-            info["critic_features"] = self._critic_features()
+            self._add_critic_features(info)
 
         return obs, info
 
-    def _critic_features(self) -> Dict[str, Any]:
+    def _add_critic_features(self, info: Dict[str, Any]) -> None:
         """The privileged critic's ground truth at the current pose, the pose the next observation is rendered from
-        (critic_features.py; env critic_features)."""
-        from .critic_features import features
+        (critic_features.py; env critic_features): info["critic_features"], and info["critic_features_error"] when
+        computing them failed (then None; the step itself is unchanged)."""
+        from .critic_features import safe
 
-        return features(self.current_item, self.view_engine.get_pose(), self.config.get("critic_feature_tables_dir"))
+        feats, error = safe(self.current_item, self.view_engine.get_pose(), self.config.get("critic_feature_tables_dir"),
+                            getattr(self, "prev_potential_score", None))
+        info["critic_features"] = feats
+        if error is not None:
+            info["critic_features_error"] = error
 
     def _build_task_prompt(self, item: Dict[str, Any]) -> str:
         object_label = item.get("object_label", "object")
@@ -1434,7 +1439,7 @@ class ActiveSpatialEnv(BaseEnv):
         info["reward_trace"] = self._reward_trace.as_dict()
         info["reward_trace_flat"] = self._reward_trace.flat()
         if self.config.get("critic_features", False):  # the privileged critic (2026-11-13), default off
-            info["critic_features"] = self._critic_features()
+            self._add_critic_features(info)
 
         return obs, self.reward, done, info
     

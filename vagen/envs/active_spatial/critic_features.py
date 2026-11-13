@@ -17,16 +17,22 @@ turn.  Nothing here changes a reward, the success rule or termination.
     condition  absolute_positioning: the horizontal footprint distance against the required one (too_close / ok /
                too_far, the success rule's tolerance, grounding_probe.truth); None for the other families
     family     the task family (task_type)
+    phi        the env's potential (shaping score, prev_potential_score) at the pose: for the critic's optional read-out
+               term (a dense reward's return-to-go carries -scale * phi), not an MLP input
+
+A failure while computing them (say a table that cannot be read) is caught (safe()): info["critic_features"] is None
+and info["critic_features_error"] says why, the step's reward, success and end stay the env's; the trainer then
+refuses the turn loudly.  A missing tables directory is a configuration error and raises at reset.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 VERSION = 1
-_CACHE_SIZE = 64
+_CACHE_SIZE = 8  # a table is 9-21 MB loaded; an agent-loop worker runs about 2 tasks an update, rarely the same again
 _TABLES: "OrderedDict[tuple, Optional[Dict[str, Any]]]" = OrderedDict()  # (root, task_id) -> table, shared per process
 
 
@@ -46,13 +52,14 @@ def table_for(root: str, task_id: str) -> Optional[Dict[str, Any]]:
     return table
 
 
-def features(item: Mapping[str, Any], c2w: Any, tables_dir: Optional[str]) -> Dict[str, Any]:
-    """The ground truth of a pose (c2w: the env's view_engine.get_pose())."""
+def features(item: Mapping[str, Any], c2w: Any, tables_dir: Optional[str], phi: Optional[float] = None
+             ) -> Dict[str, Any]:
+    """The ground truth of a pose (c2w: the env's view_engine.get_pose()); phi, the env's potential (shaping score)
+    at the pose, is carried along for the critic's read-out (not an MLP input)."""
     from data_gen.interiorgs_v10.distance_table_near import lookup_near
     from data_gen.interiorgs_v10.grounding_probe import truth
 
-    if not tables_dir:
-        raise ValueError("critic_features needs critic_feature_tables_dir (the tasks' distance tables)")
+    check_dir(tables_dir)
     table = table_for(tables_dir, str(item.get("task_id")))
     found = lookup_near(table, c2w) if table is not None else {"distance": None, "near": False}
     gt = truth(dict(item), c2w)
@@ -62,4 +69,22 @@ def features(item: Mapping[str, Any], c2w: Any, tables_dir: Optional[str]) -> Di
             "near": bool(found["near"]), "table": table is not None,
             "bearing": None if inside else gt.get("bearing"),
             "condition": gt.get("condition"),
-            "family": str(item.get("task_type") or "")}
+            "family": str(item.get("task_type") or ""),
+            "phi": None if phi is None else float(phi)}
+
+
+def check_dir(tables_dir: Optional[str]) -> None:
+    """A configuration error, raised as it is (the env calls it outside the guard of safe())."""
+    if not tables_dir:
+        raise ValueError("critic_features needs critic_feature_tables_dir (the tasks' distance tables)")
+
+
+def safe(item: Mapping[str, Any], c2w: Any, tables_dir: Optional[str], phi: Optional[float] = None
+         ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """(features, None), or (None, the error) when computing them fails: the env's step must not fail on the critic's
+    account (the agent loop would end the episode with reward 0); the trainer refuses a turn without features."""
+    check_dir(tables_dir)
+    try:
+        return features(item, c2w, tables_dir, phi), None
+    except Exception as exc:  # noqa: BLE001 - recorded in info["critic_features_error"]
+        return None, f"{type(exc).__name__}: {exc}"

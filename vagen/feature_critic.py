@@ -16,7 +16,11 @@ the turns left in the episode, this one included, over max_turns (squared error,
 a linear read-out of the two, V = a * sigmoid(logit) + b * turns_left + c (turns_left in turns), with a, b, c refit
 after every update by ridge least squares (ridge on a and b) on the buffer's Monte-Carlo returns: the undiscounted
 sum of the turn rewards from the turn to the episode's end (the return turn_gae's gamma 1 targets).  Before the first
-update the read-out is 0, so every value is 0.
+update the read-out is 0, so every value is 0.  With readout_phi (default off) the read-out has a fourth term e * phi,
+phi the env's potential (shaping score) at the turn's pose: a dense reward's return-to-go carries -scale * phi_t, which
+neither output models; phi is not an MLP input.  Every update also logs a linear ceiling: the buffer's returns fit by
+ridge on the raw input rows plus the two outputs and phi (critic/feature/ceiling_ev_buffer, in sample), to tell a
+read-out too narrow from features too poor.
 
 Every update (vagen/ray_trainer.py): values() at every candidate's turn anchors (the anchors of vagen/turn_gae.py,
 the first response position of each kept turn) before the update, with the MLP and read-out of the updates before;
@@ -47,9 +51,11 @@ BEARINGS = ("front", "right", "back", "left")
 CONDITIONS = ("too_close", "ok", "too_far")
 D_CAP = 12
 DEFAULTS = {"hidden": 128, "lr": 1e-3, "epochs": 4, "mini_batch": 256, "buffer_updates": 8, "steps_weight": 1.0,
-            "ridge": 1e-4, "threads": 4}
+            "ridge": 1e-4, "threads": 4, "readout_phi": False}
 INT_KEYS = ("hidden", "epochs", "mini_batch", "buffer_updates", "threads", "max_turns")
 FLOAT_KEYS = ("lr", "steps_weight", "ridge")
+BOOL_KEYS = ("readout_phi",)
+RESUME_FREE_KEYS = ("threads",)  # settings a resumed run may change (no effect on what the critic computes)
 
 
 def _get(config: Any, key: str, default: Any = None) -> Any:
@@ -83,9 +89,13 @@ def settings(raw: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         out[key] = int(v)
     for key in FLOAT_KEYS:
         v = out[key]
-        if isinstance(v, bool) or not float(v) >= 0 or (key == "lr" and not float(v) > 0):
-            raise ValueError(f"trainer.{CONFIG_KEY}.{key} must be a non-negative number (lr positive), not {v!r}")
+        if isinstance(v, bool) or not float(v) >= 0 or (key in ("lr", "ridge") and not float(v) > 0):
+            raise ValueError(f"trainer.{CONFIG_KEY}.{key} must be a non-negative number (lr and ridge positive), "
+                             f"not {v!r}")
         out[key] = float(v)
+    for key in BOOL_KEYS:
+        if not isinstance(out[key], bool):
+            raise ValueError(f"trainer.{CONFIG_KEY}.{key} must be true or false, not {out[key]!r}")
     return out
 
 
@@ -95,6 +105,8 @@ def check_config(config: Any) -> None:
     algo, trainer = _get(config, "algorithm"), _get(config, "trainer")
     if not TG.enabled(algo):
         raise ValueError(f"trainer.{SOURCE_KEY} features needs algorithm.adv_estimator turn_gae")
+    if float(_get(algo, "gamma", 1.0)) != 1.0:  # the read-out is fit to undiscounted Monte-Carlo returns
+        raise ValueError(f"trainer.{SOURCE_KEY} features fits the undiscounted return: algorithm.gamma must be 1")
     if _get(_get(config, "critic"), "enable", None) is not False:
         raise ValueError(f"trainer.{SOURCE_KEY} features runs without the critic worker: critic.enable must be false")
     if not bool(_get(trainer, "critic_all_candidates", False)):
@@ -194,10 +206,12 @@ def episode_rows(record: Optional[Dict[str, Any]], response_mask_row: torch.Tens
     for j in reversed(range(len(kept))):
         acc += rewards[j]
         returns[j] = acc
+    phi = [feats[i].get("phi") if feats[i] is not None else None for _, i, _ in kept]
     return {"anchors": [a for a, _, _ in kept],
             "x": [encode(feats[i], i, max_turns) for _, i, _ in kept],
             "turns_left": [float(len(kept) - j) for j in range(len(kept))],
             "returns": returns, "success": float(bool(record.get("success", False))),
+            "phi": [float(v) if v is not None else 0.0 for v in phi], "phi_missing": [v is None for v in phi],
             "d": [feats[i].get("d") for _, i, _ in kept], "near": [bool(feats[i].get("near")) for _, i, _ in kept],
             "table": [bool(feats[i].get("table")) for _, i, _ in kept]}
 
@@ -248,8 +262,9 @@ class FeatureCritic:
             self.net = _MLP(self.n_in, self.cfg["hidden"])
         self.opt = torch.optim.Adam(self.net.parameters(), lr=self.cfg["lr"])
         self.gen = torch.Generator().manual_seed(self.seed + 1)
-        self.readout = [0.0, 0.0, 0.0]  # a, b, c: V = a * p + b * turns_left + c
-        self.buffer: List[Dict[str, torch.Tensor]] = []  # per update: x, success, turns_left (over max_turns), returns
+        self.readout = [0.0, 0.0, 0.0, 0.0]  # a, b, c, e: V = a * p + b * turns_left + c (+ e * phi with readout_phi)
+        # per update: x, success, turns_left (over max_turns), returns, phi
+        self.buffer: List[Dict[str, torch.Tensor]] = []
         self.updates = 0
 
     # -- the batch ---------------------------------------------------------
@@ -262,14 +277,14 @@ class FeatureCritic:
             raise ValueError(f"feature critic: {len(records)} turn records for {mask.shape[0]} samples")
         return [episode_rows(records[i], mask[i], self.max_turns) for i in range(mask.shape[0])]
 
-    def _predict(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """(success probability, turns left in turns, value) of input rows."""
+    def _predict(self, x: torch.Tensor, phi: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """(success probability, turns left in turns, value) of input rows (phi: the env's potential per row)."""
         with torch.no_grad():
             out = self.net(x)
         p = torch.sigmoid(out[:, 0])
         left = out[:, 1] * float(self.max_turns)
-        a, b, c = self.readout
-        return p, left, a * p + b * left + c
+        a, b, c, e = self.readout
+        return p, left, a * p + b * left + c + e * phi
 
     def values(self, data: Any) -> Tuple[torch.Tensor, Dict[str, float]]:
         """The value tensor (samples x response positions: each kept turn's value at its anchor, 0 elsewhere) and
@@ -280,7 +295,8 @@ class FeatureCritic:
         xs = [x for r in rows for x in r["x"]]
         if xs:
             with _Threads(self.cfg["threads"]):
-                _, _, v = self._predict(torch.tensor(xs, dtype=torch.float32))
+                _, _, v = self._predict(torch.tensor(xs, dtype=torch.float32),
+                                        torch.tensor([f for r in rows for f in r["phi"]], dtype=torch.float32))
             k = 0
             for i, r in enumerate(rows):
                 for a in r["anchors"]:
@@ -294,6 +310,7 @@ class FeatureCritic:
             "critic/feature/d_missing_rate": sum(d is None for d in ds) / n,
             "critic/feature/d_near_rate": sum(x for r in rows for x in r["near"]) / n,
             "critic/feature/no_table_rate": sum(not x for r in rows for x in r["table"]) / n,
+            "critic/feature/phi_missing_rate": sum(x for r in rows for x in r["phi_missing"]) / n,
             "critic/feature/first_turn_d_mean": (sum(first) / len(first)) if first else -1.0}
 
     # -- the update --------------------------------------------------------
@@ -303,12 +320,30 @@ class FeatureCritic:
         mse = torch.mean((out[:, 1] - t) ** 2)
         return bce, mse
 
-    def _fit_readout(self, x: torch.Tensor, g: torch.Tensor) -> None:
-        p, left, _ = self._predict(x)
-        phi = torch.stack([p, left, torch.ones_like(p)], dim=1).double()
-        reg = torch.diag(torch.tensor([self.cfg["ridge"], self.cfg["ridge"], 0.0], dtype=torch.float64)) * len(g)
-        w = torch.linalg.solve(phi.T @ phi + reg + 1e-9 * torch.eye(3, dtype=torch.float64), phi.T @ g.double())
-        self.readout = [float(w[0]), float(w[1]), float(w[2])]
+    @staticmethod
+    def _ridge(design: torch.Tensor, g: torch.Tensor, ridge: float, free: int) -> torch.Tensor:
+        """Ridge least squares (the last ``free`` columns unpenalised), float64."""
+        a = design.double()
+        k = a.shape[1]
+        pen = torch.tensor([ridge] * (k - free) + [0.0] * free, dtype=torch.float64) * len(g)
+        return torch.linalg.solve(a.T @ a + torch.diag(pen) + 1e-9 * torch.eye(k, dtype=torch.float64), a.T @ g.double())
+
+    def _fit_readout(self, x: torch.Tensor, phi: torch.Tensor, g: torch.Tensor) -> None:
+        p, left, _ = self._predict(x, phi)
+        cols = [p, left] + ([phi] if self.cfg["readout_phi"] else []) + [torch.ones_like(p)]
+        w = self._ridge(torch.stack(cols, dim=1), g, self.cfg["ridge"], free=1)
+        if self.cfg["readout_phi"]:
+            self.readout = [float(w[0]), float(w[1]), float(w[3]), float(w[2])]
+        else:
+            self.readout = [float(w[0]), float(w[1]), float(w[2]), 0.0]
+
+    def _ceiling(self, x: torch.Tensor, phi: torch.Tensor, g: torch.Tensor) -> float:
+        """In-sample EV of the buffer's returns fit linearly on the raw rows, both outputs and phi: what a wider
+        read-out of the same information could reach (only reported)."""
+        p, left, _ = self._predict(x, phi)
+        design = torch.cat([x, p[:, None], left[:, None], phi[:, None], torch.ones_like(p)[:, None]], dim=1)
+        w = self._ridge(design, g, self.cfg["ridge"], free=1)
+        return explained_variance((design.double() @ w).float(), g)
 
     def update(self, data: Any) -> Dict[str, float]:
         """Train on an update's every-candidate batch (before the group filter); readings with the critic before the
@@ -321,20 +356,22 @@ class FeatureCritic:
         s = torch.tensor([r["success"] for r in rows for _ in r["x"]], dtype=torch.float32)
         t = torch.tensor([v for r in rows for v in r["turns_left"]], dtype=torch.float32) / float(self.max_turns)
         g = torch.tensor([v for r in rows for v in r["returns"]], dtype=torch.float32)
+        f = torch.tensor([v for r in rows for v in r["phi"]], dtype=torch.float32)
         m: Dict[str, float] = {}
         with _Threads(self.cfg["threads"]):
             with torch.no_grad():
                 bce0, mse0 = self._losses(x, s, t)
-            p0, _, v0 = self._predict(x)
+            p0, _, v0 = self._predict(x, f)
             m.update({"critic/feature/bce_before": float(bce0), "critic/feature/steps_mse_before": float(mse0),
                       "critic/feature/success_acc_before": float(((p0 > 0.5).float() == s).float().mean()),
                       "critic/feature/ev_mc_before": explained_variance(v0, g)})
-            self.buffer.append({"x": x, "s": s, "t": t, "g": g})
+            self.buffer.append({"x": x, "s": s, "t": t, "g": g, "f": f})
             del self.buffer[:-self.cfg["buffer_updates"]]
             bx = torch.cat([b["x"] for b in self.buffer])
             bs = torch.cat([b["s"] for b in self.buffer])
             bt = torch.cat([b["t"] for b in self.buffer])
             bg = torch.cat([b["g"] for b in self.buffer])
+            bf = torch.cat([b["f"] for b in self.buffer])
             n, mb = len(bx), self.cfg["mini_batch"]
             self.net.train()
             for _ in range(self.cfg["epochs"]):
@@ -347,15 +384,18 @@ class FeatureCritic:
                     loss.backward()
                     self.opt.step()
             self.net.eval()
-            self._fit_readout(bx, bg)
+            self._fit_readout(bx, bf, bg)
             with torch.no_grad():
                 bce1, mse1 = self._losses(bx, bs, bt)
-            _, _, v1 = self._predict(bx)
+            _, _, v1 = self._predict(bx, bf)
+            ceiling = self._ceiling(bx, bf, bg)
         self.updates += 1
-        a, b, c = self.readout
+        a, b, c, e = self.readout
         m.update({"critic/feature/bce_after": float(bce1), "critic/feature/steps_mse_after": float(mse1),
                   "critic/feature/ev_mc_buffer_after": explained_variance(v1, bg),
+                  "critic/feature/ceiling_ev_buffer": ceiling,
                   "critic/feature/readout_a": a, "critic/feature/readout_b": b, "critic/feature/readout_c": c,
+                  "critic/feature/readout_e": e,
                   "critic/feature/rows_new": float(len(x)), "critic/feature/buffer_rows": float(n),
                   "critic/feature/buffer_updates": float(len(self.buffer)),
                   "critic/feature/success_rate_new": float(s.mean()),
@@ -370,9 +410,13 @@ class FeatureCritic:
                 "buffer": [dict(b) for b in self.buffer], "updates": self.updates, "gen": self.gen.get_state()}
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        for key, want in (("feature_version", FEATURE_VERSION), ("n_in", self.n_in), ("cfg", dict(self.cfg))):
-            if state.get(key) != want:
-                raise ValueError(f"feature critic checkpoint: {key} {state.get(key)!r}, this run has {want!r}")
+        def fixed(cfg):  # what the critic computes; threads may change on a resume
+            return {k: v for k, v in dict(cfg or {}).items() if k not in RESUME_FREE_KEYS}
+
+        for key, have, want in (("feature_version", state.get("feature_version"), FEATURE_VERSION),
+                                ("n_in", state.get("n_in"), self.n_in), ("cfg", fixed(state.get("cfg")), fixed(self.cfg))):
+            if have != want:
+                raise ValueError(f"feature critic checkpoint: {key} {have!r}, this run has {want!r}")
         self.net.load_state_dict(state["net"])
         self.opt.load_state_dict(state["opt"])
         self.readout = [float(v) for v in state["readout"]]
