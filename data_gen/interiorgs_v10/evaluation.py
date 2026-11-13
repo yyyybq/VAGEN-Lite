@@ -46,6 +46,16 @@ nothing changes.  ``run --grounding-side`` (v2, the user's choice of 2026-11-12:
 statement under v1): the action call is the plain run's, unchanged; after it, on the same frame, a separate greedy side
 call with the assistant reply prefilled (``<state>bearing``) asks for the statement (grounding_probe.py, v2); the
 side calls never enter the history, and a failed side call costs only that turn's statement (``side_error``).  Qwen models only (the side call needs an assistant prefix in the chat prompt).
+
+Critic probe (gate 0 of docs/PREREG_PPO2.md, the representation probe; a recording mode, not an evaluation rule):
+``run --critic-probe TABLES_DIR`` runs the env with critic_features on (the tables of TABLES_DIR) and V4's reward (the
+D_cond preset with potential_field_reward_scale 3.3333333333333335), all recorded in model.json env_switches, and
+records what repr_probe.py needs to rebuild every model call: the frames as lossless PNG (<index>[_s<sample>]_<turn>.png),
+the row's system prompt (``system``), per turn the env's truth at the pose of the observation the turn answered
+(``critic_features``, reset's for turn 0 and step t-1's after; ``critic_features_error`` when the env could not compute
+it), the unrounded reward (``reward_exact``) and the sha256 of the prompt's token ids vLLM ran (``prompt_ids_sha256``),
+and the truth after the last turn (``final_critic_features``).  Needs --history; refused with --grounding-probe /
+--grounding-side.  One probe version per result folder (model.json ``critic_probe``); off, nothing changes.
 """
 
 from __future__ import annotations
@@ -64,6 +74,8 @@ PER_FAMILY = 50
 SEED = 20261014
 BANDS = ((1, 3), (4, 6), (7, 8))
 VERSION = "interiorgs_v10_eval_v2"  # v2 (round 8): results rows carry the trajectory and frames
+CRITIC_PROBE_VERSION = "critic_probe_v1"  # gate 0 of docs/PREREG_PPO2.md (run --critic-probe)
+V4_PROGRESS_SCALE = 3.3333333333333335  # V4: the D_cond preset with the progress (potential) scale / 3 (matrix_r12)
 
 
 def band_name(d: int) -> str:
@@ -316,7 +328,21 @@ def switch_overrides(args: argparse.Namespace) -> Dict[str, Any]:
         out["lenient_parse"] = True
     if getattr(args, "turn_footprint_radius", None) is not None:  # experiment 3A: the robot-base turn rule
         out["turn_footprint_radius"] = float(args.turn_footprint_radius)
+    if getattr(args, "critic_probe", None):  # gate 0 (PREREG_PPO2): the env's truth per turn and V4's reward
+        out.update(critic_probe_overrides(args.critic_probe))
     return out
+
+
+def critic_probe_overrides(tables_dir: str) -> Dict[str, Any]:
+    """Gate 0 of docs/PREREG_PPO2.md (run --critic-probe): the env settings of the probe's episodes, V4's reward (the
+    D_cond preset, training_prep.reward_overrides, with the progress scale 3.3333333333333335: each recorded turn reward
+    is V4's) and the privileged critic's truth (env critic_features from the distance tables in ``tables_dir``)."""
+    import os
+
+    from .training_prep import reward_overrides
+
+    return {**reward_overrides("D_cond"), "potential_field_reward_scale": V4_PROGRESS_SCALE,
+            "critic_features": True, "critic_feature_tables_dir": os.path.abspath(str(tables_dir))}
 
 
 def folder_rule(result: Path) -> Optional[float]:
@@ -341,18 +367,51 @@ def check_resume_rule(result: Path, switches: Dict[str, Any]) -> None:
                          f"{now!r}; one turn rule per result folder (give another --name)")
 
 
-def check_resume_probe(result: Path, version: Optional[str]) -> None:
+def check_resume_probe(result: Path, version: Optional[str], key: str = "grounding_probe") -> None:
     """Grounding probe (2026-11-12, item 5): one probe version per result folder.  A run resuming a folder whose
     results.jsonl already has rows must give the probe version of the folder's model.json (``version`` None and a
-    missing key: not a probe run), else it stops before anything is written."""
+    missing key: not a probe run), else it stops before anything is written.  ``key``: the probe's model.json key
+    (critic_probe for gate 0's recording mode)."""
     results = Path(result) / "results.jsonl"
     if not results.is_file() or not _jsonl(results, partial_ok=True):
         return
     model = Path(result) / "model.json"
-    before = json.loads(model.read_text()).get("grounding_probe") if model.is_file() else None
+    before = json.loads(model.read_text()).get(key) if model.is_file() else None
     if before != version:
-        raise SystemExit(f"{result}: its results were evaluated with grounding_probe {before!r}, this run gives "
+        raise SystemExit(f"{result}: its results were evaluated with {key} {before!r}, this run gives "
                          f"{version!r}; one probe version per result folder (give another --name)")
+
+
+def check_resume_tables(result: Path, switches: Dict[str, Any]) -> None:
+    """Critic probe: a run resuming a folder with results gives the distance tables its model.json env_switches name
+    (critic_feature_tables_dir), else it stops before anything is written."""
+    results, model = Path(result) / "results.jsonl", Path(result) / "model.json"
+    if not results.is_file() or not _jsonl(results, partial_ok=True) or not model.is_file():
+        return
+    before = (json.loads(model.read_text()).get("env_switches") or {}).get("critic_feature_tables_dir")
+    now = switches.get("critic_feature_tables_dir")
+    if before != now:
+        raise SystemExit(f"{result}: its results were recorded with critic_feature_tables_dir {before!r}, this run "
+                         f"gives {now!r}; one tables folder per result folder (give another --name)")
+
+
+def ids_digest(ids: Sequence[int]) -> str:
+    """Critic probe: the sha256 of a prompt's token ids (decimal, comma-separated), so repr_probe can check a rebuilt
+    prompt against the one vLLM ran."""
+    import hashlib
+
+    return hashlib.sha256(",".join(str(int(i)) for i in ids).encode()).hexdigest()
+
+
+def critic_probe_fields(info: Any) -> Dict[str, Any]:
+    """Critic probe: the env's truth at the pose of an observation (its reset / step info), as a turn records it."""
+    if not isinstance(info, dict) or "critic_features" not in info:
+        raise RuntimeError("critic probe: the env's info has no critic_features (env critic_features off?)")
+    feats = info["critic_features"]
+    out: Dict[str, Any] = {"critic_features": dict(feats) if feats is not None else None}
+    if info.get("critic_features_error") is not None:
+        out["critic_features_error"] = str(info["critic_features_error"])
+    return out
 
 
 def gate_summary(metric: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -408,7 +467,8 @@ def call_seed(base: int, index: int, sample: int, turn: int) -> int:
 
 def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optional[Path] = None,
                 history: bool = False, as_sft: bool = False, sample: Optional[int] = None,
-                seed: Optional[int] = None, grounding: bool = False, grounding_side: bool = False) -> Dict[str, Any]:
+                seed: Optional[int] = None, grounding: bool = False, grounding_side: bool = False,
+                critic_probe: bool = False) -> Dict[str, Any]:
     """One greedy episode; per-turn bookkeeping as in scripts/r1_run_canonical_dev_eval32.py.
 
     With ``frames`` (round 8) the row also carries the trajectory: per turn the frame the model saw (a JPEG in
@@ -420,8 +480,17 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
     <index>_s<sample>_<turn>.jpg.  ``grounding`` (2026-11-12, item 5): the grounding probe (grounding_probe.py); the
     user text the model saw (the probe instruction appended) is what the history and the trajectory keep.
     ``grounding_side`` (v2): the action call is unchanged; after it, before the env moves the camera, the policy's
-    side_generate asks for the statement on the same frame with the same earlier turns (never added to them)."""
+    side_generate asks for the statement on the same frame with the same earlier turns (never added to them).
+    ``critic_probe`` (gate 0 of PREREG_PPO2): frames as lossless PNG (.png), each turn also records the env's truth at
+    the pose of the observation it answered (critic_probe_fields of reset's info for turn 0, of step t-1's after), the
+    unrounded reward and the digest of the prompt's token ids (policy.last_prompt_ids); the row its system prompt and
+    the truth after the last turn."""
+    if critic_probe and (grounding or grounding_side):
+        raise ValueError("the critic probe runs without the grounding probe")
+    if critic_probe and frames is None:
+        raise ValueError("the critic probe records the trajectory: give frames")
     obs, info = env.reset(seed=index)
+    obs_info = info  # critic probe: the info of the observation the next answer responds to (reset's, then each step's)
     system = env.system_prompt()
     item = env.current_item or {}
     turns, invalid, attempted, collisions, success, actions_to_success = 0, 0, 0, 0, False, None
@@ -437,8 +506,12 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         if frames is None or image is None:
             return None
         frames.mkdir(parents=True, exist_ok=True)
-        name = f"{index:03d}_{turn:02d}.jpg" if sample is None else f"{index:03d}_s{sample}_{turn:02d}.jpg"
-        image.convert("RGB").save(frames / name, format="JPEG", quality=85)
+        ext = "png" if critic_probe else "jpg"
+        name = f"{index:03d}_{turn:02d}.{ext}" if sample is None else f"{index:03d}_s{sample}_{turn:02d}.{ext}"
+        if critic_probe:  # lossless: the pixels the model got (its frame went to vLLM as a PNG, _image_url)
+            image.convert("RGB").save(frames / name, format="PNG")
+        else:
+            image.convert("RGB").save(frames / name, format="JPEG", quality=85)
         return f"{frames.name}/{name}"
 
     while not done and turns < max_turns:
@@ -458,12 +531,15 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             user_text += grounding_probe.instruction(item)
         if grounding_side:  # v2: the truth at this frame's pose (the side call comes after the action call)
             truth = grounding_probe.truth(item, env.view_engine.get_pose())
+        probe = critic_probe_fields(obs_info) if critic_probe else {}  # the truth at this frame's pose
         text = policy.generate(system, user_text, images[0], **kw)
         if history:
             earlier.append((user_text, images[0], text))
         seen = {"frame": keep(images[0], turns), "user": user_text}
         if getattr(policy, "last_prompt_tokens", None) is not None:
             seen["prompt_tokens"] = policy.last_prompt_tokens
+        if critic_probe and getattr(policy, "last_prompt_ids", None) is not None:
+            seen["prompt_ids_sha256"] = ids_digest(policy.last_prompt_ids)
         if getattr(policy, "last_entropy", None) is not None:  # round 12 freeze: run --entropy
             seen.update(entropy=round(float(policy.last_entropy), 5), tokens=int(policy.last_tokens or 0))
         if grounding_side:  # v2: the same frame, the action call's earlier turns (kw), the plain user text + question
@@ -477,6 +553,7 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             else:
                 probe_turns.append(grounding_probe.side_record(side, truth, turns))
         obs, reward, done, step_info = env.step(grounding_probe.answer_part(text) if grounding else text)
+        obs_info = step_info
         if grounding:
             probe_turns.append(grounding_probe.score(text, truth, turns))
         turns += 1
@@ -496,9 +573,11 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
             # experiment 3A: under the turn rule (the env reports turn_footprint_blocks only then) the turn's turns
             # blocked by the robot-base footprint; a row under today's rule gets nothing new
             footprint = ({"footprint_blocks": int(tm["turn_footprint_blocks"])} if "turn_footprint_blocks" in tm else {})
+            if critic_probe:  # gate 0: the unrounded reward (the probe's returns-to-go are summed from it)
+                probe = {"reward_exact": float(reward), **probe}
             trajectory.append(dict(seen, answer=text, actions=[str(a) for a in parsed], valid=valid,
                                    collisions=blocked, **footprint, reward=round(float(reward), 4), met=met,
-                                   **gate_summary(metric)))
+                                   **gate_summary(metric), **probe))
     row = {"index": index, "task_id": item.get("task_id"), "scene_id": item.get("scene_id"),
            "task_type": item.get("task_type"), "d_star": int((item.get("difficulty") or {}).get("d_star", 0)),
            "success": success, "actions_to_success": actions_to_success, "turns": turns,
@@ -513,6 +592,11 @@ def run_episode(env: Any, policy: Any, index: int, max_turns: int, frames: Optio
         row.update(task_description=item.get("task_description"), start=start, trajectory=trajectory,
                    final_frame=keep(last[0] if last else None, turns),
                    end_reason=end_reason if done else "max_turns")
+    if critic_probe:  # gate 0: what repr_probe needs to rebuild the chat, and the truth after the last turn
+        final = critic_probe_fields(obs_info)
+        row.update(system=system, final_critic_features=final["critic_features"])
+        if "critic_features_error" in final:
+            row["final_critic_features_error"] = final["critic_features_error"]
     return row
 
 
@@ -667,16 +751,28 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     check_resume_rule(out, switches)  # experiment 3A: before the env, the model and model.json
     probe = bool(getattr(args, "grounding_probe", False))
     side = bool(getattr(args, "grounding_side", False))  # grounding probe v2
+    critic = bool(getattr(args, "critic_probe", None))  # gate 0 of PREREG_PPO2: the recording mode
     if probe and side:
         raise SystemExit("--grounding-probe and --grounding-side: one grounding probe per run")
+    if critic and (probe or side):
+        raise SystemExit("--critic-probe records the plain run's calls: not with --grounding-probe / --grounding-side")
+    if critic and not args.history:
+        raise SystemExit("--critic-probe needs --history (repr_probe teacher-forces each episode as one sequence)")
+    if critic and not Path(args.critic_probe).is_dir():
+        raise SystemExit(f"--critic-probe {args.critic_probe}: not a directory (the tasks' distance tables)")
     probe_key: Dict[str, Any] = {}
     if probe or side:
         from data_gen.interiorgs_v10 import grounding_probe
 
         probe_key = {"grounding_probe": grounding_probe.VERSION_SIDE if side else grounding_probe.VERSION}
+    if critic:
+        probe_key = {"critic_probe": CRITIC_PROBE_VERSION}
     if side:
         check_side_support(args.model)
     check_resume_probe(out, probe_key.get("grounding_probe"))  # 2026-11-12, item 5
+    check_resume_probe(out, probe_key.get("critic_probe"), key="critic_probe")  # gate 0: one probe version
+    if critic:
+        check_resume_tables(out, switches)
     cfg = env_config(Path(args.env_template), tasks, args.gs_root, args.prompt_format, switches)
     keys = set(ActiveSpatialEnvConfig.__dataclass_fields__)
     env = ActiveSpatialEnv(ActiveSpatialEnvConfig(**{k: v for k, v in cfg.items() if k in keys}))
@@ -713,7 +809,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
                     row = run_episode(env, policy, i, int(args.max_turns), frames=out / "frames",
                                       history=args.history, as_sft=args.sft_text, sample=k,
                                       seed=int(args.sample_seed) if sampled else None, grounding=probe,
-                                      grounding_side=side)
+                                      grounding_side=side, **({"critic_probe": True} if critic else {}))
                 except Exception as exc:  # an infrastructure error is recorded, not counted as a failure
                     row = {"index": i, "error": f"{type(exc).__name__}: {exc}"}
                     if k is not None:
@@ -1029,6 +1125,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="grounding probe v2 (2026-11-12): the action call is the plain run's; after it a separate "
                         "greedy call on the same frame, the reply prefilled with <state>bearing, asks for the "
                         "statement (grounding_probe.py); the side calls never enter the history")
+    r.add_argument("--critic-probe", default=None, metavar="TABLES_DIR",
+                   help="gate 0 of docs/PREREG_PPO2.md (the representation probe's episodes): the env with "
+                        "critic_features on (the distance tables of TABLES_DIR) and V4's reward (D_cond, progress "
+                        "scale 3.3333333333333335; model.json env_switches); frames as PNG, each turn also records the "
+                        "truth at its observation's pose, the unrounded reward and the prompt's token digest "
+                        "(repr_probe.py); needs --history; default off")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     m = sub.add_parser("terminal", help="round 12 batch: end progress, conditions met at the end, collision rate")
