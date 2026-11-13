@@ -589,6 +589,8 @@ def test_validate_check_and_factory(backend, tmp_path, monkeypatch):
     assert res["mesh_set_sha256"] == json.loads(man.read_text())["mesh_set_sha256"] and res["manifest"]["key_matches"]
     assert res["official"]["sha256"] == MC.METRICS_SHA256 and res["tolerance_m"] == 1e-4
     assert res["official"]["open3d_version"] == MC.O3D_VERSION
+    # the E3VS code's sha256 (recording only; user 2026-11-13)
+    assert list(res["code"]["e3vs_files"]) == list(E.CODE_FILES) and res["code"]["e3vs_files"] == E.code_files_sha256()
     assert res["iphone_convention"] == {"convention": "opencv", "source": "given (--convention)",
                                         "note": res["iphone_convention"]["note"]}
     assert not MC.definition_problems(v) and res["frame_ok"] and res["frame_warnings"] == []
@@ -873,6 +875,7 @@ def test_three_call_sites_use_the_validated_mesh(backend, tmp_path, monkeypatch)
     assert m["scenes"][sid]["mesh_sha256"] == m["scenes"][sid]["mesh_validated_sha256"] == res["scenes"][sid]["sha256"]
     assert m["collision_loaded"] and m["collision_loaded"][0]["sha256"] == MC.METRICS_SHA256
     assert m["collision"]["frame"]["frame_ok"] is True and m["collision"]["frame"]["ack"] is None
+    assert m["code"]["e3vs_files"] == E.code_files_sha256()  # recording only (user 2026-11-13)
     lg = json.loads((rd / "episodes.jsonl").read_text().splitlines()[0])
     assert [s["action"] for s in lg["steps"]] == ["move_forward", "turn_left", "look_down", "move_up", "stop"]
     assert [s["collision"] for s in lg["steps"]] == [True, False, False, True, False]

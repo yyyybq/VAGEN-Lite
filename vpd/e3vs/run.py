@@ -39,11 +39,12 @@ RUN dir (--run-dir, else --out-root/<pilot__START__TIER__MODE>): episodes.jsonl 
 poses, actions, collisions, parse flags, replies), prompt_dump.jsonl (the first 3 calls of the first episode,
 images as paths), images/ (the PNGs of the first --save-images episodes), manifest.json (git, E3VS commit
 bb7e603c + episode md5s, PLY sha256 and mesh sha256 per scene, the collision model (official file sha256,
-tolerance, the validated mesh_set_sha256), prompt template sha256, decoding, server,
-adapter, gsplat version + the job's B18 probe (--gsplat-probe, else $VPD_GSPLAT_PROBE), scene load counts and
-seconds), audit.json (image tokens from the processor's image_grid_thw; HF vs server prompt tokens, B4/B5), and
-results.json from vpd.e3vs.summary.score (results_invalid.json when an episode is missing or failed).  An
-existing results.json is refused (the job payload skips the step instead).
+tolerance, the validated mesh_set_sha256), prompt template sha256, decoding, server, code (code.e3vs_files: the
+sha256 of vpd/e3vs/*.py and vpd/jobs/e3vs_*.sh, recording only), adapter, gsplat version + the job's B18 probe
+(--gsplat-probe, else $VPD_GSPLAT_PROBE), scene load counts and seconds), audit.json (image tokens from the
+processor's image_grid_thw; HF vs server prompt tokens, B4/B5), and results.json from vpd.e3vs.summary.score
+(results_invalid.json when an episode is missing or failed).  An existing results.json is refused (the job payload
+skips the step instead).
 """
 
 from __future__ import annotations
@@ -729,7 +730,8 @@ def main(argv=None) -> int:
         str(a.model_dir), "adapter": adapter_info(a.adapter_meta, a.start), "concurrency": a.concurrency,
         "session": {"modes": modes, "evals": [names[m] for m in modes]},
         "git": git_facts(), "code": code_meta(Path(__file__), Path(M.__file__), Path(RD.__file__),
-                                              Path(S.__file__), Path(G.__file__), Path(MC.__file__)),
+                                              Path(S.__file__), Path(G.__file__), Path(MC.__file__),
+                                              e3vs_files=True),
         "argv": sys.argv[1:] if argv is None else list(argv),
         "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "uid": os.getuid()}
     manifests = {}

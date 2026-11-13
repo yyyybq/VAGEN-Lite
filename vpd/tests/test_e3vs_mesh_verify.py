@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import json
 import struct
+import subprocess
+from pathlib import Path
 
 import pytest
 
+import vpd.e3vs as E
+from vpd import paths
 from vpd.e3vs import mesh_verify as MV
 
 
@@ -61,6 +65,7 @@ def test_ok_and_manifest(tmp_path):
     assert len(res["mesh_set_sha256"]) == 64
     man = json.loads((out / MV.MANIFEST).read_text())
     assert man["mesh_set_sha256"] == res["mesh_set_sha256"]
+    assert set(man["code"]["e3vs_files"]) == set(E.CODE_FILES)  # recording only
     lines = (out / MV.SHA_LIST).read_text().splitlines()
     assert len(lines) == 3 and all(len(x.split("  ")[0]) == 64 for x in lines)
     assert MV.summary_line(res).startswith("mesh verify OK (3 scenes")
@@ -140,6 +145,24 @@ def test_notes_for_extras(tmp_path):
     res = MV.verify(root, idf, None, expected=IDS)
     assert res["ok"]
     assert any("semantic" in n for n in res["notes"]) and any("zzz" in n for n in res["notes"])
+
+
+def test_code_files_are_the_tracked_e3vs_code():
+    """CODE_FILES (recorded as code.e3vs_files) is exactly the tracked vpd/e3vs/*.py and vpd/jobs/e3vs_*.sh."""
+    shas = E.code_files_sha256()
+    assert list(shas) == list(E.CODE_FILES) and all(v and len(v) == 64 for v in shas.values())
+    assert shas["vpd/e3vs/mesh_verify.py"] == E.sha256_file(paths.WORKTREE / "vpd" / "e3vs" / "mesh_verify.py")
+    m = E.code_meta(Path(MV.__file__), e3vs_files=True)
+    assert m["e3vs_files"] == shas and "e3vs_files" not in E.code_meta(Path(MV.__file__))
+    assert E.code_files_sha256(Path("/nonexistent_vpd_tree"))["vpd/e3vs/run.py"] is None
+    try:
+        r = subprocess.run(["git", "-C", str(paths.WORKTREE), "ls-files", "--", "vpd/e3vs/*.py", "vpd/jobs/e3vs_*.sh"],
+                           capture_output=True, text=True, timeout=60)
+    except OSError:
+        r = None
+    if r is None or r.returncode != 0:
+        pytest.skip("no git here (a job's code snapshot)")
+    assert sorted(r.stdout.split()) == sorted(E.CODE_FILES)
 
 
 def test_expected_ids_are_the_99_episode_scenes():

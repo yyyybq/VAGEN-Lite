@@ -205,10 +205,26 @@ def _snapshot_commit(root: Path) -> str | None:
     return st.get("commit") if st.get("mode") == "snapshot" else None
 
 
-def code_meta(*files: Path) -> dict:
+# The E3VS code (user 2026-11-13: "E3VS 自己的代码 sha 记进 manifest"): every tracked vpd/e3vs/*.py and
+# vpd/jobs/e3vs_*.sh, relative to paths.WORKTREE.  An explicit list, not a glob, so that untracked files in a worktree
+# are never read; test_e3vs_mesh_verify compares it with `git ls-files`.
+CODE_FILES = tuple(f"vpd/e3vs/{m}.py" for m in (
+    "__init__", "bfs_demos", "floors", "geometry", "make_sft", "mesh_collision", "mesh_verify", "occupancy", "render",
+    "run", "summary")) + ("vpd/jobs/e3vs_prep.sh", "vpd/jobs/e3vs_start.sh")
+
+
+def code_files_sha256(root: Path | None = None) -> dict:
+    """{relpath: sha256} of CODE_FILES under root (default paths.WORKTREE: the git worktree, or a job's code snapshot
+    RUN/code); None for a missing file.  Recording only: no check or gate compares it."""
+    root = Path(root) if root is not None else paths.WORKTREE
+    return {rel: sha256_file(root / rel) if (root / rel).is_file() else None for rel in CODE_FILES}
+
+
+def code_meta(*files: Path, e3vs_files: bool = False) -> dict:
     """sha256 of the given source files plus the worktree HEAD (read from .git, no git command).  In a sco job the
     code is the snapshot RUN/code, which has no .git: worktree_head is then the snapshot's commit and
-    worktree_head_source is "snapshot"."""
+    worktree_head_source is "snapshot".  e3vs_files: also "e3vs_files" = code_files_sha256() (the mesh MANIFEST,
+    validation.json and the eval manifests record it)."""
     head = repo_commit(paths.WORKTREE)
     meta = {"worktree_head": head}
     if head is None:
@@ -217,4 +233,6 @@ def code_meta(*files: Path) -> dict:
             meta = {"worktree_head": snap, "worktree_head_source": "snapshot"}
     meta["files"] = {str(Path(f).relative_to(paths.WORKTREE)) if str(f).startswith(str(paths.WORKTREE)) else str(f):
                      sha256_file(Path(f)) for f in files}
+    if e3vs_files:
+        meta["e3vs_files"] = code_files_sha256()
     return meta

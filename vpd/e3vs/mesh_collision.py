@@ -47,7 +47,9 @@ validate  (prep job vpd-e3vs-prep, step mesh_val; CPU only, pinned to one CPU)
            (check and load_collider refuse) until `ack-frame` records the user's decision for this mesh set.
   output   OUT/e3vs/mesh_val/validation.json; its mesh_set_sha256 (mesh_verify.mesh_set_sha256 of the validated
            per-scene sha256s, for the 99 scenes equal to the manifest's) is the key the prep job stamps on
-           everything built with this model (BFS, floors, SFT) and that the start jobs and the gate check.
+           everything built with this model (BFS, floors, SFT) and that the start jobs and the gate check.  Its
+           "code" records the sha256 of the E3VS code (code.e3vs_files: vpd/e3vs/*.py and vpd/jobs/e3vs_*.sh;
+           recording only), as the eval manifests of run.py do.
 check     validation.json passes, was made with this definition (official file, commit, tolerance, threshold,
           open3d version), its key matches its scene list and the manifest, no unacknowledged frame warning, it
           covers the asked scenes, and every asked mesh still has the validated sha256 (re-hashed); prints
@@ -715,7 +717,8 @@ def validate(scenes: list[str], episodes: list[dict], out_dir: Path | None = Non
            "iphone_convention": {"convention": conv, "source": src,
                                  "note": "provenance only: the camera centre c2w[:3, 3] is the same in both"},
            "definition": DEFINITION, "frame_ok": not warn, "frame_warnings": warn, "warnings": warn,
-           "code": code_meta(Path(__file__), Path(MV.__file__), Path(RD.__file__), Path(G.__file__)),
+           "code": code_meta(Path(__file__), Path(MV.__file__), Path(RD.__file__), Path(G.__file__),
+                             e3vs_files=True),
            "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     res["pass"] = bool(pooled["pass_iphone"] and pooled["pass_viewpoints"])
     out.parent.mkdir(parents=True, exist_ok=True)

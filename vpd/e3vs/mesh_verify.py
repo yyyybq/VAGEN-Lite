@@ -8,9 +8,9 @@ Scene list: OUT/e3vs/mesh_scene_ids.txt, which must equal the scene ids of the p
 Checks per scene: the file is there and non-empty; the PLY header parses (ply, format 1.0, vertex element with
 x/y/z, face element with a vertex index list); vertex and face counts > 0; for binary files the size equals
 header + vertices + triangle faces exactly (catches a truncated download) and the first face has 3 indices;
-size and sha256.  Writes OUT/e3vs/mesh_manifest.json (per-scene facts, problems, and mesh_set_sha256 =
-sha256 of the sorted "<scene> <sha256>" lines, the key of the mesh set) and OUT/e3vs/mesh_sha256.txt
-(sha256sum format).  The last line printed is "mesh verify OK (99 scenes ...)" or "mesh verify FAILED ...";
+size and sha256.  Writes OUT/e3vs/mesh_manifest.json (per-scene facts, problems, mesh_set_sha256 = sha256 of
+the sorted "<scene> <sha256>" lines, the key of the mesh set; code: the sha256 of the E3VS code, recording only)
+and OUT/e3vs/mesh_sha256.txt (sha256sum format).  The last line printed is "mesh verify OK (99 scenes ...)" or "mesh verify FAILED ...";
 the exit code is 0 only when OK.
 
 Read-only on the meshes.  Never touches credentials and never downloads anything.  Stdlib only (plus the
@@ -252,7 +252,7 @@ def verify(root: Path = MESH_DL, ids_file: Path = MESH_IDS, out_dir: Path | None
         out_dir = Path(out_dir)
         try:
             import vpd.e3vs as E
-            res["code"] = E.code_meta(Path(__file__))
+            res["code"] = E.code_meta(Path(__file__), e3vs_files=True)
         except Exception as e:  # noqa: BLE001 - provenance only
             res["code"] = {"error": str(e)}
         _write_atomic(out_dir / MANIFEST, json.dumps(res, indent=1, sort_keys=True) + "\n")
