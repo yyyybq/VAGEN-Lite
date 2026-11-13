@@ -29,7 +29,7 @@
 | `PREREG_WB_PILOT.md` | WalkerBench 试点的事先登记。用户确认后提交，提交以后冻结 | WP-PREREG |
 | `PREREG_E3VS_PILOT.md` | E3VS 试点的事先登记 | WP-E3VS-A |
 | `__init__.py`、`paths.py` | OUT 的目录常量、各解释器路径 | WP-CORE |
-| `starts.json`、`starts.py` | 起点表（名字 → 评测 view 代码、checkpoint 路径），加载时断言注意力实现 | WP-CORE |
+| `starts.json`、`starts.py` | 起点表（名字 → 评测 view 代码、checkpoint 路径），加载时断言注意力实现。2026-11-13 末尾只加了一条 Q3SG（genc0，TVR 探索起点，DECISIONS G20），训练器指纹因此从 0865dd75f1ee 变成 119da3c84b8d | WP-CORE；第三轮 G20 |
 | `sco.py`、`ledger.py` | 包装 `downstream/sco_job.py` 的 sco 工具，带作业台账和按闸门预留的预算检查 | WP-OPS |
 | `snapshot.py` | 作业代码快照：prepare 时建 `RUN/code` 和 `SNAPSHOT.json`（三个目录加根目录的 `ply_gaussian_loader.py`）；作业里核对文件（第 7 节） | infra（第三轮） |
 | `EXPLORATORY_WB_VARIANTS.md` | WalkerBench 限量探索（DECISIONS G4）的说明：开发集、选择规则、变体清单。探索性质，不是闸门 | wbvar（第三轮） |
@@ -64,22 +64,24 @@
 | `tvr/fake_server.py` | 测试用的假 OpenAI 接口服务器（按策略回复，确定性的 usage） | tvreval（第三轮第二批） |
 | `tvr/render_parity.py` | 渲染一致性按容差判（PSNR ≥ 40 dB 且 SSIM ≥ 0.99，状态、合法动作、用户文本、action_success 必须完全相同）；smoke 和每个评测作业的渲染金丝雀用它 | tvreval（第三轮第二批） |
 | `tests/test_tvr_eval.py` | tvreval 各模块的测试 | tvreval（第三轮第二批） |
-| `tvr/pilot_tvr.py` | TVR 试点编排（plan / prepare / submit / status / collect / delete / budget / expect / smoke-verdict / cal-decide），含本轮 200 卡时的预算拒绝。2026-11-12 起另有探索模式（DECISIONS G18）：单独的作业表 `XJOBS`（vpd-tvr-xsmoke、vpd-tvr-xtrain-q3rd / -q3rs150、vpd-tvr-xeval-<s>-top / -low，`EXPLORE_STARTS` = Q3RD、Q3RS150），同一配方，输出在 `OUT/tvr/runs/explore/rl/`；守卫另查评测框架指纹、预注册 2026-11-12 那一行、档位文件、适配器的种子和初始化链；本块 25 卡时的预算拒绝；`plan`、`status`、`budget` 加 `--explore` 才列探索作业；`xsmoke-verdict`。试点作业的表、payload、守卫和 expect 不变 | tvrjobs（第三轮第二批）；第三轮 G18 |
+| `tvr/pilot_tvr.py` | TVR 试点编排（plan / prepare / submit / status / collect / delete / budget / expect / smoke-verdict / cal-decide），含本轮 200 卡时的预算拒绝。2026-11-12 起另有探索模式（DECISIONS G18）：单独的作业表 `XJOBS`（vpd-tvr-xsmoke、vpd-tvr-xtrain-q3rd / -q3rs150、vpd-tvr-xeval-<s>-top / -low，`EXPLORE_STARTS` = Q3RD、Q3RS150），同一配方，输出在 `OUT/tvr/runs/explore/rl/`；守卫另查评测框架指纹、预注册 2026-11-12 那一行、档位文件、适配器的种子和初始化链；本块 25 卡时的预算拒绝；`plan`、`status`、`budget` 加 `--explore` 才列探索作业；`xsmoke-verdict`。试点作业的表、payload、守卫和 expect 不变。2026-11-13 起第三个探索起点 Q3SG（genc0，预注册第 17 节 2026-11-13 那一行，DECISIONS G20）：`EXPLORE_STARTS` = `RL_STARTS`（Q3RD、Q3RS150）+ Q3SG，同一探索根 `runs/explore/rl/`、同一本块预算；作业 vpd-tvr-xsmoke-q3sg（只冒烟 Q3SG，est_high 0.7 = 一个起点 1,815 秒 + 300 + 180 秒向上取到 0.1）、vpd-tvr-xtrain-q3sg、vpd-tvr-xeval-q3sg-top / -low；每个起点各自的登记行（RL 2026-11-12，Q3SG 2026-11-13）、各自的训练器规则（Q3SG：指纹以 119da3c84b8d 开头，且 5 个 .py 的 sha == 试点记录的、starts.json 去掉 Q3SG 后按 indent=1 重写的 sha == 86bb356e；其他作业仍要 0865dd75f1ee，所以在这棵树上拒跑，有意如此）、各自的冒烟判定（Q3SG：runs/explore/rl/smoke 下 starts 含 Q3SG 的最新一份 PASS）；探索适配器按起点登记的训练器代码核对，不按当前树 | tvrjobs（第三轮第二批）；第三轮 G18、G20 |
 | `tvr/gate_tvr.py` | TVR 闸门判定 → `GATE.json`、`GATE.md`；从 trajectory.json 独立重数 k/n；不算起点之间的差；G0 第 7 条自 2026-11-11 起只判合并是否正确（`merge_correctness.json` 登记的诊断报告，T−MF ≤ 1e-4），bf16 的 U−M 只报告（预注册第 17 节） | tvrjobs（第三轮第二批）；第三轮 G16 |
 | `tvr/compare_tvr.py` | 登记的只报告比较（预注册第 17 节 2026-11-11）：Q3S − Q3B（主报告）、Q3S − E2（补充）每格成对 b、c、精确 p，各起点 k/n 和 Wilson，参照行 Q3B 100 种子 1001 对 1002 → `COMPARE.json`、`COMPARE.md`；GATE.json、POWER.json 写完才算。`eval_dir` / `read_side` 的评测目录前缀默认 pilot（compare_rl 传 xrl） | 第三轮 G16 |
-| `tvr/compare_rl.py` | 探索性质的比较（预注册第 17 节 2026-11-12，DECISIONS G18，只报告）：Q3RD − Q3B、Q3RS150 − Q3B（主报告），Q3RD − Q3S、Q3RS150 − Q3S（补充），5 格成对 b（只有前一个起点成功）、c、精确 p 和两边 Wilson，五个起点（Q3B、Q3S、E2、Q3RD、Q3RS150）各档各臂的 k/n；RL 一侧读 `runs/explore/rl`（前缀 xrl），Q3B、Q3S、E2 读已有的试点评测 → `runs/explore/rl/COMPARE_RL.json`、`COMPARE_RL.md`；10 个探索评测都有效之前拒算 | 第三轮 G18 |
+| `tvr/compare_rl.py` | 探索性质的比较（预注册第 17 节 2026-11-12，DECISIONS G18，只报告）：Q3RD − Q3B、Q3RS150 − Q3B（主报告），Q3RD − Q3S、Q3RS150 − Q3S（补充），5 格成对 b（只有前一个起点成功）、c、精确 p 和两边 Wilson，五个起点（Q3B、Q3S、E2、Q3RD、Q3RS150）各档各臂的 k/n；RL 一侧读 `runs/explore/rl`（前缀 xrl），Q3B、Q3S、E2 读已有的试点评测 → `runs/explore/rl/COMPARE_RL.json`、`COMPARE_RL.md`；10 个探索评测都有效之前拒算。`validate`、`side_root`、`crosscheck`、`start_table` 带起点参数（默认本比较的），compare_q3sg 复用；COMPARE_RL 的输出不变 | 第三轮 G18 |
+| `tvr/compare_q3sg.py` | 探索性质的比较（预注册第 17 节 2026-11-13，DECISIONS G20，只报告，和 compare_rl 同口径）：Q3SG − Q3B（主：100 c、ALL c）、Q3SG − Q3S（诊断：同两格），compare_rl 的 5 格都照报作描述；每格成对 b、c、精确 p、两边 Wilson；Q3B、Q3S、Q3SG 各档各臂的 k/n；两格各自的预判（Q3SG 的 k ≥ Q3B → 遗忘；Q3SG − Q3S p ≥ 0.05 且 Q3SG − Q3B p < 0.05 → 动作任务本身；其他 → 介于两者之间，不判）→ `runs/explore/rl/COMPARE_Q3SG.json`、`COMPARE_Q3SG.md`；5 个 Q3SG 评测都有效、且每个 Q3SG 适配器的 code_files 满足"5 个 .py 的 sha 和试点 Q3B、Q3S 适配器记录的相同、starts.json 只多 Q3SG 这一条"之前拒算 | 第三轮 G20 |
 | `tvr/raw_bf16.py` | 探索冒烟用：按训练器的加载方式（vpd.starts.load_model，float32 → bf16）读原始起点，按 merge.py 的方式存成作业本地盘上的 bf16 目录给 vLLM（RL 起点没有评测视图），并逐位核对几个张量 == checkpoint 转 bf16 | 第三轮 G18 |
-| `jobs/tvr_xsmoke.sh` | sco 作业脚本：`tvr_xsmoke.sh RUN`（作业 vpd-tvr-xsmoke，以 root 跑，探索性质，两个 RL 起点一起）：每个起点 bf16 加载、dry run、HF 一致性、原始起点的 vLLM 提示一致性和 smoke8 机制会话；真训练器在 0W 前 16 条上训 1 个 epoch（2 个优化步）、merge.py 合并、合并一致性（只报告）、合并模型的 smoke4 c 臂；`xsmoke-verdict`，不算 SR | 第三轮 G18 |
+| `jobs/tvr_xsmoke.sh` | sco 作业脚本：`tvr_xsmoke.sh RUN`（作业 vpd-tvr-xsmoke，以 root 跑，探索性质，两个 RL 起点一起）：每个起点 bf16 加载、dry run、HF 一致性、原始起点的 vLLM 提示一致性和 smoke8 机制会话；真训练器在 0W 前 16 条上训 1 个 epoch（2 个优化步）、merge.py 合并、合并一致性（只报告）、合并模型的 smoke4 c 臂；`xsmoke-verdict`，不算 SR。起点表参数：`tvr_xsmoke.sh [Q3RD,Q3RS150\|Q3SG] RUN`，不给时是 Q3RD,Q3RS150（作业 vpd-tvr-xsmoke，命令和以前逐字节相同）；Q3SG 是作业 vpd-tvr-xsmoke-q3sg（只冒烟 Q3SG，`xsmoke-verdict --job tvr-xsmoke-q3sg`）；别的表退出 2 | 第三轮 G18、G20 |
 | `tvr/recheck_tvr.py` | 独立重算（不导入 tvrdata 的模块）：下限 F 和逐题计数 | tvrjobs（第三轮第二批） |
 | `tvr/merge_parity.py` | 合并权重和 LoRA 的 teacher-forced 一致性（平均 \|dCE\| ≤ 0.005，回复 argmax 一致率 ≥ 0.99），每个合并评测都跑 | tvrjobs（第三轮第二批） |
 | `jobs/tvr_data.sh` | sco 作业脚本：`tvr_data.sh RUN`（作业 vpd-tvr-data，非 root）：dev200、房子、可走集合、回放、示范、档位、BFS、下限 | tvrjobs（第三轮第二批） |
 | `jobs/tvr_cal.sh` | sco 作业脚本：`tvr_cal.sh RUN`（作业 vpd-tvr-cal，以 root 跑，只用 Q3B、只在 dev200 上，探索性质）：机制检查、渲染金丝雀、0W/100/ALL 训练和评测、cal-decide | tvrjobs（第三轮第二批） |
 | `jobs/tvr_cal400.sh` | sco 作业脚本：`tvr_cal400.sh RUN`（作业 vpd-tvr-cal400，只在 cal_decision.train_400 时跑）：400 档训练和评测 | tvrjobs（第三轮第二批） |
 | `jobs/tvr_mech_smoke.sh` | sco 作业脚本：`tvr_mech_smoke.sh RUN`（作业 vpd-tvr-msmoke，以 root 跑）：三个原始起点的机制冒烟，不算 SR；root 回放的渲染一致性 | tvrjobs（第三轮第二批） |
-| `jobs/tvr_train.sh` | sco 作业脚本：`tvr_train.sh START RUN`（作业 vpd-tvr-train-<s>）：0W、100、TOP 档训练（Q3B 还有种子 1002 的复制）。环境变量 `VPD_TVR_ROOT=explore/rl` 时是探索作业 vpd-tvr-xtrain-<s>（起点 Q3RD、Q3RS150，输出在 `runs/explore/rl/<起点>/`）；不设时和以前完全一样 | tvrjobs（第三轮第二批）；第三轮 G18 |
-| `jobs/tvr_eval.sh` | sco 作业脚本：`tvr_eval.sh START top\|low RUN`（作业 vpd-tvr-eval-<s>-top、-low）：金丝雀、合并、合并一致性、评测、official。`VPD_TVR_ROOT=explore/rl` 时是探索作业 vpd-tvr-xeval-<s>-<part>（评测前缀 xrl；合并一致性只报告：本适配器的 json 判 FAILED 时记 `merge_parity_<档>:report_only`）；不设时和以前完全一样 | tvrjobs（第三轮第二批）；第三轮 G18 |
+| `jobs/tvr_train.sh` | sco 作业脚本：`tvr_train.sh START RUN`（作业 vpd-tvr-train-<s>）：0W、100、TOP 档训练（Q3B 还有种子 1002 的复制）。环境变量 `VPD_TVR_ROOT=explore/rl` 时是探索作业 vpd-tvr-xtrain-<s>（起点 Q3RD、Q3RS150、Q3SG，输出在 `runs/explore/rl/<起点>/`）；不设时和以前完全一样 | tvrjobs（第三轮第二批）；第三轮 G18、G20 |
+| `jobs/tvr_eval.sh` | sco 作业脚本：`tvr_eval.sh START top\|low RUN`（作业 vpd-tvr-eval-<s>-top、-low）：金丝雀、合并、合并一致性、评测、official。`VPD_TVR_ROOT=explore/rl` 时是探索作业 vpd-tvr-xeval-<s>-<part>（起点 Q3RD、Q3RS150、Q3SG；评测前缀 xrl；合并一致性只报告：本适配器的 json 判 FAILED 时记 `merge_parity_<档>:report_only`）；不设时和以前完全一样 | tvrjobs（第三轮第二批）；第三轮 G18 |
 | `tests/test_tvr_jobs.py`、`tests/test_tvr_integration.py` | tvrjobs 的测试（作业脚本命令清单、prepare 守卫、闸门）；全链路集成测试（假 TVR 目录树） | tvrjobs（第三轮第二批） |
-| `tests/test_tvr_explore.py` | 探索模式的测试：XJOBS、守卫、本块预算、expect、步骤、xsmoke-verdict（不读成功字段）；三个作业脚本的空跑和假解释器下的非空跑；raw_bf16（小模型）；compare_rl（合成目录） | 第三轮 G18 |
+| `tests/test_tvr_explore.py` | 探索模式的测试：XJOBS、守卫、本块预算、expect、步骤、xsmoke-verdict（不读成功字段）；三个作业脚本的空跑和假解释器下的非空跑；raw_bf16（小模型）；compare_rl（合成目录）。试点和 RL 作业的测试在试点的训练器指纹下跑（`test_tvr_jobs.use_pilot_trainer`：本树的训练器文件加试点的 starts.json） | 第三轮 G18 |
+| `tests/test_tvr_q3sg.py` | 第三个探索起点 Q3SG 的测试：starts.json 只多 Q3SG 一条；训练器指纹（本树 119da3c84b8d，用原来的 starts.json——`git show 216656b9`——重算 0865dd75f1ee）、评测框架指纹 64edd575f36b 不变；Q3SG 作业的表、payload、est_high、本块预算、守卫（指纹前缀和不变量、2026-11-13 那一行、Q3SG 冒烟判定、处理器目录）、步骤、expect、xsmoke-verdict；试点和 RL 作业在本树上拒跑；`tvr_xsmoke.sh` 起点表（默认不变）和 Q3SG 的 train / eval 空跑；compare_q3sg（合成目录：各格、预判、拒算；COMPARE_RL 不变） | 第三轮 G20 |
 | `tests/test_tvr_prereg.py`、`tests/test_power_sim.py` | 事先登记块 == `pilot_cfg.FROZEN`、`missing()` 语义；功效模拟 | prereg（第三轮第二批） |
 | `tests/test_wave1c.py` | 第三轮 1c 的几处小修：perc 已完成的运行不重写 explore.json、wb_learn483.sh 的 `part`、E3VS `code_meta` 在快照里的 `worktree_head`、强删时复查看到 start_time 不记 0 卡时；本 README 覆盖第二批的每个文件 | wave1c（第三轮第二批） |
 | `jobs/tvr_probe.sh` | sco 作业脚本：`tvr_probe.sh RUN`（作业 vpd-tvr-probe，闸门 tvr，非 root，只用 CPU 渲染） | tvrprobe（第三轮） |
@@ -141,9 +143,9 @@
 | `tvr/runs/smoke/<RUN 名>/` | 机制冒烟的输出和 `smoke_verdict.json`（不算 SR） |
 | `tvr/runs/pilot/<起点>/` | 试点的 `adapters/<档>/`、`evals/pilot__<起点>__<档>__<臂>/`、`parity/merge_<档>.json`、`canary/<作业>/render_parity.json` |
 | `tvr/runs/pilot/` | `GATE.json`、`GATE.md`（gate_tvr），以及 `POWER.json`（power_sim，只在 G0-G3 通过后）；`merge_correctness.json`（编排写的合并正确性报告登记表，G0 第 7 条读）；`COMPARE.json`、`COMPARE.md`（compare_tvr，在 GATE、POWER 之后） |
-| `tvr/runs/explore/rl/<起点>/` | 探索性质的 RL 起点（Q3RD、Q3RS150；DECISIONS G18）：`adapters/<档>/`、`evals/xrl__<起点>__<档>__<臂>/`、`parity/merge_<档>.json`（只报告）、`canary/<作业>/render_parity.json`。不进 `runs/pilot/` |
-| `tvr/runs/explore/rl/smoke/<RUN 名>/` | 探索冒烟 vpd-tvr-xsmoke 的输出（每个起点的 `load/`、`dry/`、`evals/`、`adapters/0W/`、`parity/`）和 `smoke_verdict.json`（不算 SR） |
-| `tvr/runs/explore/rl/` | `COMPARE_RL.json`、`COMPARE_RL.md`（compare_rl，10 个探索评测都有效之后） |
+| `tvr/runs/explore/rl/<起点>/` | 探索性质的 RL 起点（Q3RD、Q3RS150；DECISIONS G18）和第三个探索起点 Q3SG（DECISIONS G20；"rl" 只是目录名）：`adapters/<档>/`、`evals/xrl__<起点>__<档>__<臂>/`、`parity/merge_<档>.json`（只报告）、`canary/<作业>/render_parity.json`。不进 `runs/pilot/` |
+| `tvr/runs/explore/rl/smoke/<RUN 名>/` | 探索冒烟 vpd-tvr-xsmoke、vpd-tvr-xsmoke-q3sg 的输出（每个起点的 `load/`、`dry/`、`evals/`、`adapters/0W/`、`parity/`）和 `smoke_verdict.json`（不算 SR；`starts` 记这次冒烟的起点） |
+| `tvr/runs/explore/rl/` | `COMPARE_RL.json`、`COMPARE_RL.md`（compare_rl，10 个探索评测都有效之后）；`COMPARE_Q3SG.json`、`COMPARE_Q3SG.md`（compare_q3sg，5 个 Q3SG 评测都有效、训练器不变量成立之后） |
 | `tvr/runs/explore/mpdiag/` | 合并正确性诊断（vpd-tvr-mpdiag，探索性质）的报告，每次一个 `<RUN 名>/`（`mp_diag.json`、`mp_diag.md`） |
 | `envs/tvr` | TVR 的 conda 环境（要用户批准后才建） |
 | `e3vs/` | `repo/`、`data/`、`occ/`、`bfs/`、`sft/`、`parity/`、`runs/` |
