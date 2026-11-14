@@ -78,7 +78,7 @@ from vpd.e3vs import geometry as G
 from vpd.e3vs import make_sft as M
 from vpd.e3vs import mesh_collision as MC
 
-TIERS = ("raw", "0W", "100")
+TIERS = ("raw", "0W", "100", "300", "ALL")  # 300 / ALL: round 4 (OUT/plan/ROUND4.md, PREREG_E3VS_PILOT_V2)
 MODES = ("u", "c")
 MODE_NAMES = {"u": "unconstrained (primary)", "c": "constrained (secondary, E2 mechanism check)"}
 DEFAULT_COLLIDES = MC.FACTORY  # vpd.e3vs.mesh_collision:load_collider

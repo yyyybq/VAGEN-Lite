@@ -27,7 +27,9 @@ Subcommands (outputs under OUT/e3vs/sft unless --out):
           random.Random(S) in type-name order, then a deficit interleave (pick the type maximising
           share * (placed + 1) - placed_type, ties by type name), so every prefix is stratified and tiers nest.
   tier    seed<S>/demos_<N>.jsonl: the first N episodes of the order, all their decision records (incl. stop);
-          images under images/train/<episode>/t<step>.png (shared by all tiers).
+          images under images/train/<episode>/t<step>.png (shared by all tiers).  N = ALL (round 4,
+          OUT/plan/ROUND4.md B): every reached pool record, i.e. the order's episodes, then the other starts of
+          the same (scene, question) in a stratified_order of their own (same seed) -> demos_ALL.jsonl.
   all     warmup + order + tier for --seed / --tiers.
 Rendering: --renderer gsplat (one PLY at a time) or fake (tests).
 """
@@ -94,6 +96,7 @@ WARMUP_QUESTION = "Format practice, not a viewpoint-search task: take the action
 N_WARMUP = 20
 DEFAULT_SEED = 1001
 DEFAULT_TIERS = (100,)
+ALL_TIER = "ALL"  # every reached pool record (tier_records; round 4)
 
 
 def reply(action: str) -> str:
@@ -340,15 +343,34 @@ def build_order(pool_path: Path, seed: int, out: Path) -> dict:
     return res
 
 
-def build_tier(out: Path, seed: int, n: int, prompts: Prompts, renderers: SceneRenderers,
+def tier_records(order: dict, pool: list[dict], n, seed: int) -> list[dict]:
+    """The episodes of tier n in tier order: the first n of the order; n == ALL_TIER: every reached, non-extra
+    pool record, the order's episodes first, then the other starts in stratified_order(rest, seed)."""
+    by_ep = {r["episode_index"]: r for r in pool if r.get("status") == "reached" and not r.get("extra")}
+    if n == ALL_TIER:
+        head = [by_ep[o["episode_index"]] for o in order["order"]]
+        seen = {r["episode_index"] for r in head}
+        return head + stratified_order([r for r in by_ep.values() if r["episode_index"] not in seen], seed)
+    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+        raise ValueError(f"tier must be a positive integer or {ALL_TIER!r}, got {n!r}")
+    if n > len(order["order"]):
+        raise ValueError(f"tier {n} > {len(order['order'])} episodes in the order")
+    return [by_ep[o["episode_index"]] for o in order["order"][:n]]
+
+
+def parse_tiers(spec: str) -> list:
+    """'100' -> [100]; '300,ALL' -> [300, 'ALL']."""
+    return [ALL_TIER if x == ALL_TIER else int(x) for x in re.split(r"[,\s]+", spec) if x]
+
+
+def build_tier(out: Path, seed: int, n, prompts: Prompts, renderers: SceneRenderers,
                pool_path: Path, overwrite: bool = False) -> dict:
+    """seed<S>/demos_<n>.jsonl + manifest; n is a positive integer or ALL_TIER."""
     order = json.loads((out / f"order_seed{seed}.json").read_text())
     if order["pool_sha256"] != sha256_file(pool_path):
         raise AssertionError(f"{pool_path} changed since order_seed{seed}.json was built")
-    if n > len(order["order"]):
-        raise ValueError(f"tier {n} > {len(order['order'])} episodes in the order")
-    by_ep = {r["episode_index"]: r for r in read_pool(pool_path) if r.get("status") == "reached" and not r.get("extra")}
-    chosen = [by_ep[o["episode_index"]] for o in order["order"][:n]]
+    chosen = tier_records(order, read_pool(pool_path), n, seed)
+    in_order = {o["episode_index"] for o in order["order"]}
     system = prompts.system()
     rows = []
     for rec in sorted(chosen, key=lambda r: (r["scene_id"], r["episode_index"])):  # one PLY load per scene
@@ -360,11 +382,12 @@ def build_tier(out: Path, seed: int, n: int, prompts: Prompts, renderers: SceneR
                                    d["action"], {"kind": "demo", "episode_index": rec["episode_index"],
                                                  "scene_id": rec["scene_id"], "question_type": rec["question_type"],
                                                  "step": d["step"], "action": d["action"], "image_sha256": sha}))
-    rank = {o["episode_index"]: i for i, o in enumerate(order["order"])}
+    rank = {r["episode_index"]: i for i, r in enumerate(chosen)}  # tier order (a numeric tier: the order's)
     rows.sort(key=lambda r: (rank[r["meta"]["episode_index"]], r["meta"]["step"]))
     path = out / f"seed{seed}" / f"demos_{n}.jsonl"
     sha = _write_jsonl(path, rows)
     man = {"kind": "tier", "seed": seed, "tier": n, "n_episodes": len(chosen), "n_records": len(rows),
+           "n_from_order": sum(r["episode_index"] in in_order for r in chosen),
            "jsonl": str(path), "jsonl_sha256": sha, "order": str(out / f"order_seed{seed}.json"),
            "pool": str(pool_path), "pool_sha256": order["pool_sha256"],
            "type_counts": dict(sorted(collections.Counter(r["question_type"] for r in chosen).items())),
@@ -385,7 +408,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, default=None, help="default OUT/e3vs/sft")
     ap.add_argument("--pool", type=Path, default=None, help="default OUT/e3vs/bfs/mesh/train/demo_pool.jsonl")
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    ap.add_argument("--tiers", default=",".join(map(str, DEFAULT_TIERS)), help="comma list, e.g. 100")
+    ap.add_argument("--tiers", default=",".join(map(str, DEFAULT_TIERS)), help="comma list, e.g. 100 or 300,ALL")
     ap.add_argument("--renderer", default="gsplat", choices=("gsplat", "fake"))
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--repo", type=Path, default=None)
@@ -400,7 +423,7 @@ def main(argv=None) -> int:
     check_repo(repo)
     prompts = Prompts(repo)
     renderers = SceneRenderers(a.renderer, a.device)
-    tiers = [int(x) for x in re.split(r"[,\s]+", a.tiers) if x]
+    tiers = parse_tiers(a.tiers)
     if a.cmd in ("warmup", "all"):
         m = build_warmup(out, prompts, renderers, repo, a.overwrite)
         print(f"[make_sft] warmup: {m['n']} records -> {m['jsonl']}", flush=True)

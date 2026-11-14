@@ -539,6 +539,42 @@ def test_stratified_order_prefixes_and_dedup():
 
 
 @needs_repo
+def test_tier_records_all_and_nesting():
+    """Round 4 tiers (OUT/plan/ROUND4.md B): a numeric tier is a prefix of the order; ALL = every reached, non-extra
+    pool record, the order's episodes first, then the other starts of the same (scene, question); tiers nest."""
+    recs = []
+    for i in range(60):
+        qt = "A" if i < 30 else ("B" if i < 48 else "C")
+        recs.append({"status": "reached", "extra": False, "scene_id": f"s{i % 5}", "question": f"q{i}",
+                     "question_type": qt, "episode_index": i, "opt_len": 1 + i % 4})
+    dups = [dict(r, episode_index=500 + r["episode_index"]) for r in recs[::3]]  # other starts, same question
+    junk = [dict(recs[0], episode_index=900, question="x", status="capped"),
+            dict(recs[0], episode_index=901, question="y", extra=True)]
+    pool = recs + dups + junk
+    order = {"order": [{"episode_index": r["episode_index"]} for r in M.stratified_order(M.dedup_pool(pool), 1001)]}
+    head = [o["episode_index"] for o in order["order"]]
+
+    def ids(rs):
+        return [r["episode_index"] for r in rs]
+
+    t10, t30 = ids(M.tier_records(order, pool, 10, 1001)), ids(M.tier_records(order, pool, 30, 1001))
+    t_all = ids(M.tier_records(order, pool, M.ALL_TIER, 1001))
+    assert t10 == head[:10] and t30 == head[:30] and t_all[:30] == t30 and t_all[:len(head)] == head
+    reached = {r["episode_index"] for r in pool if r["status"] == "reached" and not r["extra"]}
+    assert len(head) == 60 and len(t_all) == len(set(t_all)) == len(reached) == 80 and set(t_all) == reached
+    assert t_all == ids(M.tier_records(order, list(reversed(pool)), M.ALL_TIER, 1001))  # pool order irrelevant
+    rest = M.stratified_order([r for r in pool if r["episode_index"] in set(t_all) - set(head)], 1001)
+    assert t_all[len(head):] == ids(rest)
+    for bad in (0, -1, len(head) + 1, "all", True):
+        with pytest.raises(ValueError):
+            M.tier_records(order, pool, bad, 1001)
+    assert M.parse_tiers("100") == [100] and M.parse_tiers("300,ALL") == [300, "ALL"]
+    assert M.parse_tiers("300 ALL") == [300, "ALL"]
+    with pytest.raises(ValueError):
+        M.parse_tiers("all")
+    assert {"300", "ALL"} <= set(RU.TIERS)
+
+
 def test_warmup_selection_rule():
     tr = E.load_episodes("train", REPO)
     sel = M.warmup_selection(tr)
@@ -612,6 +648,11 @@ def test_make_sft_tier_on_val_bfs_episodes(scratch, prompts, val_pool):
     assert Path(rows[0]["images"][0]).stat().st_mtime_ns == mt
     with pytest.raises(ValueError):
         M.build_tier(out, 1001, len(reached) + 1, prompts, ren, pool)
+    # ALL (round 4): this val pool has one start per (scene, question), so ALL == the whole order, same file
+    m_all = M.build_tier(out, 1001, M.ALL_TIER, prompts, ren, pool)
+    assert m_all["tier"] == "ALL" and m_all["n_episodes"] == m_all["n_from_order"] == len(reached)
+    assert m_all["jsonl_sha256"] == man["jsonl_sha256"] and m_all["n_records"] == man["n_records"]
+    assert Path(m_all["jsonl"]).name == "demos_ALL.jsonl"
 
 
 @needs_repo
@@ -1259,7 +1300,7 @@ def test_gate_e0_audit_and_collision_provenance(scratch):
 # ============================================================================================================
 # sco payloads
 # ============================================================================================================
-@pytest.mark.parametrize("name", ["e3vs_prep.sh", "e3vs_start.sh"])
+@pytest.mark.parametrize("name", ["e3vs_prep.sh", "e3vs_start.sh", "e3vs_cal.sh"])
 def test_job_scripts_parse(name):
     r = subprocess.run(["bash", "-n", str(JOBS / name)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -1284,7 +1325,7 @@ def test_timed_run_helpers_deadline_and_sigterm(scratch):
     """Both payloads share the helpers: a step gets at most the time left before the job deadline; SIGTERM is
     forwarded to the running step's process group, the cut step gets a steps.jsonl line, the EXIT handlers run."""
     h = _helpers("e3vs_prep.sh")
-    assert h == _helpers("e3vs_start.sh") and "timeout -k 30" in h
+    assert h == _helpers("e3vs_start.sh") == _helpers("e3vs_cal.sh") and "timeout -k 30" in h
     pre = "set -uo pipefail\nRESERVE=0\n"
     s1 = pre + "DEADLINE=$(( $(date +%s) + 2 ))\nMIN_STEP_S=0\n" + h + \
         "tx sleep 30; echo rc1=$?\nDEADLINE=$(date +%s)\nMIN_STEP_S=60\ntx true; echo rc2=$?\n"
