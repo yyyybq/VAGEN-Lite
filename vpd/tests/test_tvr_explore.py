@@ -54,11 +54,15 @@ def xlay(lay, monkeypatch):  # noqa: F811
 
 def trainer_code(s: str) -> dict:
     """The trainer code an adapter of explore start S records: the RL starts the pilot's (PILOT_TRAINER_SHA256, the
-    pilot's code_files), Q3SG this tree's (Q3SG_TRAINER_SHA256)."""
+    pilot's code_files), Q3SG the Q3SG tree's (Q3SG_TRAINER_SHA256), the dose starts this tree's
+    (DOSE_TRAINER_SHA256)."""
     files = dict(PT.TRAINER_PY_SHA256)
     if s in PT.Q3SG_STARTS:
         return {"code_sha256": PT.Q3SG_TRAINER_SHA256, "code_files": dict(files, **{
             PT.STARTS_JSON: PT.STARTS_JSON_SHA256_Q3SG})}
+    if s in PT.DOSE_STARTS:
+        return {"code_sha256": PT.DOSE_TRAINER_SHA256, "code_files": dict(files, **{
+            PT.STARTS_JSON: PT.STARTS_JSON_SHA256_DOSE})}
     return {"code_sha256": PT.PILOT_TRAINER_SHA256, "code_files": dict(files, **{
         PT.STARTS_JSON: PT.STARTS_JSON_SHA256_PILOT})}
 
@@ -116,12 +120,15 @@ def test_explore_job_table_names_and_sco_rules():
     from vpd import ledger, sco
 
     assert PT.RL_STARTS == ("Q3RD", "Q3RS150") and not set(PT.EXPLORE_STARTS) & set(pilot_cfg.STARTS)
-    assert PT.EXPLORE_STARTS == PT.RL_STARTS + ("Q3SG",)  # the third explore start (row 2026-11-13)
+    # the third explore start (row 2026-11-13) and the dose starts (row 2026-11-16)
+    assert PT.EXPLORE_STARTS == PT.RL_STARTS + ("Q3SG", "Q3S2", "Q3S4")
     assert len(PT.JOBS) == 13 and not set(PT.XJOBS) & set(PT.JOBS)  # the pilot table is unchanged
     assert sorted(PT.XJOBS) == sorted(["tvr-xsmoke", "tvr-xtrain-q3rd", "tvr-xtrain-q3rs150", "tvr-xeval-q3rd-top",
                                        "tvr-xeval-q3rd-low", "tvr-xeval-q3rs150-top", "tvr-xeval-q3rs150-low",
                                        "tvr-xsmoke-q3sg", "tvr-xtrain-q3sg", "tvr-xeval-q3sg-top",
-                                       "tvr-xeval-q3sg-low"])
+                                       "tvr-xeval-q3sg-low", "tvr-xsmoke-dose", "tvr-xtrain-q3s2", "tvr-xtrain-q3s4",
+                                       "tvr-xeval-q3s2-top", "tvr-xeval-q3s2-low", "tvr-xeval-q3s4-top",
+                                       "tvr-xeval-q3s4-low"])
     assert PT.XJOBS["tvr-xsmoke"]["starts"] == PT.RL_STARTS and PT.XJOBS["tvr-xsmoke"]["xlist"] is None
     for job, spec in PT.XJOBS.items():
         assert spec["name"] == "vpd-" + job and spec["as_root"] is True

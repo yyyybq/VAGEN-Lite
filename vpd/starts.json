@@ -58,5 +58,17 @@
   "path": "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/gen3b_sft_20261107/c0g/model/checkpoint-3976",
   "family": "qwen3",
   "note": "genc0: C0 action SFT trajectories (the same trajectory_train file as Q3S, sha 511ff945) + 22,000 general VQA rows, epoch 8 / 3,976 steps, from Qwen3-VL-8B-Instruct 0c351dd; upstream image_max_pixels 65536; no eval view; EXPLORATORY TVR start (user 2026-11-12 / 11-13)"
+ },
+ "Q3S2": {
+  "code": "c0q3_sft_e2",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-308",
+  "family": "qwen3",
+  "note": "C0 formal action SFT, the Q3S run (lf_q3formal, 10 epochs x 154 steps) at epoch 2 / 308 steps, from Qwen3-VL-8B-Instruct 0c351dd; vs checkpoint-1232 (Q3S): the same 21 files, 13 non-weight files byte-identical (config, tokenizer, processor, training_args, weight index), 7 weight shards of equal size, only trainer_state.json differs (OUT/scratch/orch/r5/dose/ckpt_check.json sha256 e5f6128b); no eval view; EXPLORATORY TVR dose start"
+ },
+ "Q3S4": {
+  "code": "c0q3_sft_e4",
+  "path": "/mnt/umm/users/yinbaiqiao/models_runs/chains/m_qwen3vl8b_formal_sft_20261026/lf_q3formal/model/checkpoint-616",
+  "family": "qwen3",
+  "note": "C0 formal action SFT, the Q3S run (lf_q3formal, 10 epochs x 154 steps) at epoch 4 / 616 steps, from Qwen3-VL-8B-Instruct 0c351dd; vs checkpoint-1232 (Q3S): the same 21 files, 13 non-weight files byte-identical (config, tokenizer, processor, training_args, weight index), 7 weight shards of equal size, only trainer_state.json differs (OUT/scratch/orch/r5/dose/ckpt_check.json sha256 e5f6128b); no eval view; EXPLORATORY TVR dose start"
  }
 }

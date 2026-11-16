@@ -90,19 +90,20 @@ def test_prereg_block_equals_pilot_cfg():
 
 def test_trainer_fingerprint_prefix(tmp_path):
     """The frozen recipe prefix is still the pilot's 0865dd75f1ee, which this tree's trainer files give with the
-    pilot's starts.json (this tree's without the Q3SG entry); this tree's own fingerprint is the Q3SG one under the
-    invariant (5 .py shas unchanged, starts.json only gains Q3SG; PREREG section 17, row 2026-11-13), so the pilot
-    jobs' trainer check refuses here (intended: the pilot is closed)."""
+    pilot's starts.json (this tree's without the Q3SG and the dose entries); this tree's own fingerprint is the dose
+    one under the invariant (5 .py shas unchanged, starts.json only gains Q3SG, then Q3S2 and Q3S4; PREREG section 17,
+    rows 2026-11-13 and 2026-11-16), so the pilot jobs' trainer check refuses here (intended: the pilot is closed)."""
     from vpd.tests import test_tvr_jobs as TJ
     from vpd.train import n2_train_vpd as T
 
     want = pilot_cfg.FROZEN["recipe"]["trainer_code_sha256_prefix"]
     assert want == "0865dd75f1ee" and PT.PILOT_TRAINER_SHA256.startswith(want)
     assert T.code_fingerprint(TJ.pilot_trainer_root(tmp_path / "pilot"))["code_sha256"] == PT.PILOT_TRAINER_SHA256
+    assert T.code_fingerprint(TJ.q3sg_trainer_root(tmp_path / "q3sg"))["code_sha256"] == PT.Q3SG_TRAINER_SHA256
     fp = T.code_fingerprint()
-    assert fp["code_sha256"] == PT.Q3SG_TRAINER_SHA256 and PT.q3sg_trainer_problems() == []
+    assert fp["code_sha256"] == PT.DOSE_TRAINER_SHA256 and PT.dose_trainer_problems() == []
     assert {k: v for k, v in fp["code_files"].items() if k != PT.STARTS_JSON} == PT.TRAINER_PY_SHA256
-    assert PT.trainer_problems() == [f"trainer code_sha256 {PT.Q3SG_TRAINER_PREFIX} != frozen prefix {want}"]
+    assert PT.trainer_problems() == [f"trainer code_sha256 {PT.DOSE_TRAINER_PREFIX} != frozen prefix {want}"]
 
 
 def test_readme_mentions_every_wave2_file():

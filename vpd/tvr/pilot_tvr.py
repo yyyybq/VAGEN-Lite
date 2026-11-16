@@ -11,7 +11,7 @@
   in-job helpers (pure; called by vpd/jobs/tvr_*.sh):
     ... pilot_tvr expect JOB --run RUN            # RUN/expect.json; exit 0 iff every expected item holds
     ... pilot_tvr smoke-verdict --smoke DIR       # DIR/smoke_verdict.json (mechanism only, never an SR)
-    ... pilot_tvr xsmoke-verdict --smoke DIR [--job tvr-xsmoke-q3sg]  # an explore smoke's DIR/smoke_verdict.json
+    ... pilot_tvr xsmoke-verdict --smoke DIR [--job JOB]  # an explore smoke's DIR/smoke_verdict.json (JOB: XJOBS)
     ... pilot_tvr cal-decide --cal-root DIR       # DIR/cal_decision.json (EXPLORATORY, Q3B only, dev200 only)
     ... pilot_tvr guard JOB --run RUN             # the job's guard step (RUN/guard.json); exit 0 ok, 2 refused
     ... pilot_tvr cfg KEY [KEY ...]               # pilot_cfg values for the payload; exit 2 if one is None
@@ -109,6 +109,31 @@ Per-start rules (only the Q3SG jobs differ):
 tvr-xsmoke-q3sg est_high: one start ~1,815 s (XEST_HIGH's per-start figure with the calibration's slowest vLLM start
 and merge) + 300 + 180 s = 2,295 s = 0.64 h -> 0.7 GPU-h (rounded up to 0.1 h as for tvr-xsmoke's 1.2): outer 2220 s,
 soft 2040 s, kill 60 s.
+
+EXPLORATORY dose starts Q3S2, Q3S4 (Q3S's own C0 action SFT run lf_q3formal at epochs 2 and 4: checkpoint-308 / -616,
+registry codes c0q3_sft_e2 / c0q3_sft_e4, not in the eval registry, no eval view; PREREG_TVR_PILOT.md section 17, row
+DOSE_ROW_DATE): EXPLORE_STARTS = RL_STARTS + Q3SG_STARTS + DOSE_STARTS, in the same explore root (runs/explore/rl/<S>,
+eval prefix xrl) with the same recipe, guards and est_high rules.  Its jobs (XJOBS; the RL and Q3SG jobs and their
+payloads are unchanged):
+    tvr-xsmoke-dose        as_root  tvr_xsmoke.sh Q3S2,Q3S4 RUN (both dose starts)  est_high 1.2 (constant, XEST_HIGH)
+    tvr-xtrain-q3s2|q3s4   as_root  VPD_TVR_ROOT=explore/rl tvr_train.sh START RUN          est_high DERIVED (as train)
+    tvr-xeval-q3s2|q3s4-top|low as_root VPD_TVR_ROOT=explore/rl tvr_eval.sh START top|low RUN est_high DERIVED (as eval)
+The start groups after the RL starts are an allowlist, XGROUPS (Q3SG, dose; XGROUP_OF: start -> group): a group's jobs
+use the group's registration row, trainer rule, smoke verdict rule and budget (the RL jobs: none of these, as above);
+the harness rule is every explore job's (the registered HARNESS_SHA256_PREFIX, harness_problems).  For the dose group:
+  trainer fingerprint: vpd/starts.json gained the Q3S2 and Q3S4 entries after Q3SG and no trainer byte changed, so the
+  fingerprint of this tree is DOSE_TRAINER_SHA256 (d694cddb942b; the same trainer files with the starts.json before
+  them give the Q3SG one, 119da3c84b8d).  The dose jobs require code_sha256 starting with d694cddb942b, the 5 .py shas
+  == TRAINER_PY_SHA256 and vpd/starts.json without the dose entries, re-serialised, == STARTS_JSON_SHA256_Q3SG (an
+  adapter's code_files: starts.json == STARTS_JSON_SHA256_DOSE).  The Q3SG jobs keep their rule (119da3c84b8d, the
+  file without Q3SG == the pilot's), so on this tree they refuse, as the pilot and RL jobs do.  Intended: the Q3SG line
+  is complete; x_adapter_check judges its adapters by their registered code, so compare_q3sg still validates them.
+  smoke verdict: the newest smoke_verdict.json under runs/explore/rl/smoke/ whose "starts" include the start (as Q3SG).
+  budget: DOSE_CAP_GPUH 25.0 (no C cap of its own, user 2026-11-16: the round-5 cap) for Q3S2 and Q3S4 together: the charge (vpd.ledger.charge: ended actual,
+  open max(est, elapsed)) of the ledger records of the dose jobs + the new est_high <= DOSE_CAP_GPUH (group_budget),
+  in place of the G18 block (whose cap the RL, Q3SG and E3VS spend used up); the round-200 check applies too.
+tvr-xsmoke-dose est_high: 2 x 1,815 s + 300 + 180 s = 4,110 s = 1.14 h -> 1.2 GPU-h (as tvr-xsmoke): outer 4020 s,
+soft 3840 s, kill 60 s.
 """
 
 from __future__ import annotations
@@ -173,10 +198,12 @@ DATA_FILES = {  # pilot_cfg data.<key> -> the file it is the sha256 of (relative
     "floors_eval500_sha256": "floors/floors_eval500.json"}
 DROP_REASONS = ("move_failed", "pose_mismatch", "no_stop", "stop_not_last", "final_not_target")
 
-# EXPLORATORY starts (PREREG section 17, rows 2026-11-12 and 2026-11-13; DECISIONS G18, G20); see the module docstring
+# EXPLORATORY starts (PREREG section 17, rows 2026-11-12, 2026-11-13 and DOSE_ROW_DATE; DECISIONS G18, G20); see the
+# module docstring
 RL_STARTS = ("Q3RD", "Q3RS150")   # the RL starts (row 2026-11-12)
 Q3SG_STARTS = ("Q3SG",)           # the third explore start, genc0 (row 2026-11-13)
-EXPLORE_STARTS = RL_STARTS + Q3SG_STARTS
+DOSE_STARTS = ("Q3S2", "Q3S4")    # the dose starts: Q3S's SFT run at epochs 2 and 4 (row DOSE_ROW_DATE)
+EXPLORE_STARTS = RL_STARTS + Q3SG_STARTS + DOSE_STARTS
 XRL_ROOT = "explore/rl"      # the explore payloads' VPD_TVR_ROOT: outputs under OUT/tvr/runs/explore/rl/<S>
 XRL_PREFIX = "xrl"           # explore eval dirs <root>/<S>/evals/xrl__<S>__<tier>__<arm>
 HARNESS_SHA256_PREFIX = "64edd575f36b"   # run_tvr.code_sha256() of the pilot evals (the registered harness)
@@ -184,6 +211,8 @@ XROW_DATE = "2026-11-12"
 XROW_NEEDLE = "两个 RL 起点按试点完全相同的配方训练和评测"
 Q3SG_ROW_DATE = "2026-11-13"
 Q3SG_ROW_NEEDLE = "第三个探索起点 Q3SG 按试点完全相同的配方训练和评测"
+DOSE_ROW_DATE = "2026-11-16"      # the dose row's date (the merge sets it to the day the row is committed)
+DOSE_ROW_NEEDLE = "剂量起点 Q3S2、Q3S4 按试点完全相同的配方训练和评测"
 BLOCK_BASELINE_GPUH = 48.5136   # ledger total spent when this block started (DECISIONS G18)
 BLOCK_CAP_GPUH = 25.0           # the user's cap of this block (DECISIONS G18): above it, stop and ask
 # the trainer fingerprint per start (row 2026-11-13; DECISIONS G20).  n2_train_vpd.CODE_FILES = the 5 .py files below
@@ -202,11 +231,35 @@ TRAINER_PY_SHA256 = {
     "vpd/starts.py": "727701fc58771fba9144f6f80910091de72756f2156769a59e8c3e1e7c982fcd",
     "vpd/paths.py": "4d16d91dd789d5d726341af0ef358e99ea3c4f798aff1724508ea8b49df1e91e",
     "vpd/walkerbench/history.py": "178c0b889fa78383bf204cd0d3152365fde6d4cdd9c4f148fe5eb79dab563af8"}
+# the dose starts (row DOSE_ROW_DATE): starts.json + the Q3S2 and Q3S4 entries after Q3SG (STARTS_JSON_SHA256_DOSE;
+# without them: STARTS_JSON_SHA256_Q3SG) gives DOSE_TRAINER_SHA256, the 5 .py files unchanged
+DOSE_TRAINER_SHA256 = "d694cddb942b1c163ac4c45b36dbb00fb52d0b101c337bc02ca00c59340d90a8"
+DOSE_TRAINER_PREFIX = DOSE_TRAINER_SHA256[:12]
+STARTS_JSON_SHA256_DOSE = "b8bc64851ad3cef7a55c0bedfe8771571e71e1dfd40b5caf7d54531412f6772c"
+DOSE_CAP_GPUH = 25.0   # Q3S2 + Q3S4 (every dose job; group_budget): the user set no C cap (2026-11-16), so the round-5
+# cap 25 (DECISIONS G24g; the round total is checked at submit too): above it, stop, ask
+# the explore start groups after the RL starts: an allowlist (module docstring).  Each appended its entries to
+# vpd/starts.json and changed no trainer byte.  trainer: the code_sha256 of its jobs and adapters; starts_json: an
+# adapter's code_files sha of vpd/starts.json; base_json / base: the sha / the name of the file without the group's
+# entries; smoke / xlist: its smoke job and tvr_xsmoke.sh's start list; cap: its own budget (None: the G18 block).
+# The harness is not per group: every explore job and eval, the registered HARNESS_SHA256_PREFIX
+XGROUPS = {
+    "Q3SG": {"starts": Q3SG_STARTS, "date": Q3SG_ROW_DATE, "needle": Q3SG_ROW_NEEDLE,
+             "what": "the third explore start Q3SG", "trainer": Q3SG_TRAINER_SHA256,
+             "starts_json": STARTS_JSON_SHA256_Q3SG, "base_json": STARTS_JSON_SHA256_PILOT, "base": "the pilot's",
+             "entries": "the Q3SG entry", "smoke": "tvr-xsmoke-q3sg", "xlist": "Q3SG", "cap": None},
+    "dose": {"starts": DOSE_STARTS, "date": DOSE_ROW_DATE, "needle": DOSE_ROW_NEEDLE,
+             "what": "the dose starts Q3S2 and Q3S4", "trainer": DOSE_TRAINER_SHA256,
+             "starts_json": STARTS_JSON_SHA256_DOSE, "base_json": STARTS_JSON_SHA256_Q3SG, "base": "the Q3SG tree's",
+             "entries": "the Q3S2 and Q3S4 entries", "smoke": "tvr-xsmoke-dose", "xlist": "Q3S2,Q3S4",
+             "cap": DOSE_CAP_GPUH}}
+XGROUP_OF = {s: g for g, spec in XGROUPS.items() for s in spec["starts"]}
 # tvr-xsmoke (both starts, one job): per start ~1,290 s typical (bf16 load + save 150, dry 45, HF parity 45, raw
 # session 330, train 110, merge 150, merge parity 160, merged smoke4 session 300; tvr-msmoke / tvr-cal step times),
 # ~1,815 s with the calibration's slowest vLLM start (505 s) and merge (186 s): 2 x 1,815 s + 300 + 180 -> 1.2 GPU-h.
-# tvr-xsmoke-q3sg (Q3SG only): 1 x 1,815 s + 300 + 180 = 2,295 s = 0.64 h -> 0.7 GPU-h (rounded up to 0.1 h)
-XEST_HIGH = {"tvr-xsmoke": 1.2, "tvr-xsmoke-q3sg": 0.7}
+# tvr-xsmoke-q3sg (Q3SG only): 1 x 1,815 s + 300 + 180 = 2,295 s = 0.64 h -> 0.7 GPU-h (rounded up to 0.1 h).
+# tvr-xsmoke-dose (Q3S2 and Q3S4): as tvr-xsmoke, 2 x 1,815 s + 300 + 180 = 4,110 s = 1.14 h -> 1.2 GPU-h
+XEST_HIGH = {"tvr-xsmoke": 1.2, "tvr-xsmoke-q3sg": 0.7, "tvr-xsmoke-dose": 1.2}
 XSMOKE_LIMIT, XSMOKE_EPOCHS = 16, 1   # the smoke trains the first 16 0W demos for one epoch (the trainer has no step
 XSMOKE_STEPS = 2                      # cap): ceil(16 x 1 / 8) = 2 optimizer steps
 XSMOKE_RAW_SET, XSMOKE_MERGED_SET = "smoke8", "smoke4"
@@ -356,9 +409,10 @@ JOBS = _jobs()
 def _xjobs() -> Dict[str, dict]:
     """The EXPLORATORY jobs (DECISIONS G18, G20); "base" = the pilot_cfg REQUIRED entry missing() checks; "starts" =
     the explore starts the job covers; "xlist" = tvr_xsmoke.sh's start-list argument (None: its default, the RL
-    starts)."""
+    starts).  The RL jobs first, then each start group's (XGROUPS: Q3SG, dose)."""
     j = {}
-    for smoke, starts, xlist in (("tvr-xsmoke", RL_STARTS, None), ("tvr-xsmoke-q3sg", Q3SG_STARTS, "Q3SG")):
+    smokes = (("tvr-xsmoke", RL_STARTS, None),) + tuple((g["smoke"], g["starts"], g["xlist"]) for g in XGROUPS.values())
+    for smoke, starts, xlist in smokes:
         j[smoke] = {"name": f"vpd-{smoke}", "script": "tvr_xsmoke.sh", "as_root": True, "kind": "xsmoke",
                     "start": None, "part": None, "base": "tvr-msmoke", "starts": starts, "xlist": xlist}
         for s in starts:
@@ -638,19 +692,27 @@ def trainer_prefix() -> str:
 
 def trainer_problems(cfg=None) -> List[str]:
     """The pilot's and the RL starts' rule: this tree's trainer code_sha256 starts with
-    recipe.trainer_code_sha256_prefix (0865dd75f1ee; the Q3SG jobs use q3sg_trainer_problems instead)."""
+    recipe.trainer_code_sha256_prefix (0865dd75f1ee; the start groups' jobs use group_trainer_problems instead)."""
     want = pilot_cfg.get("recipe.trainer_code_sha256_prefix", cfg)
     got = trainer_prefix()
     return [] if got.startswith(want) else [f"trainer code_sha256 {got[:12]} != frozen prefix {want}"]
 
 
-# --- the Q3SG trainer rule (PREREG section 17, row 2026-11-13; DECISIONS G20) ------------------------------------
+# --- the start groups' trainer rules (PREREG section 17, rows 2026-11-13 and DOSE_ROW_DATE; DECISIONS G20) ---------
 
-def trainer_fingerprint(root: Path = None) -> dict:
-    """n2_train_vpd.code_fingerprint of ROOT (default: the trainer's own tree, as the trainer records it)."""
+def trainer_root() -> Path:
+    """The tree whose trainer code the start groups' rules read: the trainer's own tree (n2_train_vpd.WORKTREE)."""
     from vpd.train import n2_train_vpd as T
 
-    return T.code_fingerprint(T.WORKTREE if root is None else Path(root))
+    return Path(T.WORKTREE)
+
+
+def trainer_fingerprint(root: Path = None) -> dict:
+    """n2_train_vpd.code_fingerprint of ROOT (default: trainer_root(), the trainer's own tree, as the trainer records
+    it)."""
+    from vpd.train import n2_train_vpd as T
+
+    return T.code_fingerprint(trainer_root() if root is None else Path(root))
 
 
 def starts_json_without(path: Path, drop=Q3SG_STARTS) -> bytes:
@@ -677,48 +739,74 @@ def code_files_problems(files, starts_sha256: str = STARTS_JSON_SHA256_Q3SG) -> 
     return bad
 
 
-def q3sg_trainer_problems(fp: dict = None, root: Path = None) -> List[str]:
-    """The Q3SG jobs' trainer rule on this tree (ROOT: default the trainer's own tree): code_sha256 starts with
-    Q3SG_TRAINER_PREFIX; code_files_problems(code_files) == []; vpd/starts.json without the Q3SG entry, re-serialised,
-    has the pilot's sha STARTS_JSON_SHA256_PILOT ("5 个 .py 文件 sha 不变、starts.json 只多这一条")."""
-    from vpd.train import n2_train_vpd as T
-
-    root = Path(T.WORKTREE if root is None else root)
+def group_trainer_problems(group: str, fp: dict = None, root: Path = None) -> List[str]:
+    """The trainer rule of start group GROUP's jobs (XGROUPS) on this tree (ROOT: default trainer_root()):
+    code_sha256 starts with the group's prefix; code_files_problems(code_files, the group's starts.json sha) == [];
+    vpd/starts.json without the group's entries, re-serialised, has the sha of the file before them (base_json;
+    "5 个 .py 文件 sha 不变、starts.json 只多这几条").  Q3SG: prefix 119da3c84b8d, without Q3SG == the pilot's; dose:
+    prefix d694cddb942b, without Q3S2 and Q3S4 == the Q3SG tree's."""
+    g = XGROUPS[group]
+    root = Path(trainer_root() if root is None else root)
     fp = trainer_fingerprint(root) if fp is None else fp
-    got = str(fp.get("code_sha256"))
-    bad = [] if got.startswith(Q3SG_TRAINER_PREFIX) else [
-        f"trainer code_sha256 {got[:12]} != the Q3SG prefix {Q3SG_TRAINER_PREFIX} (PREREG section 17, 2026-11-13)"]
-    bad += [f"trainer {b}" for b in code_files_problems(fp.get("code_files"))]
+    got, prefix = str(fp.get("code_sha256")), g["trainer"][:12]
+    bad = [] if got.startswith(prefix) else [
+        f"trainer code_sha256 {got[:12]} != the {group} prefix {prefix} (PREREG section 17, {g['date']})"]
+    bad += [f"trainer {b}" for b in code_files_problems(fp.get("code_files"), g["starts_json"])]
     try:
-        old = hashlib.sha256(starts_json_without(root / STARTS_JSON)).hexdigest()
+        old = hashlib.sha256(starts_json_without(root / STARTS_JSON, g["starts"])).hexdigest()
     except (OSError, ValueError) as e:
         bad.append(f"{root / STARTS_JSON}: unreadable ({e})")
     else:
-        if old != STARTS_JSON_SHA256_PILOT:
-            bad.append(f"{root / STARTS_JSON} without {list(Q3SG_STARTS)} re-serialised: sha256 {old[:12]} != the "
-                       f"pilot's {STARTS_JSON_SHA256_PILOT[:12]} (starts.json changed beyond the Q3SG entry)")
+        if old != g["base_json"]:
+            bad.append(f"{root / STARTS_JSON} without {list(g['starts'])} re-serialised: sha256 {old[:12]} != "
+                       f"{g['base']} {g['base_json'][:12]} (starts.json changed beyond {g['entries']})")
     return bad
 
 
+def q3sg_trainer_problems(fp: dict = None, root: Path = None) -> List[str]:
+    """The Q3SG jobs' trainer rule on this tree (ROOT: default trainer_root()): group_trainer_problems("Q3SG"):
+    code_sha256 starts with Q3SG_TRAINER_PREFIX; code_files_problems(code_files) == []; vpd/starts.json without the
+    Q3SG entry, re-serialised, has the pilot's sha STARTS_JSON_SHA256_PILOT ("5 个 .py 文件 sha 不变、starts.json 只多这
+    一条").  On a tree with the dose entries it refuses (intended: the Q3SG line is complete)."""
+    return group_trainer_problems("Q3SG", fp, root)
+
+
+def dose_trainer_problems(fp: dict = None, root: Path = None) -> List[str]:
+    """The dose jobs' trainer rule on this tree: group_trainer_problems("dose")."""
+    return group_trainer_problems("dose", fp, root)
+
+
 def x_code_problems(s: str, meta: dict, cfg=None) -> List[str]:
-    """An explore adapter's (or the explore smoke's) recorded trainer code, by its start's registered rule: Q3SG
-    code_sha256 starting with Q3SG_TRAINER_PREFIX and code_files_problems(meta.code_files) == []; the RL starts
-    code_sha256 starting with recipe.trainer_code_sha256_prefix (0865dd75f1ee)."""
+    """An explore adapter's (or the explore smoke's) recorded trainer code, by its start's registered rule: a start of
+    a group (XGROUP_OF: Q3SG, Q3S2, Q3S4) code_sha256 starting with the group's prefix and code_files_problems(
+    meta.code_files, the group's starts.json sha) == []; the RL starts code_sha256 starting with
+    recipe.trainer_code_sha256_prefix (0865dd75f1ee)."""
     got = str((meta or {}).get("code_sha256") or "")
-    if s in Q3SG_STARTS:
-        bad = [] if got.startswith(Q3SG_TRAINER_PREFIX) else [
-            f"trained with code {got[:12] or None}, not the Q3SG prefix {Q3SG_TRAINER_PREFIX}"]
-        return bad + code_files_problems((meta or {}).get("code_files"))
+    g = XGROUP_OF.get(s)
+    if g is not None:
+        prefix = XGROUPS[g]["trainer"][:12]
+        bad = [] if got.startswith(prefix) else [f"trained with code {got[:12] or None}, not the {g} prefix {prefix}"]
+        return bad + code_files_problems((meta or {}).get("code_files"), XGROUPS[g]["starts_json"])
     want = pilot_cfg.get("recipe.trainer_code_sha256_prefix", cfg)
     return [] if want and got.startswith(want) else [f"trained with code {got[:12] or None}, not the registered "
                                                      f"prefix {want}"]
 
 
+def job_group(job: str) -> Optional[str]:
+    """The start group (XGROUPS) of an explore job's starts; None for the RL jobs."""
+    groups = {XGROUP_OF.get(s) for s in XJOBS[job]["starts"]}
+    if len(groups) != 1:
+        raise ValueError(f"{job}: its starts are of more than one start group ({sorted(map(str, groups))})")
+    return groups.pop()
+
+
 def x_trainer_problems(job: str, cfg=None) -> List[str]:
-    """An explore job's trainer rule on this tree: the Q3SG jobs q3sg_trainer_problems(); the RL jobs
-    trainer_problems(cfg) (0865dd75f1ee, so they refuse on a tree whose starts.json has the Q3SG entry)."""
-    if set(XJOBS[job]["starts"]) & set(Q3SG_STARTS):
-        return q3sg_trainer_problems()
+    """An explore job's trainer rule on this tree: a start group's jobs group_trainer_problems(group) (Q3SG
+    119da3c84b8d, dose d694cddb942b); the RL jobs trainer_problems(cfg) (0865dd75f1ee, so they refuse on a tree whose
+    starts.json has the Q3SG entry)."""
+    g = job_group(job)
+    if g is not None:
+        return group_trainer_problems(g)
     return trainer_problems(cfg)
 
 
@@ -1079,6 +1167,9 @@ def budget(L: Layout = None, cfg=None, events=None, explore: bool = False) -> di
     if explore:
         out["block_budget"] = block_budget(0.0, events)
         out["est_high_total"] = round(sum(v for v in rows.values() if isinstance(v, float)), 3)
+        out["group_budgets"] = {g: dict(group_budget(g, 0.0, events), est_high_total=round(sum(
+            v for j, v in rows.items() if isinstance(v, float) and job_group(j) == g), 3))
+            for g, spec in XGROUPS.items() if spec["cap"] is not None}
     return out
 
 
@@ -1088,15 +1179,17 @@ def plan(L: Layout = None, cfg=None, out=None, explore: bool = False) -> dict:
     p = lambda *a: print(*a, file=out)  # noqa: E731
     if explore:
         p(f"VPD TVR EXPLORATORY RL plan ({utc()}; PREREG section 17, {XROW_DATE}; DECISIONS G18); starts "
-          f"{list(EXPLORE_STARTS)} (Q3SG: row {Q3SG_ROW_DATE}, DECISIONS G20), outputs {L.xroot}; n_top "
-          f"{pilot_cfg.get('tiers.n_top', cfg)!r}")
+          f"{list(EXPLORE_STARTS)} (Q3SG: row {Q3SG_ROW_DATE}, DECISIONS G20; {', '.join(DOSE_STARTS)}: row "
+          f"{DOSE_ROW_DATE}), outputs {L.xroot}; n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
     else:
         p(f"VPD TVR pilot plan ({utc()}); n_top {pilot_cfg.get('tiers.n_top', cfg)!r}")
     rows = {}
     for job, spec in (XJOBS if explore else JOBS).items():
+        hi = None
         try:
             e = est_high(job, L, cfg)
             pay = " ".join(payload_for(job, L.jobs / f"{job}-<yyyymmddHHMM>", e["est_high"], cfg))
+            hi = e["est_high"]
             est = f"est_high {e['est_high']:.2f} GPU-h ({e['rule'][:60]})"
             if explore:
                 t = job_timeouts(job, e["est_high"], cfg)
@@ -1108,7 +1201,7 @@ def plan(L: Layout = None, cfg=None, out=None, explore: bool = False) -> dict:
             bad = prerequisites(job, L, cfg)
         except (ValueError, KeyError) as err:  # e.g. tiers.n_top not frozen yet
             bad = [f"{type(err).__name__}: {err}"]
-        rows[job] = {"est": est, "prerequisites": bad}
+        rows[job] = {"est": est, "est_high": hi, "prerequisites": bad}
         p(f"\n[{job}] sco name downstream-{spec['name']}, {'as_root' if spec['as_root'] else 'non-root'}, gate {GATE}, "
           f"{est}")
         p(f"  payload: {pay}")
@@ -1122,6 +1215,13 @@ def plan(L: Layout = None, cfg=None, out=None, explore: bool = False) -> dict:
             bb = block_budget(0.0, None)
             p(f"block budget: used {bb['block_used']:.4f} (ledger {bb['ledger_spent']:.4f} - {bb['baseline']}) + open "
               f"{bb['open_est']:.2f} = {bb['total']:.2f} of {bb['cap']} GPU-h")
+            for g, spec in XGROUPS.items():
+                if spec["cap"] is None:
+                    continue
+                gb = group_budget(g, 0.0, None)
+                planned = sum(r["est_high"] for j, r in rows.items() if job_group(j) == g and r["est_high"])
+                p(f"{g} budget: spent {gb['spent']:.4f} + open {gb['open_est']:.2f} = {gb['total']:.2f} of {gb['cap']} "
+                  f"GPU-h; the {g} jobs' est_high sum {planned:.3f} GPU-h (each derivable job once)")
     except Exception as e:  # noqa: BLE001  (an unreadable ledger must not hide the plan)
         p(f"\nround budget: unreadable ({e!r})")
     return rows
@@ -1630,8 +1730,10 @@ def xrow(text: str, date: str = XROW_DATE, needle: str = XROW_NEEDLE) -> Optiona
 
 
 def xrow_key(s: str) -> Tuple[str, str]:
-    """(date, needle) of the section-17 row registering explore start S: Q3SG 2026-11-13, the RL starts 2026-11-12."""
-    return (Q3SG_ROW_DATE, Q3SG_ROW_NEEDLE) if s in Q3SG_STARTS else (XROW_DATE, XROW_NEEDLE)
+    """(date, needle) of the section-17 row registering explore start S: its start group's (Q3SG 2026-11-13, the dose
+    starts DOSE_ROW_DATE), the RL starts 2026-11-12."""
+    g = XGROUP_OF.get(s)
+    return (XGROUPS[g]["date"], XGROUPS[g]["needle"]) if g is not None else (XROW_DATE, XROW_NEEDLE)
 
 
 def xrow_problems(starts=RL_STARTS) -> List[str]:
@@ -1640,10 +1742,11 @@ def xrow_problems(starts=RL_STARTS) -> List[str]:
         text = prereg_path().read_text(encoding="utf-8")
     except OSError:
         text = ""
+    whats = {(spec["date"], spec["needle"]): spec["what"] for spec in XGROUPS.values()}
     bad = []
     for date, needle in dict.fromkeys(xrow_key(s) for s in starts):
         if xrow(text, date, needle) is None:
-            what = "the third explore start Q3SG" if date == Q3SG_ROW_DATE else "the explore RL starts"
+            what = whats.get((date, needle), "the explore RL starts")
             bad.append(f"{PREREG} has no single section-17 row '| {date} | ... {needle} ...' (the registration of "
                        f"{what})")
     return bad
@@ -1669,9 +1772,10 @@ def tier_file_problems(L: Layout, names) -> List[str]:
 def x_adapter_check(s: str, tier: str, init: Optional[str], L: Layout, cfg=None,
                     adapter_root: Optional[Path] = None) -> Tuple[int, str]:
     """An explore adapter: adapter_check's rules (complete; from INIT/adapter.pt as it is now) with the trainer code of
-    its start's registered rule (x_code_problems: RL the recipe prefix 0865dd75f1ee; Q3SG the Q3SG prefix and the
-    code_files invariant; DECISIONS G20) instead of this tree's current code, plus its meta: start, seed 1001, phase,
-    data_sha256 == the tiers manifest's (L.tiers); 0W from the fresh LoRA, 100 / TOP from this start's 0W.  Adapters
+    its start's registered rule (x_code_problems: RL the recipe prefix 0865dd75f1ee; a start group's start its group's
+    prefix and the code_files invariant; DECISIONS G20) instead of this tree's current code, plus its meta: start, seed
+    1001, phase, data_sha256 == the tiers manifest's (L.tiers); 0W from the fresh LoRA, 100 / TOP from this start's 0W.
+    Adapters
     under adapter_root/<S>/adapters (default L.xroot).  (0, ok) or (rc, why): 1 missing / unfinished / other init,
     3 other trainer code (adapter_check's codes)."""
     ar = Path(adapter_root) if adapter_root is not None else L.xroot
@@ -1737,9 +1841,10 @@ def xsmoke_verdicts_with(s: str, L: Layout = None) -> List[Path]:
 
 
 def latest_xverdict(L: Layout = None, s: Optional[str] = None) -> Tuple[Optional[Path], Optional[dict]]:
-    """The explore smoke verdict an xtrain / xeval job of start S needs: Q3SG the newest one whose "starts" include
-    Q3SG (xsmoke_verdicts_with); otherwise (the RL starts) the newest tvr-xsmoke verdict."""
-    vs = xsmoke_verdicts_with(s, L) if s in Q3SG_STARTS else xsmoke_verdicts(L)
+    """The explore smoke verdict an xtrain / xeval job of start S needs: a start group's start (Q3SG, Q3S2, Q3S4) the
+    newest one whose "starts" include S (xsmoke_verdicts_with); otherwise (the RL starts) the newest tvr-xsmoke
+    verdict."""
+    vs = xsmoke_verdicts_with(s, L) if s in XGROUP_OF else xsmoke_verdicts(L)
     return (vs[-1], read_json(vs[-1])) if vs else (None, None)
 
 
@@ -1770,7 +1875,8 @@ def x_prerequisites(job: str, L: Layout = None, cfg=None, in_job: bool = False) 
         vp, v = latest_xverdict(L, s)
         if v is None:
             bad.append(f"no smoke_verdict.json under {L.xsmoke_root} " + (
-                f"whose starts include {s} (job tvr-xsmoke-{s.lower()})" if s in Q3SG_STARTS else "(job tvr-xsmoke)"))
+                f"whose starts include {s} (job {XGROUPS[XGROUP_OF[s]]['smoke']})" if s in XGROUP_OF
+                else "(job tvr-xsmoke)"))
         elif v.get("verdict") != "PASS":
             bad.append(f"{vp}: verdict {v.get('verdict')!r}, not PASS ({', '.join(v.get('failed') or [])})")
     if kind == "xeval":
@@ -1793,6 +1899,33 @@ def block_budget(new_est: float, events=None) -> dict:
             "cap": BLOCK_CAP_GPUH, "ok": total <= BLOCK_CAP_GPUH + 1e-9}
 
 
+def group_budget(group: str, new_est: float, events=None) -> dict:
+    """A start group's own cap (XGROUPS cap; the dose starts: DOSE_CAP_GPUH, the user's cap for Q3S2 and Q3S4
+    together): the charge (vpd.ledger.charge) of the ledger records of the group's jobs, spent (ended: actual) + open
+    (submitted / uncertain: max(est, 0)), + new <= cap.  Other jobs' spend does not count here (the round check
+    covers it)."""
+    from vpd import ledger
+
+    events = ledger.read() if events is None else events
+    cap = XGROUPS[group]["cap"]
+    if cap is None:
+        raise ValueError(f"start group {group} has no cap of its own (the G18 block budget applies)")
+    names = sorted(spec["name"] for j, spec in XJOBS.items() if job_group(j) == group)
+    spent = open_est = 0.0
+    for j in ledger.fold(events).values():
+        if j.get("name") not in names:
+            continue
+        if j.get("status") == "ended":
+            spent += ledger.charge(j)
+        elif ledger.is_open(j):
+            open_est += ledger.charge(j)
+    total = spent + open_est + float(new_est)
+    return {"group": group, "jobs": names, "spent": round(spent, 4), "open_est": round(open_est, 4),
+            "new_est_high": round(float(new_est), 4), "total": round(total, 4), "cap": float(cap),
+            "ok": total <= float(cap) + 1e-9,
+            "rule": f"charge of the {group} jobs' ledger records (ended actual, open est) + new est_high <= cap"}
+
+
 def make_x_shared_parents(L: Layout) -> List[str]:
     out = []
     for d in L.x_shared_parents():
@@ -1803,7 +1936,8 @@ def make_x_shared_parents(L: Layout) -> List[str]:
 
 def x_facts(job: str = "tvr-xsmoke") -> dict:
     """The facts an explore job's prepared.json / guard.json record: the harness and trainer fingerprints, the sha256
-    of the job's registration row; the Q3SG jobs also the trainer rule and its problems (q3sg_trainer_problems)."""
+    of the job's registration row; a start group's jobs (Q3SG, dose) also the trainer rule and its problems
+    (group_trainer_problems)."""
     starts = XJOBS[job]["starts"]
     date, needle = xrow_key(starts[0])
     try:
@@ -1813,10 +1947,12 @@ def x_facts(job: str = "tvr-xsmoke") -> dict:
     fp = trainer_fingerprint()
     out = {"explore": True, "harness_code_sha256": harness_sha256(), "trainer_code_sha256": fp["code_sha256"],
            "prereg_row_sha256": None if row is None else hashlib.sha256(row.encode()).hexdigest()}
-    if set(starts) & set(Q3SG_STARTS):
-        out.update(prereg_row_date=date, trainer_rule=f"Q3SG: prefix {Q3SG_TRAINER_PREFIX}, 5 .py shas == the "
-                   "pilot's, starts.json == the pilot's + the Q3SG entry",
-                   trainer_code_files=fp.get("code_files"), trainer_problems=q3sg_trainer_problems(fp))
+    g = job_group(job)
+    if g is not None:
+        spec = XGROUPS[g]
+        out.update(prereg_row_date=date, trainer_rule=f"{g}: prefix {spec['trainer'][:12]}, 5 .py shas == the "
+                   f"pilot's, starts.json == {spec['base']} + {spec['entries']}",
+                   trainer_code_files=fp.get("code_files"), trainer_problems=group_trainer_problems(g, fp))
     return out
 
 
@@ -1827,12 +1963,22 @@ def _budget_checks(job: str, hi: float, events, cfg) -> Tuple[dict, dict]:
     rb = round_budget(hi, events, cfg)
     print(f"[pilot_tvr] round budget: used {rb['round_used']:.2f} + open {rb['open_est']:.2f} + new "
           f"{rb['new_est_high']:.2f} = {rb['total']:.2f} GPU-h vs cap {rb['cap']:.0f}", file=sys.stderr)
-    bb = block_budget(hi, events)
-    print(f"[pilot_tvr] block budget: used {bb['block_used']:.4f} + open {bb['open_est']:.4f} + new "
-          f"{bb['new_est_high']:.4f} = {bb['total']:.4f} GPU-h vs cap {bb['cap']}", file=sys.stderr)
+    g = job_group(job)
+    if g is not None and XGROUPS[g]["cap"] is not None:  # the group's own cap instead of the G18 block (dose)
+        bb = group_budget(g, hi, events)
+        print(f"[pilot_tvr] {g} budget: spent {bb['spent']:.4f} + open {bb['open_est']:.4f} + new "
+              f"{bb['new_est_high']:.4f} = {bb['total']:.4f} GPU-h vs cap {bb['cap']}", file=sys.stderr)
+    else:
+        bb = block_budget(hi, events)
+        print(f"[pilot_tvr] block budget: used {bb['block_used']:.4f} + open {bb['open_est']:.4f} + new "
+              f"{bb['new_est_high']:.4f} = {bb['total']:.4f} GPU-h vs cap {bb['cap']}", file=sys.stderr)
     if not rb["ok"]:
         raise Refused(f"ROUND BUDGET: round_used {rb['round_used']:.2f} + open {rb['open_est']:.2f} + new "
                       f"{rb['new_est_high']:.2f} = {rb['total']:.2f} > {rb['cap']} GPU-h (brief 2C: the round stops)")
+    if "group" in bb and not bb["ok"]:
+        raise Refused(f"{g.upper()} BUDGET: spent {bb['spent']:.4f} + open {bb['open_est']:.4f} + new "
+                      f"{bb['new_est_high']:.4f} = {bb['total']:.4f} > {bb['cap']} GPU-h (the user's cap for "
+                      f"{' and '.join(XGROUPS[g]['starts'])} together; {job} not prepared: stop and ask)")
     if not bb["ok"]:
         raise Refused(f"BLOCK BUDGET: block_used {bb['block_used']:.4f} + open {bb['open_est']:.4f} + new "
                       f"{bb['new_est_high']:.4f} = {bb['total']:.4f} > {bb['cap']} GPU-h (DECISIONS G18: the "
@@ -2042,16 +2188,17 @@ def _finite(x) -> bool:
 
 
 def xsmoke_verdict(smoke: Path, L: Layout = None, cfg=None, job: str = "tvr-xsmoke") -> dict:
-    """SMOKE/smoke_verdict.json of an explore smoke JOB (tvr-xsmoke: the RL starts; tvr-xsmoke-q3sg: Q3SG; EXPLORATORY;
-    DECISIONS G18, G20): PASS iff every mechanism check passes.
+    """SMOKE/smoke_verdict.json of an explore smoke JOB (tvr-xsmoke: the RL starts; tvr-xsmoke-q3sg: Q3SG;
+    tvr-xsmoke-dose: Q3S2, Q3S4; EXPLORATORY; DECISIONS G18, G20): PASS iff every mechanism check passes.
     Per explore start S of the job (SMOKE/S/): load (the bf16 conversion of the trainer's loader, load/load.json), dry
     run (grid [1,22,40], 222 tokens per image), HF parity, vLLM prompt parity and the pilot smoke's session checks on
     the raw start (smoke8: c, u, blind), the smoke training (meta: XSMOKE_STEPS optimizer steps of the first
     XSMOKE_LIMIT 0W demos, seed 1001, the start's registered trainer code (x_code_problems: RL the recipe prefix;
-    Q3SG the Q3SG prefix and the code_files invariant), the manifest's 0W sha), the merge (merge_parity's record of
-    vpd_merge.json: every wrapped module merged, from this adapter), merge parity (report only: it ran on this
-    adapter; its pass is recorded, never judged), and the merged smoke4 c session (vLLM prompt parity, session
-    checks, the served adapter).  Never reads a success / SR field (run_tvr --mechanism-only also nulls them)."""
+    a start group's start its group's prefix and the code_files invariant), the manifest's 0W sha), the merge
+    (merge_parity's record of vpd_merge.json: every wrapped module merged, from this adapter), merge parity (report
+    only: it ran on this adapter; its pass is recorded, never judged), and the merged smoke4 c session (vLLM prompt
+    parity, session checks, the served adapter).  Never reads a success / SR field (run_tvr --mechanism-only also nulls
+    them)."""
     L = L or LAYOUT
     smoke = Path(smoke)
     if job not in XJOBS or XJOBS[job]["kind"] != "xsmoke":

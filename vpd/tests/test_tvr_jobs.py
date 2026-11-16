@@ -167,33 +167,59 @@ def test_payloads_never_mkdir_a_shared_parent():
 
 
 # ------------------------------------------------------------------------------------------ the pilot's trainer
-def pilot_trainer_root(root: Path) -> Path:
-    """ROOT = a copy of the trainer's CODE_FILES with the pilot's vpd/starts.json (this tree's without the Q3SG entry,
-    re-serialised: the bytes the pilot and RL adapters were trained with; PREREG section 17, row 2026-11-13)."""
+def trainer_tree_root(root: Path, drop) -> Path:
+    """ROOT = a copy of the trainer's CODE_FILES of this tree with vpd/starts.json without the DROP entries,
+    re-serialised (pilot_tvr.starts_json_without: the bytes of the tree before those entries were appended)."""
     from vpd.train import n2_train_vpd as T
 
     for rel in T.CODE_FILES:
         dst = Path(root) / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         if rel == PT.STARTS_JSON:
-            dst.write_bytes(PT.starts_json_without(T.WORKTREE / rel))
+            dst.write_bytes(PT.starts_json_without(T.WORKTREE / rel, tuple(drop)))
         else:
             shutil.copyfile(T.WORKTREE / rel, dst)
     return Path(root)
 
 
+def pilot_trainer_root(root: Path) -> Path:
+    """ROOT = a copy of the trainer's CODE_FILES with the pilot's vpd/starts.json (this tree's without the Q3SG and the
+    dose entries, re-serialised: the bytes the pilot and RL adapters were trained with; PREREG section 17, rows
+    2026-11-13 and 2026-11-16)."""
+    return trainer_tree_root(root, PT.Q3SG_STARTS + PT.DOSE_STARTS)
+
+
+def q3sg_trainer_root(root: Path) -> Path:
+    """ROOT = a copy of the trainer's CODE_FILES with the Q3SG tree's vpd/starts.json (this tree's without the dose
+    entries, re-serialised: the bytes the Q3SG adapters were trained with, STARTS_JSON_SHA256_Q3SG)."""
+    return trainer_tree_root(root, PT.DOSE_STARTS)
+
+
+def use_trainer_tree(monkeypatch, root: Path, want: str) -> dict:
+    """The tests of the jobs registered under another trainer fingerprint run under that one: ROOT is a trainer tree
+    (trainer_tree_root, or this tree itself) whose code_sha256 is WANT; n2_train_vpd.code_fingerprint() of this tree
+    answers ROOT's fingerprint and pilot_tvr.trainer_root() is ROOT (the start groups' rules read its starts.json)."""
+    from vpd.train import n2_train_vpd as T
+
+    real = getattr(T.code_fingerprint, "vpd_real", T.code_fingerprint)
+    fp = real(Path(root))
+    assert fp["code_sha256"] == want, fp["code_sha256"]
+
+    def fake(root=T.WORKTREE):
+        return fp if Path(root) == T.WORKTREE else real(root)
+
+    fake.vpd_real = real
+    monkeypatch.setattr(T, "code_fingerprint", fake)
+    monkeypatch.setattr(PT, "trainer_root", lambda: Path(root))
+    return fp
+
+
 def use_pilot_trainer(monkeypatch, root: Path) -> dict:
     """The tests of the pilot and RL jobs run under the trainer fingerprint those jobs were registered with
     (PILOT_TRAINER_SHA256, 0865dd75f1ee): n2_train_vpd.code_fingerprint() of this tree answers the fingerprint of
-    pilot_trainer_root (this tree's own is Q3SG_TRAINER_SHA256, under which those jobs refuse: test_tvr_q3sg)."""
-    from vpd.train import n2_train_vpd as T
-
-    real = T.code_fingerprint
-    fp = real(pilot_trainer_root(root))
-    assert fp["code_sha256"] == PT.PILOT_TRAINER_SHA256, fp["code_sha256"]
-    monkeypatch.setattr(T, "code_fingerprint",
-                        lambda root=T.WORKTREE: fp if Path(root) == T.WORKTREE else real(root))
-    return fp
+    pilot_trainer_root (this tree's own is DOSE_TRAINER_SHA256, under which those jobs refuse: test_tvr_q3sg,
+    test_tvr_dose)."""
+    return use_trainer_tree(monkeypatch, pilot_trainer_root(root), PT.PILOT_TRAINER_SHA256)
 
 
 # ------------------------------------------------------------------------------------------ layout + fakes for prepare

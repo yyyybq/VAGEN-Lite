@@ -6,6 +6,10 @@ invariant, the 2026-11-13 row, the Q3SG smoke verdict, the processor dir; steps,
 per-start trainer rule (the pilot and RL jobs still require 0865dd75f1ee, so they refuse on this tree); tvr_xsmoke.sh's
 start list (its default unchanged) and tvr_train.sh / tvr_eval.sh with Q3SG; vpd/tvr/compare_q3sg.py on synthetic
 roots (cells, predictions, refusals; COMPARE_RL unchanged).
+Since the dose starts Q3S2 and Q3S4 were appended to vpd/starts.json (row 2026-11-16, test_tvr_dose.py), "this tree"
+above is the Q3SG tree: the Q3SG tests run under the Q3SG trainer fingerprint (test_tvr_jobs.q3sg_trainer_root: this
+tree's trainer files with its starts.json without the dose entries, == the file before them), as the pilot / RL tests
+run under the pilot's; on this tree itself the Q3SG jobs refuse (test_tvr_dose).
 
 Hermetic like test_tvr_explore.py (its fixtures and builders are reused): no GPU, no network, no rendering, no 8B
 model, no sco call; real files are only read (this tree, its prereg, the explore / pilot adapter metas and the Q3SG
@@ -54,11 +58,18 @@ OLD_COMMIT = "216656b9"  # the RL explore mode's last commit: vpd/starts.json be
 TRAINER_NEW, TRAINER_OLD = "119da3c84b8d", "0865dd75f1ee"
 
 
+def q3sg_starts_json() -> bytes:
+    """The Q3SG tree's vpd/starts.json: this tree's without the dose entries, re-serialised (== the file before them,
+    STARTS_JSON_SHA256_Q3SG; checked against git in test_tvr_dose)."""
+    return PT.starts_json_without(T.WORKTREE / PT.STARTS_JSON, PT.DOSE_STARTS)
+
+
 @pytest.fixture
-def qlay(lay, monkeypatch):  # noqa: F811
-    """test_tvr_jobs' layout (fake sco, fake prereg state) with THIS tree's trainer fingerprint (the Q3SG one) and an
-    explore-start check that needs no checkpoint dir (x_start_problems is tested on its own below)."""
-    monkeypatch.setattr(T, "code_fingerprint", REAL_FP)
+def qlay(lay, monkeypatch, tmp_path):  # noqa: F811
+    """test_tvr_jobs' layout (fake sco, fake prereg state) with the Q3SG tree's trainer fingerprint (the one the Q3SG
+    jobs were registered with: test_tvr_jobs.use_trainer_tree on q3sg_trainer_root) and an explore-start check that
+    needs no checkpoint dir (x_start_problems is tested on its own below)."""
+    TJ.use_trainer_tree(monkeypatch, TJ.q3sg_trainer_root(tmp_path / "q3sg_trainer"), PT.Q3SG_TRAINER_SHA256)
     monkeypatch.setattr(PT, "x_start_problems", lambda s: [] if s in PT.EXPLORE_STARTS else [f"start {s!r} not "
                                                                                               "explore"])
     return lay
@@ -76,14 +87,13 @@ def _steps_file(run: Path, job: str, cfg: dict) -> None:
 
 
 def trainer_tree(root: Path, starts_json: bytes = None, edit_py: str = None) -> Path:
-    """ROOT = a copy of the trainer's CODE_FILES of this tree; STARTS_JSON replaces vpd/starts.json; EDIT_PY gets one
-    more line."""
+    """ROOT = a copy of the trainer's CODE_FILES of this tree with the Q3SG tree's starts.json (q3sg_starts_json);
+    STARTS_JSON replaces vpd/starts.json; EDIT_PY gets one more line."""
     for rel in T.CODE_FILES:
         dst = Path(root) / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(T.WORKTREE / rel, dst)
-    if starts_json is not None:
-        (Path(root) / PT.STARTS_JSON).write_bytes(starts_json)
+    (Path(root) / PT.STARTS_JSON).write_bytes(q3sg_starts_json() if starts_json is None else starts_json)
     if edit_py:
         with open(Path(root) / edit_py, "a") as f:
             f.write("# changed\n")
@@ -104,16 +114,19 @@ def git_old_starts_json():
 
 
 # ------------------------------------------------------------------------------------------ starts.json, fingerprints
-def test_starts_json_only_gains_the_q3sg_entry():
+def test_starts_json_only_gains_the_q3sg_entry(tmp_path):
+    """On the Q3SG tree's starts.json (this tree's without the dose entries; the dose entries: test_tvr_dose)."""
     from vpd import starts
 
-    p = paths.VPD_PKG / "starts.json"
-    new = p.read_bytes()
+    p = tmp_path / "starts.json"
+    new = q3sg_starts_json()
+    p.write_bytes(new)
     assert TJ.sha(new) == PT.STARTS_JSON_SHA256_Q3SG
     table = json.loads(new)
-    assert list(table)[-1] == Q and list(starts.load_table()) == list(table)
+    assert list(table)[-1] == Q and list(starts.load_table())[:len(table)] == list(table)
     e = starts.resolve(Q)
-    assert e["code"] == "sft_q3genc0_e8" and e["family"] == "qwen3"
+    assert e["code"] == "sft_q3genc0_e8" and e["family"] == "qwen3" and table[Q] == {
+        k: v for k, v in e.items() if k != "name"}
     assert e["path"] == ("/mnt/umm/users/yinbaiqiao/VAGEN-Lite/exps/vagen_active_spatial/interiorgs_v10_q3_20261027/"
                          "gen3b_sft_20261107/c0g/model/checkpoint-3976")
     old = PT.starts_json_without(p)
@@ -123,14 +136,16 @@ def test_starts_json_only_gains_the_q3sg_entry():
 
 
 def test_trainer_fingerprint_this_tree_and_the_old_starts_json(tmp_path):
-    """This tree: 119da3c84b8d (the 5 .py shas are the pilot's, starts.json the Q3SG one); the same trainer files with
-    the old starts.json (git show 216656b9, == this file without the Q3SG entry): 0865dd75f1ee, the pilot's."""
-    fp = REAL_FP()
+    """The Q3SG tree (this tree's trainer files with q3sg_starts_json): 119da3c84b8d (the 5 .py shas are the pilot's,
+    starts.json the Q3SG one); the same trainer files with the old starts.json (git show 216656b9, == the Q3SG file
+    without the Q3SG entry): 0865dd75f1ee, the pilot's."""
+    q3sg = trainer_tree(tmp_path / "q3sg")
+    fp = REAL_FP(q3sg)
     assert fp["code_sha256"] == PT.Q3SG_TRAINER_SHA256 and fp["code_sha256"].startswith(TRAINER_NEW)
-    assert PT.Q3SG_TRAINER_PREFIX == TRAINER_NEW and PT.trainer_fingerprint() == fp
+    assert PT.Q3SG_TRAINER_PREFIX == TRAINER_NEW and PT.trainer_fingerprint(q3sg) == fp
     assert {k: v for k, v in fp["code_files"].items() if k != PT.STARTS_JSON} == PT.TRAINER_PY_SHA256
-    assert fp["code_files"][PT.STARTS_JSON] == PT.STARTS_JSON_SHA256_Q3SG and PT.q3sg_trainer_problems() == []
-    derived = PT.starts_json_without(T.WORKTREE / PT.STARTS_JSON)
+    assert fp["code_files"][PT.STARTS_JSON] == PT.STARTS_JSON_SHA256_Q3SG and PT.q3sg_trainer_problems(root=q3sg) == []
+    derived = PT.starts_json_without(q3sg / PT.STARTS_JSON)
     old = git_old_starts_json()
     if old is not None:
         assert old == derived and TJ.sha(old) == PT.STARTS_JSON_SHA256_PILOT
@@ -167,7 +182,7 @@ def test_harness_fingerprint_and_pilot_cfg_unchanged():
 
 
 def test_q3sg_trainer_rule_on_changed_trees(tmp_path):
-    table = json.loads((T.WORKTREE / PT.STARTS_JSON).read_text())
+    table = json.loads(q3sg_starts_json())  # the Q3SG tree's (this tree's: test_tvr_dose)
 
     def dumps(t):
         return (json.dumps(t, indent=1) + "\n").encode()
@@ -190,7 +205,7 @@ def test_q3sg_trainer_rule_on_changed_trees(tmp_path):
     assert any(f"code_files {PT.STARTS_JSON}" in b for b in probs)
     # the pilot's starts.json (no Q3SG entry): the pilot's fingerprint, not the Q3SG one
     probs = PT.q3sg_trainer_problems(root=trainer_tree(tmp_path / "pilot", PT.starts_json_without(
-        T.WORKTREE / PT.STARTS_JSON)))
+        T.WORKTREE / PT.STARTS_JSON, PT.Q3SG_STARTS + PT.DOSE_STARTS)))
     assert any(f"{TRAINER_OLD} != the Q3SG prefix" in b for b in probs) and not any("changed beyond" in b for b in probs)
     # a trainer .py changed
     probs = PT.q3sg_trainer_problems(root=trainer_tree(tmp_path / "py", edit_py="vpd/walkerbench/history.py"))
@@ -271,8 +286,9 @@ def test_q3sg_prepare_records_budgets_facts_and_parents(qlay, capsys):
 
 
 def test_pilot_and_rl_jobs_refuse_on_this_tree(qlay):
-    """This tree's trainer is the Q3SG one: every pilot and RL job (recipe prefix 0865dd75f1ee) refuses, the Q3SG
-    jobs do not (DECISIONS G20: intended, the pilot is closed and the RL block is done)."""
+    """The Q3SG tree's trainer (qlay) is the Q3SG one: every pilot and RL job (recipe prefix 0865dd75f1ee) refuses, the
+    Q3SG jobs do not (DECISIONS G20: intended, the pilot is closed and the RL block is done; on this tree itself the
+    Q3SG jobs refuse too: test_tvr_dose)."""
     cfg = TJ.filled_cfg()
     TX.ready(qlay, cfg)
     TX.xverdict(qlay)
@@ -318,15 +334,17 @@ def test_q3sg_guards_smoke_verdict_trainer_and_row(qlay, monkeypatch, tmp_path):
     assert "tvr-xsmoke-q3sg-202611131030" in info["smoke_verdict"]["path"] and info["smoke_verdict"]["verdict"] == "PASS"
     assert c["payload"][2] == "VPD_TVR_ROOT=explore/rl" and c["payload"][-2:] == [Q, c["run"]]
     assert c["est_gph"] == PT.derived_train(Q, qlay, cfg)["est_high"]
-    # the trainer: prefix and invariant (this tree's fingerprint replaced)
-    fp = REAL_FP()
+    # the trainer: prefix and invariant (the Q3SG tree's fingerprint replaced)
+    real_tfp = PT.trainer_fingerprint
+    fp = real_tfp()
+    assert fp["code_sha256"] == PT.Q3SG_TRAINER_SHA256
     monkeypatch.setattr(PT, "trainer_fingerprint", lambda root=None: dict(fp, code_sha256=PT.PILOT_TRAINER_SHA256))
     assert any(f"{TRAINER_OLD} != the Q3SG prefix {TRAINER_NEW}" in b
                for b in PT.prerequisites("tvr-xtrain-q3sg", qlay, cfg))
     monkeypatch.setattr(PT, "trainer_fingerprint", lambda root=None: dict(fp, code_files=dict(
         fp["code_files"], **{"vpd/paths.py": "0" * 64})))
     assert any("code_files vpd/paths.py" in b for b in PT.prerequisites("tvr-xeval-q3sg-low", qlay, cfg))
-    monkeypatch.setattr(PT, "trainer_fingerprint", lambda root=None: REAL_FP(root or T.WORKTREE))
+    monkeypatch.setattr(PT, "trainer_fingerprint", real_tfp)
     assert PT.prerequisites("tvr-xtrain-q3sg", qlay, cfg) == []
     # the row: the Q3SG jobs need exactly one 2026-11-13 row; the RL jobs the 2026-11-12 one
     text = PT.prereg_path().read_text(encoding="utf-8")
@@ -556,7 +574,7 @@ def test_xsmoke_default_start_list_unchanged_and_refusals(tmp_path):
     for bad in (["Q3SG,Q3RD"], ["Q3RD"], ["q3sg"], ["Q3B"], ["Q3RS150,Q3RD"], ["Q3SG", "x"], [""]):
         r = TX._bash([str(JOBS_DIR / "tvr_xsmoke.sh"), *bad, str(tmp_path / "jobs" / "r")], {"VPD_DRYRUN": "1"},
                      tmp_path)
-        assert r.returncode == 2 and "usage: tvr_xsmoke.sh [Q3RD,Q3RS150|Q3SG] RUN" in r.stderr, bad
+        assert r.returncode == 2 and "usage: tvr_xsmoke.sh [Q3RD,Q3RS150|Q3SG|Q3S2,Q3S4] RUN" in r.stderr, bad
     r = TX._bash([str(JOBS_DIR / "tvr_xsmoke.sh"), Q, ""], {"VPD_DRYRUN": "1"}, tmp_path)
     assert r.returncode == 2 and "usage" in r.stderr
 
@@ -611,6 +629,8 @@ SUCC_Q = {("Q3SG", "0W", "c"): set(range(5)), ("Q3B", "0W", "c"): {8, 9, 10, 11}
 
 @pytest.fixture
 def qworld(tmp_path, monkeypatch):
+    # the Q3SG tree's trainer: compare_q3sg records the Q3SG rule on it as this_tree (on this tree: test_tvr_dose)
+    TJ.use_trainer_tree(monkeypatch, TJ.q3sg_trainer_root(tmp_path / "q3sg_trainer"), PT.Q3SG_TRAINER_SHA256)
     monkeypatch.setattr(PT, "EVAL500_N", TX.N_TASKS)
     monkeypatch.setattr(PT, "prereg_state", lambda: {"commit": "c0ffee"})
     L = PT.Layout(tmp_path / "out")

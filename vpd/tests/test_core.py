@@ -29,14 +29,15 @@ from vpd import paths, starts  # noqa: E402
 from vpd.walkerbench import action_regex as AR  # noqa: E402
 from vpd.walkerbench import history, sandbox  # noqa: E402
 
-EXPECTED_STARTS = {"Q3B", "Q3S", "E2", "Bp", "Q3RS150", "Q3RD", "QRL-s1", "QRL-s2", "QACTL", "Q3SG"}
+EXPECTED_STARTS = {"Q3B", "Q3S", "E2", "Bp", "Q3RS150", "Q3RD", "QRL-s1", "QRL-s2", "QACTL", "Q3SG", "Q3S2", "Q3S4"}
 EXPECTED_CODES = {"Q3B": "qwen3vl-8B", "Q3S": "c0q3_sft_e8", "E2": "sft_m3e2_e10", "Bp": "sft_m3b_e10",
                   "Q3RS150": "c0q3_s1s0_150", "Q3RD": "c0q3_s1d_300", "QRL-s1": None, "QRL-s2": None,
-                  "QACTL": None, "Q3SG": "sft_q3genc0_e8"}
+                  "QACTL": None, "Q3SG": "sft_q3genc0_e8", "Q3S2": "c0q3_sft_e2", "Q3S4": "c0q3_sft_e4"}
 ROOT_ONLY = {"Q3B"}  # blobs are root-only: directory existence only
 # codes that are not (yet) in eval_external/adapters/registry_matrix_v3.yaml (bf4b2553): Q3SG (genc0, appended
-# 2026-11-13, DECISIONS G20) is served under its code from a merged folder and read by path; no eval view
-NOT_IN_EVAL_REGISTRY = {"Q3SG"}
+# 2026-11-13, DECISIONS G20) and the dose starts Q3S2 / Q3S4 (Q3S's run at epochs 2 / 4, appended after it) are
+# served under their codes from a merged folder and read by path; no eval view
+NOT_IN_EVAL_REGISTRY = {"Q3SG", "Q3S2", "Q3S4"}
 
 
 def _torch():

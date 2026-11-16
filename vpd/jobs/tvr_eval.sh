@@ -35,7 +35,8 @@
 # a json of the served adapter that says FAILED is recorded as merge_parity_<tier>:report_only, rc 0, while a crash
 # or a missing json is still a failure).  Any other value: exit 2.  The third explore start Q3SG (PREREG section 17,
 # row 2026-11-13; DECISIONS G20) runs under explore/rl the same way (jobs tvr-xeval-q3sg-<part>, P =
-# runs/explore/rl/Q3SG, prefix xrl).
+# runs/explore/rl/Q3SG, prefix xrl); so do the dose starts Q3S2 and Q3S4 (row 2026-11-16; jobs
+# tvr-xeval-q3s2-<part> / tvr-xeval-q3s4-<part>, P = runs/explore/rl/<S>, prefix xrl).
 
 START=${1:-}
 PART=${2:-}
@@ -52,8 +53,10 @@ case $TVR_ROOT in
     PARITY_GATED=1 ;;
   explore/rl)
     case $START in
-      Q3RD|Q3RS150|Q3SG) ;;
-      *) echo "usage: VPD_TVR_ROOT=explore/rl tvr_eval.sh START top|low RUN   (START: Q3RD Q3RS150 Q3SG)" >&2; exit 2 ;;
+      Q3RD|Q3RS150|Q3SG|Q3S2|Q3S4) ;;
+      *) echo "usage: VPD_TVR_ROOT=explore/rl tvr_eval.sh START top|low RUN   (START:" \
+           "Q3RD Q3RS150 Q3SG Q3S2 Q3S4)" >&2
+         exit 2 ;;
     esac
     JOB=tvr-xeval-${START,,}-$PART
     PREFIX=xrl

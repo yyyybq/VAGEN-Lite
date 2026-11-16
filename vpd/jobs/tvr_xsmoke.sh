@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sco payload of job vpd-tvr-xsmoke (EXPLORATORY; PREREG_TVR_PILOT.md section 17, row 2026-11-12; DECISIONS G18): the
 # GPU smoke of the RL starts Q3RD and Q3RS150 (one job, both starts) before tvr-xtrain-<s> (and of Q3SG alone, job
-# vpd-tvr-xsmoke-q3sg, below).  Mechanism only: dev tasks
+# vpd-tvr-xsmoke-q3sg, and of the dose starts Q3S2 and Q3S4, job vpd-tvr-xsmoke-dose, below).  Mechanism only: dev tasks
 # (smoke8 / smoke4), never eval500, no success rate anywhere (run_tvr --mechanism-only nulls result.success;
 # xsmoke-verdict never reads a success field).  as_root, one H800, gate tvr, from pilot_tvr.py:
 #     env VPD_JOB_DEADLINE_S=3840 timeout -k 60 4020 bash /mnt/umm/users/yinbaiqiao/VAGEN-Lite-vpd/vpd/jobs/tvr_xsmoke.sh RUN
@@ -9,11 +9,14 @@
 # registered lists: Q3RD,Q3RS150 (the default when omitted: job vpd-tvr-xsmoke, the commands above unchanged) or Q3SG
 # (job vpd-tvr-xsmoke-q3sg, the third explore start alone; the same steps per start):
 #     env VPD_JOB_DEADLINE_S=2040 timeout -k 60 2220 bash WT/vpd/jobs/tvr_xsmoke.sh Q3SG RUN
-# Any other list: exit 2.  The job name goes to `pilot_tvr guard / expect JOB` and (Q3SG) `xsmoke-verdict --job JOB`.
+# or Q3S2,Q3S4 (job vpd-tvr-xsmoke-dose, both dose starts; PREREG section 17, row 2026-11-16):
+#     env VPD_JOB_DEADLINE_S=3840 timeout -k 60 4020 bash WT/vpd/jobs/tvr_xsmoke.sh Q3S2,Q3S4 RUN
+# Any other list: exit 2.  The job name goes to `pilot_tvr guard / expect JOB` and (Q3SG, dose) `xsmoke-verdict --job
+# JOB`.
 # SM = OUT/tvr/runs/explore/rl/smoke/<RUN name> (runs/explore/rl/smoke is made by pilot_tvr prepare as the login user).
 # Steps: node, prereg_committed (vpd_snapshot_file vpd/PREREG_TVR_PILOT.md), guard (pilot_tvr guard JOB: the
-# explore guards), merge_disk; per start S of the list (Q3RD Q3RS150, or Q3SG; each a `part`; a failure never skips
-# the other start):
+# explore guards), merge_disk; per start S of the list (Q3RD Q3RS150, Q3SG, or Q3S2 Q3S4; each a `part`; a failure
+# never skips the other start):
 #   load_S          PY_Q3 -m vpd.tvr.raw_bf16: the checkpoint as the trainer loads it (vpd.starts.load_model: float32
 #                   -> bf16, sdpa asserted) saved like merge.py's folder on job-local disk -> SM/S/load/load.json
 #   dry_S           PY_TRAIN n2_train_vpd.py --dry-run --limit 3 --expect-grid 22x40 on tiers/v1/parity3.jsonl
@@ -47,10 +50,11 @@ esac
 case $XLIST in
   Q3RD,Q3RS150) JOB=tvr-xsmoke ;;  # pilot_tvr XJOBS[JOB]["starts"], in this order
   Q3SG) JOB=tvr-xsmoke-q3sg ;;
+  Q3S2,Q3S4) JOB=tvr-xsmoke-dose ;;  # the dose starts (PREREG section 17, row 2026-11-16)
   *) JOB="" ;;
 esac
 if [[ -z $RUN || -z $JOB ]]; then
-  echo "usage: tvr_xsmoke.sh [Q3RD,Q3RS150|Q3SG] RUN   (default Q3RD,Q3RS150)" >&2
+  echo "usage: tvr_xsmoke.sh [Q3RD,Q3RS150|Q3SG|Q3S2,Q3S4] RUN   (default Q3RD,Q3RS150)" >&2
   exit 2
 fi
 IFS=, read -r -a XSTARTS <<< "$XLIST"
