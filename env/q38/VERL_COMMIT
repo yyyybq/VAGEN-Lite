@@ -1,0 +1,3 @@
+4bfa94d193624132021db86cc0d3c38e1f4d2217
+# verl/ in this worktree is a plain clone (no hardlinks) of pear f32aa1f7 3rdparty/verl/src:
+# upstream volcengine/verl 8e03c039 + 43 pear patches. The submodule gitlink is deliberately not updated.
