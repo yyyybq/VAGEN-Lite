@@ -22,7 +22,13 @@ five methods of verl/verl/trainer/ppo/v1/trainer_base.py (TB) and changes nothin
   name ``actor/entropy`` (verl's own value, seq-mean-token-mean over all rows, moves to ``actor/entropy_v1``) and the
   asynchronous diagnostics split by staleness 0 / 1 (``vagen/async/*_s0`` / ``*_s1``);
 - ``_update_actor`` (TB:1901-1944): the parent, then ``actor/kl_loss`` in the 8B unit (user question 3, MF1):
-  kl_v1 x rows / (vagen.ga_8b x n_real) (``kl_to_8b_unit``), verl's own value as ``actor/kl_loss_v1``.
+  kl_v1 x rows / (vagen.ga_8b x n_real) (``kl_to_8b_unit``), verl's own value as ``actor/kl_loss_v1``; the batch's
+  rows and real rows (``vagen/actor/rows``, ``vagen/actor/real_rows``).  With ppo_epochs > 1 (Q5 PT, smoke S4) also
+  the value of each pass (``per_epoch_metrics``): verl reduces the per-mini-batch lists of the worker to their mean
+  over every mini-batch of every pass (engine_workers.py:323-341, TB:1939-1941), so the parent's reduce_metrics is
+  wrapped for the duration of the call to keep a copy of the lists (``capture_reduced_lists``; the values it returns
+  are unchanged).  Pass 1 runs at the old weights: its KL is the one the driver can recompute from old_log_probs and
+  ref_log_prob, and its ppo_kl is 0.
 
 Two more overrides change only the type of logged values, not the step: ``_compute_metrics`` (TB:1946-2074, the last
 step before ``self.logger.log``, TB:528-544) and ``_validate`` (TB:1092; its metrics are logged directly before
@@ -34,15 +40,19 @@ Metric names this module writes (all int or float; MetricsAggregator drops bools
 actor/entropy, actor/entropy_v1, actor/kl_loss, actor/kl_loss_v1, vagen/guard/entropy_t1_calib,
 vagen/guard/entropy_t08_calib, vagen/guard/entropy_tokens, vagen/guard/calib_tokens, vagen/adv/real_rows,
 vagen/adv/scaled_groups, vagen/adv/zero_groups, vagen/async/rows_s0, vagen/async/rows_s1, vagen/async/rows_s_other,
-vagen/async/tis_w_mean_s{0,1}, vagen/async/tis_clip_frac_s{0,1}, vagen/async/logp_diff_abs_mean_s{0,1}.
+vagen/async/tis_w_mean_s{0,1}, vagen/async/tis_clip_frac_s{0,1}, vagen/async/logp_diff_abs_mean_s{0,1},
+vagen/actor/rows, vagen/actor/real_rows, and with ppo_epochs > 1 vagen/epoch/{kl_loss,kl_loss_v1,ppo_kl,pg_clipfrac,
+pg_clipfrac_lower,pg_loss,grad_norm}_e{1..epochs} (kl_loss in the 8B unit).
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
+import numbers
 import os
-from typing import Any, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -62,6 +72,10 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))
 CALIB_TEMPERATURE = 1.0
 DEFAULT_CALIB_STEPS = (1,)
 STALENESS_BUCKETS = (0, 1)
+# the worker's per-mini-batch actor metrics logged per pass when ppo_epochs > 1 (losses.py:57-155 Metric values,
+# one float per mini-batch after Metric.aggregate_dp; grad_norm one per optimizer step, engine_workers.py:202-215)
+EPOCH_METRICS = ("actor/kl_loss", "actor/ppo_kl", "actor/pg_clipfrac", "actor/pg_clipfrac_lower", "actor/pg_loss",
+                 "actor/grad_norm")
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -85,6 +99,65 @@ def kl_to_8b_unit(kl_v1: float, rows: int, ga_8b: int, n_real: int) -> float:
     if ga_8b <= 0 or rows <= 0:
         raise ValueError(f"q38 trainer: bad KL conversion inputs rows={rows}, ga_8b={ga_8b}")
     return float(kl_v1) * float(rows) / (float(ga_8b) * float(n_real))
+
+
+def per_epoch_metrics(
+    raw: Mapping[str, Any], epochs: int, kl_factor: float | None
+) -> tuple[dict[str, float], list[str]]:
+    """The value of each pass of the actor update; (metrics, keys of EPOCH_METRICS that could not be split).
+
+    ``raw`` holds the worker's lists as the trainer reduces them (after rename_dict, TB:1939): one entry per
+    mini-batch iteration, epoch-major (tensordict_utils.make_iterator: every mini-batch of pass 1, then pass 2, ...;
+    engine_workers.py:276-336).  Pass e is the mean of its contiguous chunk, the same reduction verl applies to the
+    whole list.  actor/kl_loss gives ``vagen/epoch/kl_loss_v1_e{e}`` (verl's unit) and, with ``kl_factor`` (the
+    trainer's kl_to_8b_unit of 1), ``vagen/epoch/kl_loss_e{e}`` in the 8B unit; the others ``vagen/epoch/<name>_e{e}``.
+    A list whose length is not a multiple of ``epochs``, or that holds a non-number, is left out (reported back)."""
+    if epochs <= 0:
+        raise ValueError(f"per_epoch_metrics: epochs must be positive, got {epochs}")
+    out: dict[str, float] = {}
+    skipped: list[str] = []
+    for key in EPOCH_METRICS:
+        values = raw.get(key)
+        if values is None:
+            continue
+        if (not isinstance(values, (list, tuple)) or not values or len(values) % epochs
+                or not all(isinstance(v, numbers.Real) and not isinstance(v, bool) for v in values)):
+            skipped.append(key)
+            continue
+        per = len(values) // epochs
+        name = key.split("/", 1)[1]
+        for e in range(epochs):
+            chunk = [float(v) for v in values[e * per:(e + 1) * per]]
+            mean = sum(chunk) / len(chunk)
+            if key == "actor/kl_loss":
+                out[f"vagen/epoch/kl_loss_v1_e{e + 1}"] = mean
+                if kl_factor is not None:
+                    out[f"vagen/epoch/kl_loss_e{e + 1}"] = mean * float(kl_factor)
+            else:
+                out[f"vagen/epoch/{name}_e{e + 1}"] = mean
+    return out, skipped
+
+
+@contextlib.contextmanager
+def capture_reduced_lists(sink: dict) -> Iterator[dict]:
+    """While open, every dict trainer_base's reduce_metrics reduces leaves a copy of its list values in ``sink``
+    (key -> list); the reduction itself is verl's, unchanged.  TB looks the function up in its module globals at
+    call time (TB:86, 1941), so the module attribute is swapped for the duration and always restored."""
+    from verl.trainer.ppo.v1 import trainer_base
+
+    original = trainer_base.reduce_metrics
+
+    def capturing(metrics, *args, **kwargs):
+        for key, value in metrics.items():
+            if isinstance(value, (list, tuple)):
+                sink[key] = list(value)
+        return original(metrics, *args, **kwargs)
+
+    trainer_base.reduce_metrics = capturing
+    try:
+        yield sink
+    finally:
+        trainer_base.reduce_metrics = original
 
 
 def row_uid(key: str) -> str:
@@ -358,18 +431,33 @@ class VagenTrainerMixin:
     # ---- 5. actor update, KL in the 8B unit ---------------------------------------------------------------------------
 
     def _update_actor(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
-        batch = super()._update_actor(batch, metrics)
-        if "actor/kl_loss" not in metrics:  # use_kl_loss off
-            return batch
         actor = self.config.actor_rollout_ref.actor
-        mini_n = int(actor.ppo_mini_batch_size) * int(self.config.actor_rollout_ref.rollout.n)
+        epochs = int(actor.get("ppo_epochs", 1) or 1)
+        raw: dict = {}
+        if epochs > 1:
+            with capture_reduced_lists(raw):
+                batch = super()._update_actor(batch, metrics)
+        else:
+            batch = super()._update_actor(batch, metrics)
         rows = len(batch)
-        if rows % mini_n:
-            raise RuntimeError(f"q38 trainer: the actor batch of {rows} rows is not whole mini-batches of {mini_n}")
         n_real = sum(1 for r in self._real_rows(batch) if r)
-        kl_v1 = float(metrics["actor/kl_loss"])
-        metrics["actor/kl_loss_v1"] = kl_v1
-        metrics["actor/kl_loss"] = kl_to_8b_unit(kl_v1, rows, self._ga_8b(), n_real)
+        metrics["vagen/actor/rows"] = int(rows)
+        metrics["vagen/actor/real_rows"] = int(n_real)
+        kl_factor = None
+        if "actor/kl_loss" in metrics:  # absent with use_kl_loss off
+            mini_n = int(actor.ppo_mini_batch_size) * int(self.config.actor_rollout_ref.rollout.n)
+            if rows % mini_n:
+                raise RuntimeError(f"q38 trainer: the actor batch of {rows} rows is not whole mini-batches of {mini_n}")
+            kl_v1 = float(metrics["actor/kl_loss"])
+            metrics["actor/kl_loss_v1"] = kl_v1
+            metrics["actor/kl_loss"] = kl_to_8b_unit(kl_v1, rows, self._ga_8b(), n_real)
+            kl_factor = kl_to_8b_unit(1.0, rows, self._ga_8b(), n_real)
+        if epochs > 1:
+            per_epoch, skipped = per_epoch_metrics(raw, epochs, kl_factor)
+            if skipped:
+                logger.warning(f"q38 trainer: step {self.global_steps}: no per-pass values for {skipped} (the worker's "
+                               f"lists are not {epochs} passes of numbers)")
+            metrics.update(per_epoch)
         return batch
 
     # ---- 6. logged values as Python numbers ---------------------------------------------------------------------------

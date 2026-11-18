@@ -110,7 +110,14 @@ FORBIDDEN_CASES = {
     "kl_8b_factor": [("vagen.ga_8b", 24)],
     "parity_override_outside_parity": [("vagen.parity_sampling_override", {"temperature": 0.8, "top_p": 0.92})],
     "dynamic_bsz": [(A + ".use_dynamic_bsz", True)],
+    # smoke S5 (vagen/q38/fault_injection.py; more cases in tests/test_fault_injection.py)
+    "fault_injection_config": [("vagen.fault_injection", {"enable": False, "env_step_exception": {"turn": 2}})],
+    "stuck_warn_below_floor": [("vagen.stuck_warn", {"min_s": 1, "factor": 0, "repeat_s": 30})],
 }
+
+# the Q5 PT update shape (DESIGN 3.1 last rows; smoke S4 keeps every group with filter.enable false before phase 2)
+Q5_PT_SHAPE = [("vagen.profile", "q5_pt"), (A + ".ppo_mini_batch_size", 24), (A + ".ppo_epochs", 3),
+               ("vagen.ga_8b", 24), ("filter.enable", False)]
 
 
 class ForbiddenTest(Base):
@@ -234,6 +241,10 @@ class ExpectedTest(Base):
             ("trainer.v1.sampler.sampler_kwargs.rollout_n", 4),
             ("trainer.v1.sampler.sampler_kwargs.rollout_data_dir", "/elsewhere/rollout_data"),
             ("trainer.v1.sampler.sampler_kwargs.filter", {"enable": False}),
+            ("vagen.profile", "q5"),
+            # the main line's shape (no profile): Q5 PT values fail it
+            (A + ".ppo_epochs", 3),
+            (A + ".ppo_mini_batch_size", 24),
         ]
         for key, value in cases:
             with self.subTest(key=key, value=value):
@@ -313,6 +324,60 @@ class ExpectedTest(Base):
         put(cfg, "trainer.v1.trainer_mode", "sync")
         put(cfg, "vagen.parity_sampling_override", {"temperature": 0.8})
         self.assertViolates(cfg, "vagen.parity_sampling_override")
+
+    def test_q5_pt_profile(self):
+        """vagen.profile q5_pt: mini 24, 3 passes, ga_8b 24 and (before phase 2) every group kept; the main shape
+        fails it and it fails the main shape."""
+        cfg = self.base()
+        for key, value in Q5_PT_SHAPE:
+            put(cfg, key, value)
+        report = self.evaluate(cfg)
+        self.assertTrue(report["passed"], C.summary(report))
+        self.assertEqual(report["profile"]["shape"], "q5_pt")
+        self.assertFalse(report["profile"]["filter"])
+        applied = {(e["key"], json.dumps(e.get("expected"))) for e in report["expected"] if e["applies"]}
+        self.assertIn((A + ".ppo_epochs", "3"), applied)
+        self.assertNotIn((A + ".ppo_epochs", "1"), applied)
+        for key, value, rules in (
+                (A + ".ppo_mini_batch_size", 12, [A + ".ppo_mini_batch_size", "kl_8b_factor"]),
+                (A + ".ppo_epochs", 1, [A + ".ppo_epochs"]),
+                ("vagen.ga_8b", 12, ["vagen.ga_8b", "kl_8b_factor"]),
+                ("filter.enable", True, ["filter.enable"]),
+        ):
+            with self.subTest(key=key, value=value):
+                bad = self.base()
+                for k, v in Q5_PT_SHAPE:
+                    put(bad, k, v)
+                put(bad, key, value)
+                report = self.evaluate(bad)
+                self.assertFalse(report["passed"])
+                for rule in rules:
+                    self.assertIn(rule, report["violations"], C.summary(report))
+        # the same shape without the profile is checked against the main line
+        main = self.base()
+        for key, value in Q5_PT_SHAPE:
+            if key != "vagen.profile":
+                put(main, key, value)
+        report = self.evaluate(main)
+        self.assertEqual(report["profile"]["shape"], "main")
+        for rule in (A + ".ppo_mini_batch_size", A + ".ppo_epochs", "vagen.ga_8b"):
+            self.assertIn(rule, report["violations"])
+        # the on-policy shortcut stays refused with 3 passes
+        put(cfg, "vagen.onpolicy_shortcut", True)
+        self.assertViolates(cfg, "onpolicy_shortcut_shape")
+        # profile main written out is the default
+        main = self.base()
+        put(main, "vagen.profile", "main")
+        self.assertTrue(self.evaluate(main)["passed"])
+        self.assertEqual(C.profile(main), "main")
+        put(main, "vagen.profile", None)
+        self.assertEqual(C.profile(main), "main")
+
+    def test_shapes_keep_the_kl_factor(self):
+        for name, shape in C.SHAPES.items():
+            with self.subTest(profile=name):
+                self.assertEqual(shape["ppo_mini_batch_size"] * 8, C.KL_8B_FACTOR * shape["ga_8b"])
+        self.assertEqual(set(C.SHAPES), set(C.PROFILES))
 
     def test_allow_override(self):
         cfg = self.base()
@@ -419,6 +484,19 @@ class SmokeExampleTest(unittest.TestCase):
                 self.assertEqual(self.cfg.trainer.total_epochs, math.ceil(700 / (10798 // 24)) + 1)
         report = C.evaluate(self.cfg, 701, check_paths=True)
         self.assertEqual(report["violations"], ["endpoint_beyond_horizon"])
+
+    def test_smoke_s4_q5_pt(self):
+        """Smoke S4 (DESIGN 5.2): the example in the Q5 PT shape, save_freq 3 (the one override), endpoint 3."""
+        cfg = OmegaConf.create(OmegaConf.to_container(self.cfg, resolve=False))
+        for key, value in Q5_PT_SHAPE + [("trainer.save_freq", 3),
+                                         ("vagen.contract.allow_override", ["trainer.save_freq"])]:
+            put(cfg, key, value)
+        report = C.evaluate(cfg, 3, check_paths=True)
+        self.assertTrue(report["passed"], C.summary(report))
+        self.assertEqual(report["overridden"], ["trainer.save_freq"])
+        self.assertEqual(report["profile"]["shape"], "q5_pt")
+        # the sampler gets the filter section through the interpolation: every group, factor 1
+        self.assertEqual(OmegaConf.select(cfg, "trainer.v1.sampler.sampler_kwargs.filter.enable"), False)
 
     def test_shape(self):
         cfg = self.cfg

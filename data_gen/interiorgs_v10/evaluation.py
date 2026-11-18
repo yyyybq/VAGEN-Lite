@@ -61,6 +61,13 @@ built env; the run stops without done.json after CRITIC_PROBE_MAX_ERRORS_IN_A_RO
 resumes only with the same model.json (but name and load_seconds).  One probe version per result folder (model.json
 ``critic_probe``); off, nothing changes.  Under the switch the rows' progress fields (``progress``, ``failed_gates``)
 are the grouped_gated progress of V4's env, not comparable with plain folders.
+
+q38 (the Qwen3.8-27B rerun line, docs/q38/TEMPLATE_CHECK.md and STACK_SUPPORT 2.5, question 7 of DESIGN_ASYNC): a model
+whose config.json model_type is in MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS (only "qwen3_5": Qwen3.5 / Qwen3.8)
+gets those chat-template arguments at every chat call (enable_thinking False) and those vLLM arguments
+(generation_config "vllm"), and its model.json records them (model_type_record).  Every other model type (the 8B main
+line's qwen3_vl, qwen2_5_vl, cambrian_qwen, a folder without a readable config.json): no switch, every call and
+model.json exactly as before.  The rules (greedy, history, 12 turns, the env) are the same for every model type.
 """
 
 from __future__ import annotations
@@ -82,6 +89,17 @@ VERSION = "interiorgs_v10_eval_v2"  # v2 (round 8): results rows carry the traje
 CRITIC_PROBE_VERSION = "critic_probe_v1"  # gate 0 of docs/PREREG_PPO2.md (run --critic-probe)
 V4_PROGRESS_SCALE = 3.3333333333333335  # V4: the D_cond preset with the progress (potential) scale / 3 (matrix_r12)
 CRITIC_PROBE_MAX_ERRORS_IN_A_ROW = 10  # critic probe: a run stops (no done.json) after this many error rows in a row
+# q38: per config.json model_type, what the vLLM calls get beyond the defaults (a type not listed: nothing, as before).
+# Qwen3.5 / Qwen3.8 ("qwen3_5"): its chat template thinks unless enable_thinking is False -- the generation prompt ends
+# in "<think>\n" (the 384-token answers would go to thinking) and the 27B's adds a "Reasoning effort is set to xhigh"
+# note to the system turn; with False it ends in the empty think block "<think>\n\n</think>\n\n", as RL's agent loop
+# (data.apply_chat_template_kwargs) and the 27B SFT have it.  preserve_thinking is left to the template (the 27B's
+# keeps the empty think block of earlier turns, as the agent loop's token history does; TEMPLATE_CHECK 1).  And vLLM's
+# own sampling defaults instead of the model's generation_config.json (the hub 27B's: temperature 1.0, top_k 20, top_p
+# 0.95; STACK_SUPPORT 2.5).  A safeguard: vLLM 0.28's LLM uses those defaults only for a call without SamplingParams
+# (vllm/entrypoints/llm.py get_default_sampling_params), and every call here gives its own
+MODEL_TYPE_CHAT_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"enable_thinking": False}}
+MODEL_TYPE_LLM_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"generation_config": "vllm"}}
 
 
 def band_name(d: int) -> str:
@@ -657,6 +675,29 @@ def cambrian_request(wrapper: Any, system: str, earlier: Sequence[Tuple[str, Any
     return {"prompt_token_ids": ids, "multi_modal_data": {"image": images}}
 
 
+def model_type_kwargs(model_type: Optional[str]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """q38: (chat-template arguments, extra vLLM LLM arguments) of a config.json model_type; both empty for every type
+    not in MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS (copies: a caller may not change the tables)."""
+    key = model_type or ""
+    return dict(MODEL_TYPE_CHAT_KWARGS.get(key, {})), dict(MODEL_TYPE_LLM_KWARGS.get(key, {}))
+
+
+def model_type_record(model: str) -> Dict[str, Any]:
+    """q38: what model.json records of the model-type switch: nothing for a type without one (model.json as before);
+    else its model_type, the chat-template and vLLM arguments and the job's CUDA_VISIBLE_DEVICES (the 2-card eval job
+    gives vLLM card 1, the render service keeps card 0: sco_interiorgs_v10_train.sh eval_policy_cards)."""
+    import os
+
+    from vagen.models.model_types import of_checkpoint
+
+    kind = of_checkpoint(model)
+    chat, llm = model_type_kwargs(kind)
+    if not chat and not llm:
+        return {}
+    return {"model_type": kind, "chat_template_kwargs": chat, "llm_kwargs": llm,
+            "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
+
+
 class VllmPolicy:  # pragma: no cover - needs a GPU
     def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
                  max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0, entropy: bool = False) -> None:
@@ -664,8 +705,12 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
 
         from vagen.models.model_types import of_checkpoint
 
+        kind = of_checkpoint(model)
+        # q38: {} and {} for every model type but qwen3_5 (MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS), so the
+        # LLM and its calls get exactly the arguments they always had
+        self.chat_template_kwargs, llm_kwargs = model_type_kwargs(kind)
         self.cambrian = None
-        if of_checkpoint(model) == "cambrian_qwen":  # the model line: compact <image> tokens (cambrian_request)
+        if kind == "cambrian_qwen":  # the model line: compact <image> tokens (cambrian_request)
             from transformers import AutoTokenizer
 
             from vagen.models.cambrian_plugin import register
@@ -675,7 +720,7 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
             self.cambrian = CambrianProcessorWrapper(AutoTokenizer.from_pretrained(model))
         self.llm = LLM(model=model, gpu_memory_utilization=gpu_memory_utilization, max_model_len=max_model_len,
                        enforce_eager=True, enable_prefix_caching=True, limit_mm_per_prompt={"image": max_images},
-                       trust_remote_code=self.cambrian is not None)
+                       trust_remote_code=self.cambrian is not None, **llm_kwargs)
         self.last_prompt_tokens: Optional[int] = None
         self.temperature, self.top_p = float(temperature), float(top_p)
         self.entropy = bool(entropy)  # round 12 freeze: the answers' token entropy (last_entropy, last_tokens)
@@ -684,6 +729,12 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         self.last_prompt_ids: Optional[List[int]] = None  # grounding probe v2: the layout check of the side call
         self.last_finish: Optional[str] = None  # critic probe: how the last answer ended (stop / length) and on what
         self.last_stop_reason: Any = None
+
+    def _chat_kwargs(self) -> Dict[str, Any]:
+        """q38: the chat-template arguments of a chat call ({} without any: the call as before; also for a policy built
+        without __init__, as test_grounding_probe's SidePolicyTest builds one)."""
+        kwargs = getattr(self, "chat_template_kwargs", None)
+        return {"chat_template_kwargs": dict(kwargs)} if kwargs else {}
 
     def generate(self, system: str, user_text: str, image: Any, earlier: Sequence[Tuple[str, Any, str]] = (),
                  as_sft: bool = False, seed: Optional[int] = None) -> str:
@@ -697,7 +748,7 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
                                     sampling_params=params, use_tqdm=False)
         else:
             out = self.llm.chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft),
-                                sampling_params=params, use_tqdm=False)
+                                sampling_params=params, use_tqdm=False, **self._chat_kwargs())
         self.last_prompt_tokens = len(out[0].prompt_token_ids)
         self.last_prompt_ids = list(out[0].prompt_token_ids)
         self.last_finish = out[0].outputs[0].finish_reason
@@ -729,7 +780,8 @@ class VllmPolicy:  # pragma: no cover - needs a GPU
         params = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=int(max_tokens), stop=[stop],
                                 include_stop_str_in_output=True)
         tokenizer = self.llm.get_tokenizer()
-        prompt = self.llm.preprocess_chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft))[0]
+        prompt = self.llm.preprocess_chat(chat_messages(system, earlier, user_text, image, _image_url, as_sft),
+                                          **self._chat_kwargs())[0]
         prompt, prefix_ids = grounding_probe.prefixed_prompt(prompt, tokenizer, prefix)
         out = self.llm.generate([prompt], sampling_params=params, use_tqdm=False)
         side_ids = list(out[0].prompt_token_ids)
@@ -842,7 +894,8 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
 
 def model_record(args: argparse.Namespace, cfg: Dict[str, Any], switches: Dict[str, Any], sampled: bool,
                  probe_key: Dict[str, Any], load_seconds: Optional[float]) -> Dict[str, Any]:
-    """model.json of a run (the keys in this order; the probes' keys last)."""
+    """model.json of a run (the keys in this order; the probes' keys last; q38: the model-type switch's keys, only for a
+    model type with one, before them)."""
     return {"name": args.name, "model": args.model, "version": VERSION,
             "prompt_format": cfg["prompt_format"], "greedy": not sampled,
             "samples": int(args.samples) if sampled else 1,
@@ -853,10 +906,12 @@ def model_record(args: argparse.Namespace, cfg: Dict[str, Any], switches: Dict[s
             "history": bool(args.history),
             "sft_text": bool(args.sft_text),
             "entropy": bool(getattr(args, "entropy", False)),
-            "load_seconds": load_seconds, **probe_key}
+            "load_seconds": load_seconds, **model_type_record(args.model), **probe_key}
 
 
-RESUME_FREE_KEYS = ("name", "load_seconds")  # critic probe: what a resumed folder's model.json may differ in
+# critic probe: what a resumed folder's model.json may differ in (q38: and the job's cards, which only a model type with
+# a switch records, model_type_record)
+RESUME_FREE_KEYS = ("name", "load_seconds", "cuda_visible_devices")
 
 
 def check_resume_record(result: Path, record: Dict[str, Any]) -> None:

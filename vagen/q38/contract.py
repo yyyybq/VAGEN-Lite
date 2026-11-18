@@ -4,7 +4,9 @@
 
 - EXPECTED: config key -> expected value, each with its source (the 8B run, the asynchronous recipe, or a decision of
   the user).  Rules can depend on the run's profile: ``vagen.trainer_impl`` (``vagen``, or ``stock`` for smoke S0),
-  ``vagen.parity_mode`` (the 8B parity run, DESIGN 5.3) and whether a group filter is on;
+  ``vagen.parity_mode`` (the 8B parity run, DESIGN 5.3), ``vagen.profile`` (``main``, the default: the main line
+  and the matrix; ``q5_pt``: the update shape of the Q5 PT arm, DESIGN 3.1 last rows and smoke S4) and whether a
+  group filter is on;
 - FORBIDDEN: combinations that silently change the recipe (the table at the end of DESIGN 3.1);
 - PATHS: the inputs a run reads (env yamls, the model, the filter's task rows) must exist;
 - endpoint rules: the endpoint must lie within the learning-rate horizon and within total_epochs x steps_per_epoch
@@ -13,7 +15,8 @@
 It writes ``<run>/contract_check.json`` (every rule with its expected and actual value) and
 ``<run>/effective_config.yaml`` (the resolved config), where ``<run>`` is the parent of ``trainer.default_local_dir``,
 and raises ContractError when a rule fails that is not listed in ``vagen.contract.allow_override`` (a list of rule
-names: an EXPECTED key, a FORBIDDEN name, or ``path:<key>``).  An unknown name in that list is itself an error.
+names: an EXPECTED key, a FORBIDDEN name, or ``path:<key>``).  An unknown name in that list is itself an error, and so
+is a name of NOT_OVERRIDABLE (fault_injection_config: smoke S5's fault injection stays off outside a smoke run).
 
     python -m vagen.q38.contract --config RL/ppo.yaml --endpoint 300          # dry run: prints, writes nothing
     python -m vagen.q38.contract --config RL/ppo.yaml --endpoint 300 --write  # also writes the two files
@@ -59,6 +62,20 @@ SAVE_CONTENTS = ["model", "hf_model", "optimizer", "extra"]
 PARITY_SAMPLING = {"temperature": 0.8, "top_p": 0.92}
 TRAINER_IMPLS = ("vagen", "stock")
 FAILURE_POLICIES = ("raise", "skip")
+# smoke S5 (vagen/q38/fault_injection.py): the switch, and the floor of the sampler's stuck warning outside S5
+FI_ENABLE_KEY = "vagen.fault_injection.enable"
+STUCK_WARN_FLOOR = {"min_s": 60.0, "factor": 1.0, "repeat_s": 60.0}
+# FORBIDDEN rules that vagen.contract.allow_override may not name
+NOT_OVERRIDABLE = ("fault_injection_config",)
+
+# vagen.profile: the update shape a run is checked against.  main = the 8B main line (12 kept groups padded to 96
+# rows, one pass); q5_pt = the Q5 PT arm (YQ5: 24 groups = 192 rows a mini-batch, 3 passes, ga_8b 24).  Before phase 2
+# brings the nominal filter, q5_pt keeps every group with factor 1 (filter.enable false, DESIGN 5.2 S4).
+PROFILES = ("main", "q5_pt")
+SHAPES = {
+    "main": {"ppo_mini_batch_size": 12, "ppo_epochs": 1, "ga_8b": 12},
+    "q5_pt": {"ppo_mini_batch_size": 24, "ppo_epochs": 3, "ga_8b": 24},
+}
 
 A = "actor_rollout_ref.actor"
 R = "actor_rollout_ref.rollout"
@@ -66,6 +83,8 @@ SK = "trainer.v1.sampler.sampler_kwargs"
 
 # where the 8B values come from: Y8 = R8/rl_qw3v4s3/ppo.yaml (the 8B main line V4)
 Y8 = "8B Y8"
+# YQ5 = reward_runs/runs/rw_p3n_s2tcswf3c/rl_rw_s2tcswf3c/ppo.yaml (the Q5 PT arm, DESIGN_ASYNC 1)
+YQ5 = "Q5 PT YQ5"
 ASYNC = "async recipe (DESIGN_ASYNC 3.1)"
 
 
@@ -137,6 +156,21 @@ def parity_mode(cfg: DictConfig) -> bool:
     return bool(OmegaConf.select(cfg, "vagen.parity_mode", default=False))
 
 
+def profile(cfg: DictConfig) -> str:
+    """``vagen.profile``: ``main`` (absent or null) or ``q5_pt``; any other value fails the vagen.profile rule and
+    is checked against the main shape."""
+    value = OmegaConf.select(cfg, "vagen.profile", default="main")
+    return "main" if value is None else str(value)
+
+
+def _q5_pt(cfg) -> bool:
+    return profile(cfg) == "q5_pt"
+
+
+def _main_shape(cfg) -> bool:
+    return not _q5_pt(cfg)
+
+
 def filter_on(cfg: DictConfig) -> bool:
     return bool(OmegaConf.select(cfg, "filter.enable", default=False))
 
@@ -155,6 +189,10 @@ def _vagen_filter(cfg) -> bool:
 
 def _keep_by_std(cfg) -> bool:
     return _vagen_filter(cfg) and OmegaConf.select(cfg, "filter.name", default=None) == "keep_by_return_std"
+
+
+def _vagen_q5_pt(cfg) -> bool:
+    return _vagen(cfg) and _q5_pt(cfg)
 
 
 def _not_parity(cfg) -> bool:
@@ -397,6 +435,9 @@ EXPECTED: List[Expect] = [
     Expect("trainer.v1.sampler.sync_refill_failed_groups", False, ASYNC + ": no refill"),
     Expect("filter.enable", AbsentOr(False), "trainer_impl stock: plain GRPO, nothing applies filter.* (smoke S0)",
            _stock),
+    Expect("filter.enable", AbsentOr(False),
+           "profile q5_pt before phase 2: every group kept with factor 1 stands in for nominal 24 (YQ5:586-589; "
+           "DESIGN 5.2 S4); the nominal filter is phase 2", _vagen_q5_pt),
     Expect("filter.name", OneOf(*PHASE1_FILTERS),
            "8B group filters of phase 1 (Y8:579-592; S0 mixed_outcome, V4 keep_by_return_std); nominal is phase 2",
            _vagen_filter),
@@ -409,8 +450,12 @@ EXPECTED: List[Expect] = [
     Expect("data.custom_cls", DATASET, "DESIGN 2.1"),
     Expect(R + ".n", 8, Y8 + ":196"),
     # --- loss and optimizer
-    Expect(A + ".ppo_mini_batch_size", 12, Y8 + ":42 (padded to 96 rows, one optimizer step)"),
-    Expect(A + ".ppo_epochs", 1, Y8 + ":68"),
+    Expect(A + ".ppo_mini_batch_size", SHAPES["main"]["ppo_mini_batch_size"],
+           Y8 + ":42 (padded to 96 rows, one optimizer step)", _main_shape),
+    Expect(A + ".ppo_mini_batch_size", SHAPES["q5_pt"]["ppo_mini_batch_size"],
+           YQ5 + ":42 (24 groups = 192 rows, one optimizer step a pass)", _q5_pt),
+    Expect(A + ".ppo_epochs", SHAPES["main"]["ppo_epochs"], Y8 + ":68", _main_shape),
+    Expect(A + ".ppo_epochs", SHAPES["q5_pt"]["ppo_epochs"], YQ5 + ":68 (3 passes over the batch)", _q5_pt),
     Expect(A + ".shuffle", False, Y8 + ":69"),
     Expect(A + ".loss_agg_mode", "seq-mean-token-mean",
            "the 8B's actual objective: sum of per-episode token means / nominal episodes (DESIGN 3.1)"),
@@ -453,7 +498,11 @@ EXPECTED: List[Expect] = [
     Expect("algorithm.rollout_correction.bypass_mode", False, ASYNC + ": pi_old recomputed on the trainer"),
     Expect("algorithm.rollout_correction.rollout_is_batch_normalize", False, ASYNC),
     Expect("algorithm.rollout_correction.score_centering", AbsentOr(False), ASYNC + " (no score centering, 4.4 #3)"),
-    Expect("vagen.ga_8b", 12, "8B gradient accumulation of the main line (12 kept groups); Q5 PT 24 (MF1)"),
+    Expect("vagen.ga_8b", SHAPES["main"]["ga_8b"], "8B gradient accumulation of the main line (12 kept groups) (MF1)",
+           _main_shape),
+    Expect("vagen.ga_8b", SHAPES["q5_pt"]["ga_8b"], "8B gradient accumulation of Q5 PT (24 groups) (MF1)", _q5_pt),
+    Expect("vagen.profile", OneOf(*PROFILES, allow_absent=True),
+           "update shape: main (absent) or q5_pt (DESIGN 3.1 Q5 rows)"),
     Expect("vagen.onpolicy_shortcut", AbsentOr(False), "on until S9 passes (question 8)"),
     # --- reward and verl's rollout skip
     # A reward model without its own resource pool has no reward-loop handles (reward_loop.py:320-322), so V1 scores
@@ -535,6 +584,9 @@ EXPECTED: List[Expect] = [
     Expect(SK + ".failure_policy", SameAs("vagen.failure_policy"), "DESIGN 3.1", _vagen),
     Expect(SK + ".stuck_warn", SameAs("vagen.stuck_warn"), "DESIGN 3.1 (MF5)", _vagen),
     Expect(SK + ".strict_version_check", SameAs("vagen.async.strict_version_check"), "DESIGN 3.1 (MF3)", _vagen),
+    # --- smoke S5 (vagen/q38/fault_injection.py): off in every run but an S5 smoke, which lists this key in
+    # vagen.contract.allow_override; FORBIDDEN fault_injection_config (not overridable) also needs a smoke run name
+    Expect(FI_ENABLE_KEY, AbsentOr(False), "DESIGN 5.2 S5: fault injection only in a smoke run (allow_override)"),
 ]
 
 # recorded in contract_check.json, not asserted (DESIGN 3.1 rows without a tick, and the run's own choices)
@@ -547,7 +599,7 @@ INFO_KEYS = [
     R + ".tensor_model_parallel_size", R + ".gpu_memory_utilization", R + ".max_num_seqs", R + ".enforce_eager",
     R + ".agent.num_workers", A + ".ppo_micro_batch_size_per_gpu", A + ".fsdp_config.param_offload",
     A + ".fsdp_config.optimizer_offload", "actor_rollout_ref.ref.fsdp_config.param_offload",
-    "async_training", "filter", "trainer.v1.sampler.sampler_kwargs",
+    "async_training", "filter", "trainer.v1.sampler.sampler_kwargs", "vagen.fault_injection",
 ]
 
 # the inputs a run reads; checked to exist when check_paths is on
@@ -713,6 +765,46 @@ def _f_dynamic_bsz(cfg, ctx):
     return ("dynamic batch on: " + ", ".join(bad)) if bad else None
 
 
+def _f_fault_injection(cfg, ctx):
+    """vagen.fault_injection (smoke S5): a well-formed section, and on only in a run whose name says smoke."""
+    from vagen.q38 import fault_injection as fi
+
+    plan, problems = fi.parse(fi.section_of(cfg))
+    found = list(problems)
+    if plan is not None:
+        name = get(cfg, "trainer.experiment_name")
+        if not isinstance(name, str) or fi.SMOKE_MARK not in name:
+            found.append(f"fault injection on in run {name!r}: only a run whose trainer.experiment_name contains "
+                         f"{fi.SMOKE_MARK!r} may inject faults")
+    return "; ".join(found) or None
+
+
+def _f_stuck_warn_floor(cfg, ctx):
+    """vagen.stuck_warn below STUCK_WARN_FLOOR (a warning every few seconds) only with the S5 switch
+    vagen.fault_injection.stuck_warn; absent keys count as the sampler's defaults (sampler.py: 300 s, 3, 300 s)."""
+    from vagen.q38 import fault_injection as fi
+
+    section = get(cfg, "vagen.stuck_warn")
+    if section is ABSENT or section is None:
+        return None
+    if not isinstance(section, dict):
+        return f"vagen.stuck_warn={jsonable(section)!r} is not a mapping"
+    defaults = {"min_s": 300.0, "factor": 3.0, "repeat_s": 300.0}
+    below = []
+    for key, floor in STUCK_WARN_FLOOR.items():
+        value = section.get(key, defaults[key])
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"vagen.stuck_warn.{key}={jsonable(value)!r} is not a number"
+        if value < floor:
+            below.append(f"{key}={value!r} < {floor:g}")
+    if not below:
+        return None
+    plan, problems = fi.parse(fi.section_of(cfg))
+    if plan is not None and plan.stuck_warn and not problems:
+        return None
+    return f"vagen.stuck_warn below the floor ({', '.join(below)}) without vagen.fault_injection.stuck_warn"
+
+
 @dataclass(frozen=True)
 class Forbid:
     name: str
@@ -738,6 +830,10 @@ FORBIDDEN: List[Forbid] = [
     Forbid("kl_8b_factor", _f_kl_factor, "the KL conversion to the 8B unit assumes (mini x n) / ga_8b = 8 (MF1)"),
     Forbid("parity_override_outside_parity", _f_parity_override, "the sampling override is for the parity run only"),
     Forbid("dynamic_bsz", _f_dynamic_bsz, "aggregate_dp may fail with uneven micro-batches; off until S10 passes"),
+    Forbid("fault_injection_config", _f_fault_injection,
+           "smoke S5 only: a malformed vagen.fault_injection, or injection on outside a smoke run (not overridable)"),
+    Forbid("stuck_warn_below_floor", _f_stuck_warn_floor,
+           "a stuck threshold of seconds is the S5 test of the warning, not a run setting"),
 ]
 
 
@@ -775,6 +871,8 @@ def evaluate(cfg: DictConfig, endpoint: Optional[int] = None, *, check_paths: bo
     for name in allow:
         if name not in known:
             problems.append(f"vagen.contract.allow_override names an unknown rule: {name!r}")
+        elif name in NOT_OVERRIDABLE:
+            problems.append(f"vagen.contract.allow_override names {name!r}, which cannot be overridden")
 
     expected = []
     for rule in EXPECTED:
@@ -800,7 +898,7 @@ def evaluate(cfg: DictConfig, endpoint: Optional[int] = None, *, check_paths: bo
             detail = f"<error {type(e).__name__}: {e}>"
         entry = {"name": rule.name, "reason": rule.reason, "violated": detail is not None, "detail": detail}
         if detail is not None:
-            entry["overridden"] = rule.name in allow
+            entry["overridden"] = rule.name in allow and rule.name not in NOT_OVERRIDABLE
             (overridden if entry["overridden"] else violations).append(rule.name)
         forbidden.append(entry)
 
@@ -825,7 +923,8 @@ def evaluate(cfg: DictConfig, endpoint: Optional[int] = None, *, check_paths: bo
         "time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "endpoint": endpoint,
         "profile": {"trainer_impl": trainer_impl(cfg), "parity_mode": parity_mode(cfg),
-                    "trainer_mode": jsonable(get(cfg, "trainer.v1.trainer_mode")), "filter": filter_on(cfg)},
+                    "trainer_mode": jsonable(get(cfg, "trainer.v1.trainer_mode")), "filter": filter_on(cfg),
+                    "shape": profile(cfg)},
         "derived": {"run_dir": None if ctx.run_dir is None else str(ctx.run_dir), "dataset_size": ctx.dataset_size,
                     "steps_per_epoch": ctx.steps_per_epoch, "env_specs": ctx.env_specs, "errors": ctx.errors},
         "passed": not violations and not problems,

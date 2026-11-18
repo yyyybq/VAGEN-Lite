@@ -582,6 +582,101 @@ def test_kl_conversion_errors():
     metrics = {}
     t._update_actor(_actor_batch(96, 0), metrics)
     assert "actor/kl_loss" not in metrics and "actor/kl_loss_v1" not in metrics
+    assert (metrics["vagen/actor/rows"], metrics["vagen/actor/real_rows"]) == (96, 96)
+
+
+def q5_pt_config(**overrides):
+    """The smoke config in the Q5 PT shape (smoke S4): mini 24, 3 passes, ga_8b 24, every group kept."""
+    shape = {"vagen.profile": "q5_pt", "actor_rollout_ref.actor.ppo_mini_batch_size": 24,
+             "actor_rollout_ref.actor.ppo_epochs": 3, "vagen.ga_8b": 24, "filter.enable": False}
+    shape.update(overrides)
+    return smoke_config(**shape)
+
+
+def test_per_epoch_metrics_q5_shape():
+    """Q5 PT (S4): one mini-batch of 192 rows, 3 passes -> one value per pass; pass 1 is at the old weights."""
+    from verl.trainer.ppo.v1 import trainer_base
+
+    original = trainer_base.reduce_metrics
+    wg = FakeWorkerGroup(None)
+    wg.update_metrics = {"kl_loss": [0.024, 0.048, 0.072], "ppo_kl": [0.0, 0.002, 0.004],
+                         "actor/pg_clipfrac": [0.0, 0.01, 0.03], "actor/pg_clipfrac_lower": [0.0, 0.0, 0.001],
+                         "actor/pg_loss": [-0.1, -0.2, -0.3], "actor/grad_norm": [1.0, 2.0, 3.0], "mfu": [0.5]}
+    t = make_trainer(cfg=q5_pt_config(), wg=wg, global_steps=3)
+    metrics = {}
+    t._update_actor(_actor_batch(192, 0), metrics)
+    assert trainer_base.reduce_metrics is original  # restored
+    assert (metrics["vagen/actor/rows"], metrics["vagen/actor/real_rows"]) == (192, 192)
+    # verl's own reduction is unchanged: the mean over the three passes
+    assert metrics["actor/kl_loss_v1"] == pytest.approx(0.048)
+    assert metrics["actor/kl_loss"] == pytest.approx(0.048 / 24, rel=1e-12)  # 192 / (24 x 192)
+    assert metrics["actor/ppo_kl"] == pytest.approx(0.002)
+    for e, (kl, ppo_kl, clip) in enumerate(((0.024, 0.0, 0.0), (0.048, 0.002, 0.01), (0.072, 0.004, 0.03)), start=1):
+        assert metrics[f"vagen/epoch/kl_loss_v1_e{e}"] == pytest.approx(kl, rel=1e-12)
+        assert metrics[f"vagen/epoch/kl_loss_e{e}"] == pytest.approx(kl / 24, rel=1e-12)
+        assert metrics[f"vagen/epoch/ppo_kl_e{e}"] == pytest.approx(ppo_kl, abs=1e-15)
+        assert metrics[f"vagen/epoch/pg_clipfrac_e{e}"] == pytest.approx(clip, abs=1e-15)
+        assert metrics[f"vagen/epoch/grad_norm_e{e}"] == pytest.approx(float(e))
+        assert metrics[f"vagen/epoch/pg_loss_e{e}"] == pytest.approx(-0.1 * e)
+    assert not any(k.endswith("_e4") for k in metrics)
+    assert all(type(v) is float for k, v in metrics.items() if k.startswith("vagen/epoch/"))
+    # the mean of the converted passes is the converted mean
+    assert sum(metrics[f"vagen/epoch/kl_loss_e{e}"] for e in (1, 2, 3)) / 3 == pytest.approx(metrics["actor/kl_loss"])
+
+
+def test_per_epoch_metrics_split_and_skip():
+    from vagen.q38.trainer import per_epoch_metrics
+
+    # two mini-batches a pass, epoch-major (make_iterator): pass e is the mean of its contiguous pair
+    out, skipped = per_epoch_metrics({"actor/ppo_kl": [0.0, 0.0, 1.0, 3.0, 2.0, 4.0],
+                                      "actor/kl_loss": [1.0, 3.0, 5.0, 7.0, 9.0, 11.0]}, 3, kl_factor=0.5)
+    assert skipped == []
+    assert [out[f"vagen/epoch/ppo_kl_e{e}"] for e in (1, 2, 3)] == [0.0, 2.0, 3.0]
+    assert [out[f"vagen/epoch/kl_loss_v1_e{e}"] for e in (1, 2, 3)] == [2.0, 6.0, 10.0]
+    assert [out[f"vagen/epoch/kl_loss_e{e}"] for e in (1, 2, 3)] == [1.0, 3.0, 5.0]
+    out, _ = per_epoch_metrics({"actor/kl_loss": [1.0, 2.0, 3.0]}, 3, kl_factor=None)  # use_kl_loss off upstream
+    assert "vagen/epoch/kl_loss_e1" not in out and out["vagen/epoch/kl_loss_v1_e1"] == 1.0
+    # numpy scalars count as numbers; a list that is not whole passes, or holds lists, is left out
+    import numpy as np
+
+    out, skipped = per_epoch_metrics({"actor/pg_loss": [np.float64(0.5), np.float32(1.5)], "actor/ppo_kl": [1.0] * 4,
+                                      "actor/grad_norm": [[1.0], [2.0]], "actor/pg_clipfrac": []}, 2, kl_factor=1.0)
+    assert out == {"vagen/epoch/pg_loss_e1": 0.5, "vagen/epoch/pg_loss_e2": 1.5,
+                   "vagen/epoch/ppo_kl_e1": 1.0, "vagen/epoch/ppo_kl_e2": 1.0}
+    assert sorted(skipped) == ["actor/grad_norm", "actor/pg_clipfrac"]
+    _, skipped = per_epoch_metrics({"actor/ppo_kl": [1.0] * 5}, 3, kl_factor=None)
+    assert skipped == ["actor/ppo_kl"]
+    with pytest.raises(ValueError):
+        per_epoch_metrics({}, 0, kl_factor=None)
+
+
+def test_per_epoch_metrics_only_with_several_passes_and_restore_on_error():
+    from verl.trainer.ppo.v1 import trainer_base
+
+    original = trainer_base.reduce_metrics
+    wg = FakeWorkerGroup(None)
+    wg.update_metrics = {"kl_loss": [0.03], "ppo_kl": [0.0], "mfu": [0.5]}
+    t = make_trainer(wg=wg, global_steps=2)  # the main line: one pass
+    metrics = {}
+    t._update_actor(_actor_batch(96, 0), metrics)
+    assert not any(k.startswith("vagen/epoch/") for k in metrics)
+    assert trainer_base.reduce_metrics is original
+
+    wg.update_metrics = {"kl_loss": [0.03, 0.04], "mfu": [0.5]}  # 2 values for 3 passes: logged without per-pass
+    t = make_trainer(cfg=q5_pt_config(), wg=wg, global_steps=2)
+    metrics = {}
+    t._update_actor(_actor_batch(192, 0), metrics)
+    assert metrics["actor/kl_loss_v1"] == pytest.approx(0.035)
+    assert not any(k.startswith("vagen/epoch/") for k in metrics)
+
+    class Boom(FakeWorkerGroup):
+        def update_actor(self, batch):
+            raise RuntimeError("worker died")
+
+    t = make_trainer(cfg=q5_pt_config(), wg=Boom(None), global_steps=2)
+    with pytest.raises(RuntimeError, match="worker died"):
+        t._update_actor(_actor_batch(192, 0), {})
+    assert trainer_base.reduce_metrics is original
 
 
 # ======================================================================================================================

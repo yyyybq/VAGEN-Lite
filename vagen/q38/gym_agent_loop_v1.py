@@ -52,6 +52,9 @@ Configuration read here (all optional):
   vagen.parity_mode                (false)
   vagen.parity_sampling_override   (null) a dict merged into every turn's sampling params (the 8B parity run samples at
                                           T 0.8 / top-p 0.92, DESIGN_ASYNC 5.3); refused without vagen.parity_mode
+  vagen.fault_injection            (off) smoke S5 only: env.step / generate exceptions and an extra <|image_pad|> in
+                                          chosen episodes (vagen/q38/fault_injection.py); off, the loop does exactly
+                                          what it does without the key
   env_registry                     name -> "module.Class" (GL:204); ActiveSpatial by default
 """
 
@@ -73,6 +76,7 @@ from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutp
 from verl.utils.rollout_trace import rollout_trace_op
 
 from vagen.q38 import contract
+from vagen.q38 import fault_injection as fi
 
 # the 8B loop's helpers, imported unchanged (GL is read-only for this line)
 from vagen.agent_loop.gym_agent_loop import (
@@ -235,6 +239,10 @@ class _Episode:
         self.termination = ""
         self.render_url_refreshed = 0
 
+        # smoke S5: the injections that hit this episode ({kind: Target}, empty when off) and its uid / session
+        self.faults: dict[str, fi.Target] = {}
+        self.fault_where = ""
+
     @property
     def want_logprobs(self) -> bool:
         """Whether the episode carries rollout logprobs (rollout.calculate_log_probs)."""
@@ -302,6 +310,8 @@ class GymAgentLoopV1(AgentLoopBase):
     _env_classes: dict[str, type] = {}
     # (row address, current address) pairs already logged by this process (refresh_render_url)
     _render_url_logged: set[tuple[str, str]] = set()
+    # whether this process has logged that fault injection is on (smoke S5)
+    _fault_plan_logged: bool = False
     # what the data rows must carry (MF8); None skips the check
     expected_max_turns: Optional[int] = contract.MAX_TURNS
     expected_turn_limit: Optional[int] = contract.RESPONSE_LENGTH_PER_TURN
@@ -322,6 +332,12 @@ class GymAgentLoopV1(AgentLoopBase):
             )
         self.sampling_override: dict[str, Any] = dict(override or {})
 
+        # smoke S5 (vagen/q38/fault_injection.py): None unless vagen.fault_injection.enable is true
+        self.fault_plan: Optional[fi.Plan] = fi.plan_of(self.config)
+        if self.fault_plan is not None and not GymAgentLoopV1._fault_plan_logged:
+            GymAgentLoopV1._fault_plan_logged = True
+            logger.warning("%s: ON in this process (smoke S5): %s", fi.MESSAGE_PREFIX, self.fault_plan.describe())
+
         registry = dict(DEFAULT_ENV_REGISTRY)
         registry.update({str(k): str(v) for k, v in (_plain(_select(self.config, "env_registry", None)) or {}).items()})
         self.env_registry_paths = registry
@@ -337,6 +353,29 @@ class GymAgentLoopV1(AgentLoopBase):
         tid = self.tokenizer.convert_tokens_to_ids(token)
         if tid is None or (self.tokenizer.unk_token_id is not None and tid == self.tokenizer.unk_token_id):
             return None
+        return int(tid)
+
+    # ------------------------------------------------------------------ fault injection (smoke S5)
+
+    def _arm_faults(self, ep: _Episode, kwargs: dict[str, Any]) -> None:
+        """The injections of self.fault_plan that hit this episode, by the row's uid and session_id."""
+        uid, session_id = kwargs.get("uid"), kwargs.get("session_id")
+        if uid is None or session_id is None:
+            raise ValueError(f"{fi.MESSAGE_PREFIX}: the row has no uid / session_id ({uid!r}, {session_id!r})")
+        ep.faults = self.fault_plan.for_episode(uid, session_id)
+        ep.fault_where = f"uid={uid} session={session_id}"
+
+    def _log_fault(self, ep: _Episode, kind: str, turn: int, what: str) -> str:
+        message = f"{fi.MESSAGE_PREFIX}: {kind}: {what} ({ep.fault_where} turn={turn} request={ep.request_id})"
+        logger.warning(message)
+        return message
+
+    def _image_token_id(self) -> int:
+        from verl.utils.tokenizer import get_processor_token_id
+
+        tid = get_processor_token_id(self.processor, "image") if self.processor is not None else None
+        if tid is None:
+            raise ValueError(f"{fi.MESSAGE_PREFIX}: image_pad_extra needs a processor with an image token")
         return int(tid)
 
     # ------------------------------------------------------------------ env
@@ -400,6 +439,8 @@ class GymAgentLoopV1(AgentLoopBase):
 
         ep = _Episode(request_id=uuid4().hex, want_logprobs=want_logprobs)  # one request id an episode (sticky server)
         self.episode = ep  # the instance lives for one episode; kept for inspection (tests)
+        if self.fault_plan is not None:
+            self._arm_faults(ep, kwargs)
         env = self._make_env(kwargs["env_name"], self._env_config(ep, kwargs["config"]))
         try:
             await self._reset(env, ep, kwargs)
@@ -437,6 +478,10 @@ class GymAgentLoopV1(AgentLoopBase):
 
         self._assert_mm_supported(bool(ep.images))
         ep.prompt_ids = await self.ct_build_initial_tokens(ep.messages, images=ep.images or None)
+        target = ep.faults.get("image_pad_extra")
+        if target is not None and target.where == "prompt":
+            ep.prompt_ids, pos = fi.insert_extra_pad_in_prompt(ep.prompt_ids, self._image_token_id())
+            self._log_fault(ep, "image_pad_extra", 1, f"one <|image_pad|> more in the initial prompt at token {pos}")
         ep.initial_prompt_len = len(ep.prompt_ids)
 
     async def _generate_turn(self, ep: _Episode, sampling_params: dict[str, Any], per_turn_limit: int) -> bool:
@@ -448,6 +493,12 @@ class GymAgentLoopV1(AgentLoopBase):
         max_tokens = min(per_turn_limit, remaining)
         turn_params = {k: v for k, v in sampling_params.items() if k != "max_new_tokens"}
         turn_params["max_tokens"] = max_tokens
+
+        turn = len(ep.turn_gen_s) + 1
+        target = ep.faults.get("generate_exception")
+        if target is not None and target.turn == turn:
+            message = self._log_fault(ep, "generate_exception", turn, "generate raised on purpose")
+            raise fi.FaultInjected(message)
 
         t0 = time.perf_counter()
         output = await self.server_manager.generate(
@@ -475,6 +526,12 @@ class GymAgentLoopV1(AgentLoopBase):
             ep.endoftext_stops += 1  # Continuous Token inserts no "\n" after it
         if not token_ids or token_ids[-1] not in self._eos_ids:
             ep.length_stops += 1
+        target = ep.faults.get("image_pad_extra")
+        if target is not None and target.where == "answer" and target.turn == turn:
+            token_ids, log_probs = fi.insert_stray_pad_in_answer(
+                token_ids, log_probs, self._image_token_id(), self._eos_ids, max_tokens
+            )
+            self._log_fault(ep, "image_pad_extra", turn, "one stray <|image_pad|> in the answer")
 
         merge_result, mask, logprobs = await self.ct_merge_assistant_token(
             ep.prompt_ids,
@@ -503,7 +560,13 @@ class GymAgentLoopV1(AgentLoopBase):
         action_str = ep.last_answer_text or ""
         error = False
         t0 = time.perf_counter()
+        target = ep.faults.get("env_step_exception")
         try:
+            if target is not None and target.turn == ep.env_turns + 1:
+                # inside the try: the injected exception takes the same path as a real one (GL:451-459, MF5)
+                raise fi.FaultInjected(
+                    self._log_fault(ep, "env_step_exception", ep.env_turns + 1, "env.step raised on purpose")
+                )
             obs, reward, done, info = await env.step(action_str)
         except Exception as exc:  # GL:451-459: the episode ends as done with reward 0; counted here (MF5)
             logger.error("Environment step failed in '%s' with action %r: %s", kwargs.get("env_name"), action_str, exc)
