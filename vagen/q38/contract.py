@@ -60,6 +60,9 @@ CHECKPOINT_CALLBACK = "vagen.q38.ckpt_callback.VagenCheckpointCallback"
 SAVE_CONTENTS = ["model", "hf_model", "optimizer", "extra"]
 # the 8B parity run (DESIGN 5.3, P8-2): train-side T=1 through rollout.temperature, the agent loop samples like 8B
 PARITY_SAMPLING = {"temperature": 0.8, "top_p": 0.92}
+# P8-2 compares its first 20 updates with the first 20 of the three 8B V4 seeds (DESIGN 5.3)
+PARITY_ENDPOINT = 20
+PARITY_FILTER = "keep_by_return_std"
 TRAINER_IMPLS = ("vagen", "stock")
 FAILURE_POLICIES = ("raise", "skip")
 # smoke S5 (vagen/q38/fault_injection.py): the switch, and the floor of the sampler's stuck warning outside S5
@@ -199,12 +202,21 @@ def _not_parity(cfg) -> bool:
     return not parity_mode(cfg)
 
 
+def _vagen_parity(cfg) -> bool:
+    return _vagen(cfg) and parity_mode(cfg)
+
+
 def _grpo(cfg) -> bool:
     return OmegaConf.select(cfg, "algorithm.adv_estimator", default=None) == "grpo"
 
 
 def _always(cfg) -> bool:
     return True
+
+
+def _colocated(cfg) -> bool:
+    """sync and colocate_async: rollout and training share the cards (V1 forces the naive weight sync, TB:406-407)."""
+    return OmegaConf.select(cfg, "trainer.v1.trainer_mode", default=None) in ("sync", "colocate_async")
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -383,6 +395,11 @@ def _rollout_data_dir_expected(cfg, ctx):
     return None if ctx.run_dir is None else str(ctx.run_dir / "rollout_data")
 
 
+def _endpoint_actual(cfg, ctx):
+    """The run's endpoint: --endpoint (the context), else vagen.endpoint as the entry writes it."""
+    return ctx.endpoint if ctx.endpoint is not None else get(cfg, "vagen.endpoint")
+
+
 def _env_values(split: str, item: str):
     """Getter: the set of an item over the env specs of one split (one value expected)."""
 
@@ -441,6 +458,12 @@ EXPECTED: List[Expect] = [
     Expect("filter.name", OneOf(*PHASE1_FILTERS),
            "8B group filters of phase 1 (Y8:579-592; S0 mixed_outcome, V4 keep_by_return_std); nominal is phase 2",
            _vagen_filter),
+    Expect("filter.enable", True, "8B parity run: V4 keep_by_return_std like rl_qw3v4s3/s4/s5 (Y8:579-592; DESIGN 5.3)",
+           _vagen_parity),
+    Expect("filter.name", PARITY_FILTER, "8B parity run: V4 keep_by_return_std (Y8:580; DESIGN 5.3)", _vagen_parity),
+    Expect("vagen.endpoint", PARITY_ENDPOINT,
+           "8B parity run P8-2: 20 updates, compared with the first 20 of rl_qw3v4s3/s4/s5 (DESIGN 5.3)",
+           parity_mode, getter=_endpoint_actual),
     Expect("filter.filter_kwargs.target_groups", 12, Y8 + ":582", _vagen_filter),
     Expect("filter.filter_kwargs.std_threshold", 0.3318, Y8 + ":583", _keep_by_std),
     Expect("filter.filter_kwargs.std_floor", 1.0, Y8 + ":584", _keep_by_std),
@@ -528,7 +551,14 @@ EXPECTED: List[Expect] = [
     Expect(R + ".top_p", 1.0, "user PEAR 2.6: top-p < 1 biases TIS (rollout.py:197)"),
     Expect(R + ".top_k", -1, Y8 + ":170"),
     Expect(R + ".calculate_log_probs", True, "TIS needs rollout_log_probs (8B had false)"),
-    Expect(R + ".logprobs_mode", "processed_logprobs", "post-temperature logprobs (raw are pre-temperature)"),
+    Expect(R + ".logprobs_mode", "processed_logprobs", "post-temperature logprobs (raw are pre-temperature)",
+           _not_parity),
+    # in the parity run no TIS reads the rollout logprobs (rollout_is null); raw_logprobs (vLLM's own default: before
+    # temperature and top-p) against the trainer's T=1 forward is how the 8B measured training/rollout_probs_diff_mean
+    # (0.0030: Qwen3-VL-8B smoke, verl 0.6.1, rollout.calculate_log_probs true, steps 2-10; docs/models STATUS 1c)
+    Expect(R + ".logprobs_mode", OneOf("processed_logprobs", "raw_logprobs"),
+           "8B parity run: raw_logprobs makes training/rollout_probs_diff_* comparable with the 8B's 0.0030",
+           parity_mode),
     Expect(R + ".prompt_length", 4096, Y8 + ":289 (data.max_prompt_length)"),
     Expect(R + ".response_length", 4096, Y8 + ":290 (data.max_response_length; 384 a turn via max_tokens)"),
     Expect(R + ".limit_images", LIMIT_IMAGES, "12 turns + the initial frame (MF8); vLLM 0.28 default not checked"),
@@ -545,6 +575,16 @@ EXPECTED: List[Expect] = [
            "colocated rollout: no KV connector (LMCache, PEAR 3.2 I8)"),
     Expect(R + ".free_cache_engine", True, "colocated rollout (PEAR 2.3 A)"),
     Expect(R + ".enable_sleep_mode", AbsentOr(True), "colocated rollout sleeps while training (PEAR 2.3 A)"),
+    # A_log in fp32 (STACK_SUPPORT 2(c), 3.3; DESIGN 5.4 Z1): vLLM keeps each GDN layer's A_log in fp32
+    # (qwen_gdn_linear_attn.py:450-457).  The colocated weight sync sends the actor's FSDP state dict in its own dtype,
+    # uncast (engine_workers.py:765-813 reads this backend key; transformer_impl.py:1058-1115;
+    # bucketed_weight_transfer.py:118-125), so A_log arrives in fp32 only with fp32 master weights; the checkpoint
+    # engines of separate_async cast to bf16 (nccl_checkpoint_engine.py:141-147).  tests/test_alog_sync.py
+    Expect(A + ".fsdp_config.model_dtype", OneOf("fp32", "float32"),
+           "A_log reaches vLLM in fp32 only from fp32 master weights (naive sync sends them uncast)"),
+    Expect(R + ".checkpoint_engine.backend", "naive",
+           "colocated runs: the workers read this key for the weight sync (engine_workers.py:762-765); naive keeps "
+           "A_log fp32", _colocated),
     Expect("vagen.parity_mode", OneOf(True, False, allow_absent=True), "DESIGN 3.1 (true only for P8-2)"),
     Expect("vagen.parity_sampling_override", PARITY_SAMPLING, "8B parity run: sample like 8B (Y8:169-171)",
            parity_mode),
@@ -600,6 +640,8 @@ INFO_KEYS = [
     R + ".agent.num_workers", A + ".ppo_micro_batch_size_per_gpu", A + ".fsdp_config.param_offload",
     A + ".fsdp_config.optimizer_offload", "actor_rollout_ref.ref.fsdp_config.param_offload",
     "async_training", "filter", "trainer.v1.sampler.sampler_kwargs", "vagen.fault_injection",
+    "actor_rollout_ref.ref.fsdp_config.model_dtype", R + ".max_model_len", R + ".enable_prefix_caching",
+    R + ".enable_chunked_prefill", "vagen.host_mem_log",
 ]
 
 # the inputs a run reads; checked to exist when check_paths is on

@@ -317,13 +317,37 @@ class ExpectedTest(Base):
         put(cfg, R + ".temperature", 1.0)
         put(cfg, "algorithm.rollout_correction.rollout_is", None)
         put(cfg, "vagen.parity_sampling_override", dict(C.PARITY_SAMPLING))
-        report = self.evaluate(cfg)
+        report = self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)
         self.assertTrue(report["passed"], C.summary(report))
+        # P8-2 runs 20 updates (DESIGN 5.3): --endpoint, else vagen.endpoint
+        self.assertIn("vagen.endpoint", self.evaluate(cfg, endpoint=300)["violations"])
+        put(cfg, "vagen.endpoint", C.PARITY_ENDPOINT)
+        self.assertTrue(self.evaluate(cfg, endpoint=None)["passed"])
+        # raw_logprobs (the 8B's way of measuring rollout_probs_diff) only in the parity run
+        put(cfg, R + ".logprobs_mode", "raw_logprobs")
+        report = self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)
+        self.assertTrue(report["passed"], C.summary(report))
+        put(cfg, R + ".logprobs_mode", "raw_logits")
+        self.assertIn(R + ".logprobs_mode", self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)["violations"])
+        put(cfg, R + ".logprobs_mode", "processed_logprobs")
+        # V4 keep like the three 8B seeds
+        put(cfg, "filter.name", "mixed_outcome")
+        self.assertIn("filter.name", self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)["violations"])
+        put(cfg, "filter.name", "keep_by_return_std")
+        put(cfg, "filter.enable", False)
+        self.assertIn("filter.enable", self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)["violations"])
+        put(cfg, "filter.enable", True)
         put(cfg, "trainer.v1.trainer_mode", "colocate_async")
-        self.assertViolates(cfg, "trainer.v1.trainer_mode")
+        self.assertIn("trainer.v1.trainer_mode", self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)["violations"])
         put(cfg, "trainer.v1.trainer_mode", "sync")
         put(cfg, "vagen.parity_sampling_override", {"temperature": 0.8})
-        self.assertViolates(cfg, "vagen.parity_sampling_override")
+        self.assertIn("vagen.parity_sampling_override",
+                      self.evaluate(cfg, endpoint=C.PARITY_ENDPOINT)["violations"])
+
+    def test_raw_logprobs_outside_parity(self):
+        cfg = self.base()
+        put(cfg, R + ".logprobs_mode", "raw_logprobs")
+        self.assertViolates(cfg, R + ".logprobs_mode")
 
     def test_q5_pt_profile(self):
         """vagen.profile q5_pt: mini 24, 3 passes, ga_8b 24 and (before phase 2) every group kept; the main shape

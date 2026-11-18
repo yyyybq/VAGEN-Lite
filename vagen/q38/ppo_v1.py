@@ -10,7 +10,9 @@ vagen/q38/configs/smoke_4b_example.yaml), loaded with OmegaConf like the 8B entr
 2. the contract (vagen.q38.contract) checks it and writes ``<run>/contract_check.json`` and
    ``<run>/effective_config.yaml``; a failure exits with status 2 before Ray starts;
 3. verl's own start-up checks run as in verl.trainer.main_ppo.main (auto_set_device, validate_config);
-4. ``run_ppo(cfg, task_runner_class=Q38TaskRunner)``.
+4. ``run_ppo(cfg, task_runner_class=Q38TaskRunner)``; with ``vagen.host_mem_log.interval_s`` set, a thread of this
+   process samples the machine's memory meanwhile (vagen.q38.host_mem_log, smoke Z1's host-memory pass lines) into
+   ``<run>/logs/host_mem_rl-<UTC>.jsonl``.
 
 Q38TaskRunner is verl's TaskRunnerV1 (verl/verl/trainer/main_ppo.py:102-163) with two differences:
 
@@ -242,10 +244,15 @@ def main(argv: Optional[list] = None) -> None:
 
     from verl.trainer.main_ppo import run_ppo
 
+    from vagen.q38 import host_mem_log
+
+    mem_log = host_mem_log.start_from_config(cfg, report["derived"]["run_dir"])
     try:
         run_ppo(cfg, task_runner_class=ray.remote(num_cpus=1)(Q38TaskRunner))
     finally:
         ray.shutdown()
+        if mem_log is not None:
+            mem_log.stop()
 
 
 if __name__ == "__main__":
