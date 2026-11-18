@@ -28,6 +28,10 @@ Round 12 batch: ``subsets --trajectories SFT/sft_trajectories.jsonl --rows ROWS 
 --equal-tasks-of 200 --link-from SFT --out DIR`` draws nested train-scene subsets (a fixed seed; each the first n
 scenes of one shuffled order) with all formal tasks of their scenes for SFT and the reserve tasks of their scenes
 for RL, plus an arm with the same task count over every scene.
+
+The Qwen3.8-27B rerun (docs/q38/DESIGN_ASYNC.md): ``rl-config ... --stack q38`` writes, in place of the 8B PPO config,
+the complete config of verl's V1 trainer (vagen.q38.ppo_v1): verl's generated default + configs/ppo_q38_delta.yaml +
+the run's keys from the same 8B path (q38_ppo_config).  Without --stack (or --stack 8b) nothing changes.
 """
 
 from __future__ import annotations
@@ -736,6 +740,184 @@ def prompt_mismatches(env_cfg: Dict[str, Any], task_types: Sequence[str], policy
     return [t for t in sorted(set(task_types)) if env_system_prompt(env_cfg, t) != protocol_system_prompt(t, policy)]
 
 
+# ---------------------------------------------------------------------------
+# The q38 stack (the Qwen3.8-27B rerun, docs/q38/DESIGN_ASYNC.md sections 2.2 and 3.1)
+# ---------------------------------------------------------------------------
+# rl-config --stack q38 writes the complete config of verl's V1 trainer (entry vagen.q38.ppo_v1) in place of the 8B
+# one: verl's generated default (this tree's verl/verl/trainer/config/_generated_ppo_trainer.yaml) + the recipe
+# (configs/ppo_q38_delta.yaml: the keys that differ from that default) + the run's keys.  The run's keys are the ones
+# the 8B path computes for the run (files, model, names, folders, seed, the package's sizes and coefficients, the group
+# filter, a run's own overrides): they are taken from the 8B config under the same names (Q38_RUN_KEYS) or a V1 name
+# (Q38_RUN_RENAMED), so the two stacks get them from the same code.  Everything before the 8B config is written (rows,
+# checks, env YAMLs, system prompt check) is the 8B path unchanged; the stack only replaces the dict it writes.
+STACKS = ("8b", "q38")
+Q38_DELTA = Path(__file__).with_name("configs") / "ppo_q38_delta.yaml"
+Q38_VERL_DEFAULT = (Path(__file__).resolve().parents[2] / "verl" / "verl" / "trainer" / "config"
+                    / "_generated_ppo_trainer.yaml")
+Q38_MISSING = "???"  # a delta key every run sets
+Q38_RUN_KEYS = (
+    # the run's files, model, names and folders
+    "data.train_files", "data.val_files", "data.seed", "actor_rollout_ref.model.path", "critic.model.path",
+    "critic.model.tokenizer_path", "trainer.project_name", "trainer.experiment_name", "trainer.default_local_dir",
+    "trainer.validation_data_dir",
+    # the package's sizes and coefficients and the run's own overrides of them (--actor-lr, --kl-loss-coef, ...)
+    "data.train_batch_size", "data.val_batch_size", "actor_rollout_ref.rollout.n",
+    "actor_rollout_ref.actor.ppo_mini_batch_size", "actor_rollout_ref.actor.optim.lr",
+    "actor_rollout_ref.actor.kl_loss_coef", "actor_rollout_ref.actor.entropy_coeff", "algorithm.adv_estimator",
+    "algorithm.norm_adv_by_std_in_grpo", "trainer.critic_warmup",
+    # the checkpoints (--save-freq / --checkpoint-every): every save_freq-th is a milestone the callback keeps
+    "trainer.save_freq", "trainer.ckpt_keep_every", "trainer.ckpt_prune_to_hf",
+    # the group filter (S0 mixed_outcome, V4 keep_by_return_std with its rows), read by the sampler (${filter})
+    "filter",
+)
+# 8B keys whose value the V1 config keeps under another name: the 8B trainer's rollout dump is the sampler's
+Q38_RUN_RENAMED = {"trainer.rollout_data_dir": "trainer.v1.sampler.sampler_kwargs.rollout_data_dir"}
+# keys of verl's default the q38 config must not have: actor.grad_clip is deprecated and unread in V1 (the clip is
+# actor.optim.clip_grad, transformer_impl.py:859-876); a config showing it would suggest it acts
+Q38_REMOVED = ("actor_rollout_ref.actor.grad_clip",)
+Q38_PACKAGE_ESTIMATORS = ("grpo",)  # phase 1 (turn_credit, turn_gae and the critic come in phases 2-3)
+
+
+def _q38_flat(node: Any, prefix: str = "") -> Dict[str, Any]:
+    """{dotted key: leaf value} of a nested dict (an empty dict is a leaf)."""
+    if isinstance(node, dict) and node:
+        out: Dict[str, Any] = {}
+        for k, v in node.items():
+            out.update(_q38_flat(v, f"{prefix}.{k}" if prefix else str(k)))
+        return out
+    return {prefix: node}
+
+
+def _q38_get(cfg: Dict[str, Any], dotted: str) -> Tuple[bool, Any]:
+    node: Any = cfg
+    for k in dotted.split("."):
+        if not isinstance(node, dict) or k not in node:
+            return False, None
+        node = node[k]
+    return True, node
+
+
+def _q38_merge(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
+    """``base`` with ``over`` merged in, key by key (dicts recursively; any other value replaces)."""
+    import copy
+
+    out = copy.deepcopy(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _q38_merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+def q38_check_options(args: argparse.Namespace) -> None:
+    """The rl-config options the q38 stack refuses (after the standard filled them): the 8B trainer's features the V1
+    trainer does not have, and recipes of the later phases."""
+    refused = {"trial": "has no one-card trial (the 4B smoke config is written by hand)",
+               "curriculum_easy_updates": "has no curriculum sampler (data.sampler; the step sampler draws the tasks)",
+               "invalid_turn_nonpositive": "has no invalid-turn advantage rule (vagen/invalid_turns.py: the 8B trainer)",
+               "progress_adv_weight": "has no split progress advantage (vagen/split_reward_adv.py is the 8B trainer's)",
+               "logprob_tokens": "has no per-token log-probability files (vagen/logprob_tokens.py is the 8B trainer's)",
+               "greedy_val": "trains without validation inside training (val_kwargs are unused)"}
+    for key, why in refused.items():
+        if getattr(args, key, None):
+            raise SystemExit(f"--stack q38 {why}: leave out --{key.replace('_', '-')}")
+    if (getattr(args, "history_mode", None) or "none") != "concat":
+        raise SystemExit("--stack q38 trains one sequence per episode: it needs --history-mode concat (the standards "
+                         "set it)")
+    package = getattr(args, "opt_package", None)
+    if not package:
+        raise SystemExit("--stack q38 needs an optimisation package (--opt-package or a --standard naming one)")
+    estimator = OPT_PACKAGES.get(package, {}).get("adv_estimator", "grpo")
+    if estimator not in Q38_PACKAGE_ESTIMATORS:
+        raise SystemExit(f"--stack q38 has no {estimator!r} yet (phase 1: {Q38_PACKAGE_ESTIMATORS}): package {package}")
+    if getattr(args, "test_freq", None) or not getattr(args, "no_internal_val", False):
+        raise SystemExit("--stack q38 trains without validation inside training: --no-internal-val (the standards set "
+                         "it) and no --test-freq")
+
+
+def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[Dict[str, Any]] = None,
+                   default_path: Optional[Path] = None,
+                   delta_path: Optional[Path] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """(the complete q38 V1 config, its report) for the run whose 8B config is ``ppo8`` (``n_train`` train rows).
+    Refuses an 8B config the V1 trainer would not run as the 8B one ran."""
+    import copy
+    import hashlib
+
+    import yaml
+
+    default_path = Path(default_path or Q38_VERL_DEFAULT)
+    delta_path = Path(delta_path or Q38_DELTA)
+    if not default_path.is_file():
+        raise SystemExit(f"--stack q38 needs verl's V1 config default {default_path} (the q38 worktree's verl)")
+    base = yaml.safe_load(default_path.read_text())
+    if not ((base.get("trainer") or {}).get("use_v1") and "v1" in (base.get("trainer") or {})):
+        raise SystemExit(f"{default_path} is not a V1 trainer's config (no trainer.use_v1 / trainer.v1)")
+    delta = yaml.safe_load(delta_path.read_text())
+    if type_overrides:
+        raise SystemExit(f"--stack q38 has no model-type overrides of the 8B config ({sorted(type_overrides)})")
+    trainer8 = ppo8.get("trainer") or {}
+    if not trainer8.get("concat_multi_turn"):
+        raise SystemExit("--stack q38 needs the 8B config of the concat history mode")
+    if trainer8.get("test_freq", -1) != -1 or trainer8.get("val_before_train"):
+        raise SystemExit("--stack q38 trains without validation inside training (trainer.test_freq -1, "
+                         "val_before_train false)")
+    cfg = _q38_merge(base, delta)
+    for key in Q38_RUN_KEYS:
+        found, value = _q38_get(ppo8, key)
+        if not found:
+            raise SystemExit(f"the 8B config has no {key}, which the q38 config takes from the run")
+        _set(cfg, key, copy.deepcopy(value))
+    for key8, key in Q38_RUN_RENAMED.items():
+        found, value = _q38_get(ppo8, key8)
+        if not found or value in (None, ""):
+            raise SystemExit(f"the 8B config has no {key8}, which the q38 config keeps as {key}")
+        _set(cfg, key, copy.deepcopy(value))
+    for key in Q38_REMOVED:
+        found, _ = _q38_get(cfg, key)
+        if found:
+            parent, last = key.rsplit(".", 1)
+            _q38_get(cfg, parent)[1].pop(last)
+    # the learning-rate horizon is the recipe's (V1 fixes it at start-up, TB:792-813); the 8B template must agree
+    horizon = int(cfg["trainer"]["total_training_steps"])
+    if trainer8.get("total_training_steps") != horizon:
+        raise SystemExit(f"the 8B config's trainer.total_training_steps {trainer8.get('total_training_steps')!r} is "
+                         f"not the q38 recipe's {horizon}")
+    # epochs: V1 counts len(dataset) // train_batch_size steps an epoch (TB:790) and fit ends after total_epochs of
+    # them; one epoch more than the horizon needs, as the step dispatched ahead takes a batch too (DESIGN_ASYNC 3.1)
+    batch = int(cfg["data"]["train_batch_size"])
+    steps_per_epoch = int(n_train) // batch
+    if steps_per_epoch < 1:
+        raise SystemExit(f"{n_train} train rows give no step of {batch} tasks")
+    cfg["trainer"]["total_epochs"] = math.ceil(horizon / steps_per_epoch) + 1
+    # vagen.ga_8b, the 8B update's gradient accumulation (the KL metric's conversion, DESIGN_ASYNC 2.5.2): the rows of
+    # an 8B mini-batch over its ranks and micro-batch (0.6.1 dp_actor normalises the mini-batch by the ranks)
+    actor8 = ppo8["actor_rollout_ref"]["actor"]
+    rows8 = int(actor8["ppo_mini_batch_size"]) * int(ppo8["actor_rollout_ref"]["rollout"]["n"])
+    ranks8 = int(trainer8.get("n_gpus_per_node", 8)) * int(trainer8.get("nnodes", 1))
+    micro8 = int(actor8.get("ppo_micro_batch_size_per_gpu") or 1)
+    if rows8 % (ranks8 * micro8):
+        raise SystemExit(f"the 8B mini-batch of {rows8} rows does not split into {ranks8} ranks x micro {micro8}")
+    cfg["vagen"]["ga_8b"] = rows8 // (ranks8 * micro8)
+    flat_delta = _q38_flat(delta)
+    flat = _q38_flat(cfg)
+    unset = sorted(k for k, v in flat_delta.items() if v == Q38_MISSING
+                   and _q38_get(cfg, k)[1] in (None, Q38_MISSING, ""))
+    if unset:
+        raise SystemExit(f"the q38 config leaves {unset} unset")
+    # the run's keys that differ from the recipe file's values (a run's own overrides), for the report
+    overrides = {k: {"recipe": flat_delta[k], "run": flat[k]} for k in sorted(flat_delta)
+                 if flat_delta[k] != Q38_MISSING and k in flat and flat[k] != flat_delta[k]}
+    report = {"verl_default": str(default_path),
+              "verl_default_sha256": hashlib.sha256(default_path.read_bytes()).hexdigest(),
+              "delta": str(delta_path), "delta_sha256": hashlib.sha256(delta_path.read_bytes()).hexdigest(),
+              "trainer_mode": cfg["trainer"]["v1"]["trainer_mode"], "lr_horizon": horizon,
+              "steps_per_epoch": steps_per_epoch, "total_epochs": cfg["trainer"]["total_epochs"],
+              "ga_8b": cfg["vagen"]["ga_8b"], "removed": [k for k in Q38_REMOVED],
+              "run_keys_over_recipe": overrides or None}
+    return cfg, report
+
+
 def cmd_rl_config(args: argparse.Namespace) -> None:
     import copy
 
@@ -753,6 +935,11 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         apply_standard(args, standard)
     if not getattr(args, "ppo_template", None):
         raise SystemExit("rl-config needs --ppo-template (or a --standard that names one)")
+    stack = getattr(args, "stack", None) or "8b"
+    if stack not in STACKS:
+        raise SystemExit(f"--stack must be one of {STACKS}, not {stack!r}")
+    if stack == "q38":  # the Qwen3.8-27B rerun: refused options before anything is written
+        q38_check_options(args)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rows = _jsonl(Path(args.rows))
@@ -1010,6 +1197,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
             raise SystemExit(f"turn_gae is not supported with the {args.model_type} agent-loop manager")
         for key, value in type_overrides.items():
             _set(ppo, key, value)
+    q38_report = None
+    if stack == "q38":  # the Qwen3.8-27B rerun: verl's V1 config from this 8B one (q38_ppo_config)
+        ppo, q38_report = q38_ppo_config(ppo, len(parts["train"]), type_overrides)
     (out / "ppo.yaml").write_text(yaml.safe_dump(ppo, sort_keys=False))
     report = {"train": len(parts["train"]), "val": len(parts["val"]), "trial": bool(args.trial),
               "model": model, "system_prompt_matches_sft": True,
@@ -1050,6 +1240,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     if footprint is not None:  # experiment 3A: only when set, so every other report stays as it was
         report["turn_footprint_radius"] = float(footprint)
+    if q38_report is not None:  # the q38 stack: only when set, so every 8B report stays as it was
+        report["stack"] = "q38"
+        report["q38"] = q38_report
     if feature_env:  # the privileged critic (2026-11-13): only when set, so every other report stays as it was
         report["critic_source"] = "features"
         report["critic_feature_tables"] = feature_env["critic_feature_tables_dir"]
@@ -1430,6 +1623,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--curriculum-max-dstar", type=int, default=None, help="the easy tasks' largest d* (default 3)")
     c.add_argument("--standard", default=None,
                    help="round 12: a named standard configuration (configs/rl_standards.json) fixing the recipe's options")
+    c.add_argument("--stack", choices=STACKS, default=None,
+                   help="the Qwen3.8-27B rerun (docs/q38/DESIGN_ASYNC.md): q38 writes the complete config of verl's V1 "
+                        "trainer (verl's default + configs/ppo_q38_delta.yaml + the run's keys) in place of the 8B "
+                        "one; default 8b")
     c.add_argument("--out", required=True)
     u = sub.add_parser("subsets", help="round 12: nested train-scene subsets for the data-scale curve")
     u.add_argument("--trajectories", required=True, help="the SFT conversations (sft_trajectories.jsonl, with split)")

@@ -1,0 +1,184 @@
+# The q38 stack's PPO config (the Qwen3.8-27B rerun, docs/q38/DESIGN_ASYNC.md section 3.1): only the keys whose value
+# differs from verl's default, verl/verl/trainer/config/_generated_ppo_trainer.yaml of this tree's verl (the pear verl
+# copy, 4bfa94d), or that the default does not have.  The complete config is that default + this file + the run's
+# keys: `python -m data_gen.interiorgs_v10.training_prep rl-config --stack q38 ...` writes it (ppo.yaml).
+#
+# "???" marks a key every run sets (training_prep fills it from the run; a config still holding one is refused).
+# Y8:<line> is the 8B main line V4 config the value comes from (exps/vagen_active_spatial/
+# interiorgs_v10_train_q3s3_20261027/rl_qw3v4s3/ppo.yaml); R<n> is the recipe change of DESIGN_ASYNC section 3.3.
+#
+# Keys the recipe relies on at their verl default, so not repeated here (vagen/q38/contract.py and
+# vagen/q38/tests/test_config.py check them in the complete config):
+#   actor: ppo_epochs 1, shuffle false, clip_ratio / clip_ratio_low / clip_ratio_high 0.2, clip_ratio_c 3.0,
+#     kl_loss_type low_var_kl, policy_loss.loss_mode vanilla, use_dynamic_bsz false;
+#     optim: weight_decay 0.01, lr_warmup_steps_ratio 0.0 and lr_warmup_steps -1 (no warm-up), zero_indexed_step true;
+#   rollout: top_p 1 (R3; Y8 0.92), top_k -1, calculate_log_probs true (R2; Y8 false), logprobs_mode
+#     processed_logprobs, free_cache_engine true (RolloutConfig.enable_sleep_mode true), scheduling_policy fcfs;
+#     this verl has no rollout.kernels and no LMCache keys (both pear's own, PEAR_ASSESSMENT I8);
+#   algorithm: norm_adv_by_std_in_grpo true, use_kl_in_reward false, filter_groups.enable false;
+#     rollout_correction: rollout_is_threshold 2.0, rollout_rs null, bypass_mode false, rollout_is_batch_normalize
+#     false, score_centering false;
+#   trainer: use_v1 true, v1.colocate_async.num_warmup_batches 1, v1.sampler.sync_refill_failed_groups false,
+#     max_actor_ckpt_to_keep / max_critic_ckpt_to_keep null (Y8 2: the V1 worker would delete the milestones' HF),
+#     rollout_data_dir null (the sampler writes the rollouts), test_freq -1, val_only false, logger [console, wandb],
+#     resume_mode auto, critic_warmup 0;
+#   async_training: absent (partial_rollout must not be false: LS:347).
+# Left at the 8B values until the 27B smoke decides them (DESIGN_ASYNC 3.1, last row of "sampling and agent loop"):
+#   rollout tensor_model_parallel_size / gpu_memory_utilization / max_num_seqs / enforce_eager, the FSDP offloads.
+
+actor_rollout_ref:
+  actor:
+    optim:
+      lr: 2.0e-06                    # Y8:7 (package p1)
+      # Y8:105 actor.grad_clip 0.3 was the 8B engine's clip (Y8:15 optim.clip_grad 1.0 was unread); the V1 engine
+      # reads only optim.clip_grad (transformer_impl.py:859-876), so the key moves here and actor.grad_clip is
+      # removed from the complete config
+      clip_grad: 0.3
+      lr_scheduler_type: cosine      # Y8:18 (V1 default constant, j2 F21)
+      min_lr_ratio: 0.05             # Y8:16 (V1 default 0.0); horizon trainer.total_training_steps 700
+    fsdp_config:
+      param_offload: true            # Y8:25
+      optimizer_offload: true        # Y8:26
+    ppo_mini_batch_size: 12          # Y8:42: 12 groups x rollout.n 8 = 96 rows, one optimizer step
+    ppo_micro_batch_size_per_gpu: 1  # Y8:44
+    # Y8:60 token-mean; the 8B update's actual objective is the sum of the episodes' token means over the nominal 96
+    # episodes, which V1 spells seq-mean-token-mean (TB:1903-1929; core_algos.py:1194-1202); a software-stack rename
+    loss_agg_mode: seq-mean-token-mean
+    entropy_coeff: 0.01              # Y8:61 (on the T 0.8 entropy, R3)
+    use_kl_loss: true                # Y8:64
+    kl_loss_coef: 0.05               # Y8:66
+    checkpoint:
+      # Y8:72-76: with hf_model, or rank 0 still writes a config and the chain evaluates an empty folder (PEAR m7)
+      save_contents: [model, hf_model, optimizer, extra]
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1  # Y8:114
+    fsdp_config:
+      param_offload: true            # Y8:146
+  rollout:
+    name: vllm                       # Y8:167
+    temperature: 0.8                 # Y8:169; the trainer's old / ref / update passes use it too (TB:600,1729,1775,1934)
+    gpu_memory_utilization: 0.3      # Y8:175 (the smoke decides)
+    enforce_eager: true              # Y8:177 (the user 11-17: eager first)
+    tensor_model_parallel_size: 4    # Y8:180 (the smoke decides)
+    max_num_seqs: 1024               # Y8:186 (two batches in flight, about 384 episodes)
+    log_prob_micro_batch_size_per_gpu: 1  # Y8:191
+    disable_log_stats: false         # Y8:194
+    n: 8                             # Y8:196
+    # at most 12 turns + the first frame; the default is not in the generated yaml (RolloutConfig.limit_images None,
+    # vllm_async_server.py:290-291 passes it as limit_mm_per_prompt); the agent loop asserts it too
+    limit_images: 13
+    val_kwargs:                      # Y8:202-208 (no validation inside training; kept as the 8B values)
+      top_p: 0.95
+      temperature: 0.8
+      n: 4
+      do_sample: true
+    multi_turn:
+      enable: true                   # Y8:211 (read only by the fully-async recipe in this verl)
+    agent:
+      num_workers: 48                # Y8:226
+      default_agent_loop: gym_agent  # the rows' agent_name (gym_agent_dataset.py); Y8:227 single_turn_agent was unused
+      agent_loop_config_path: vagen/q38/configs/agent_loop_v1.yaml  # Y8:228 vagen/configs/agent.yaml (AL:559-561)
+    checkpoint_engine:
+      update_weights_bucket_megabytes: 512  # Y8:233 rollout.update_weights_bucket_megabytes (renamed in V1)
+  model:
+    path: ???                        # the start model (rl-config --model)
+data:
+  train_files: ???
+  val_files: ???                     # V1 always builds the val dataset (TB:745-752)
+  max_prompt_length: 4096            # Y8:289
+  max_response_length: 4096          # Y8:290; 384 a turn come from the agent loop's max_tokens
+  train_batch_size: 24               # Y8:291: candidate groups per step (package p1)
+  gen_batch_size: 1                  # forced to 1 in async modes anyway (TB:754-766)
+  val_batch_size: 8                  # Y8:292
+  seed: ???                          # Y8:299 (the run's --seed, or the 8B template's)
+  custom_cls:                        # Y8:309-311 vagen/gym_agent_dataset.py AgenticDataset
+    path: pkg://vagen.q38.dataset
+    name: AgenticDatasetV1
+  apply_chat_template_kwargs:
+    enable_thinking: false           # Y8:320; preserve_thinking must not appear (TEMPLATE_CHECK 1, MF9)
+critic:                              # off for GRPO (critic.enable null); the 8B values renamed for the later phases
+  optim:
+    lr: 2.0e-05                      # Y8:326
+  fsdp:                              # Y8:341-359 critic.model.fsdp_config (renamed in V1)
+    param_offload: true              # Y8:345
+    optimizer_offload: true          # Y8:346
+  ppo_micro_batch_size_per_gpu: 1    # Y8:379
+  model:
+    path: ???
+    tokenizer_path: ???
+algorithm:
+  adv_estimator: grpo                # Y8:480
+  gamma: 0.95                        # Y8:478 (unused by GRPO)
+  lam: 0.95                          # Y8:479 (unused by GRPO)
+  kl_ctrl:
+    kl_coef: 0.002                   # Y8:487 (unused: use_kl_in_reward false)
+  rollout_correction:
+    # R2: decoupled PPO + token TIS, w = min(exp(old - rollout), 2), detached, on the pg term only
+    # (rollout_corr_helper.py:572-596; core_algos.py:1364-1368).  Explicit: the dataclass default is sequence
+    # (algorithm.py:193)
+    rollout_is: token
+trainer:
+  total_training_steps: 700          # Y8:500: the learning-rate horizon; the endpoint (300) comes from the command line
+  total_epochs: ???                  # ceil(700 / steps_per_epoch) + 1 (training_prep)
+  project_name: ???
+  experiment_name: ???
+  default_local_dir: ???
+  validation_data_dir: ???
+  log_val_generations: 8             # Y8:506
+  save_freq: 50                      # Y8:511
+  val_before_train: false            # Y8:515
+  checkpoint_callback_class: vagen.q38.ckpt_callback.VagenCheckpointCallback
+  ckpt_keep_every: 50                # Y8:535: every 50th checkpoint kept (the callback)
+  ckpt_keep_latest: 2                # of the others the latest 2 (Y8 had it as max_*_ckpt_to_keep 2)
+  ckpt_prune_to_hf: true             # Y8:536
+  v1:
+    trainer_mode: colocate_async     # R1 (the user's Q2)
+    sampler:
+      # staleness gate 2 + wait, a record only: the guarantee is the sampler taking the oldest dispatched batch whole,
+      # plus the version-tag assertion (DESIGN_ASYNC 4.4)
+      max_off_policy_threshold: 2
+      max_off_policy_strategy: wait
+      custom_sampler:                # TB:155-169
+        path: pkg://vagen.q38.sampler
+        name: VagenStepBatchSampler
+      sampler_kwargs:                # each value written once, referenced here (DESIGN_ASYNC 2.5.1)
+        filter: ${filter}
+        adv_estimator: ${algorithm.adv_estimator}
+        rollout_n: ${actor_rollout_ref.rollout.n}
+        candidates_per_step: ${data.train_batch_size}
+        rollout_data_dir: ???        # Y8:507 trainer.rollout_data_dir (the sampler writes the 8B-format rollouts)
+        model_path: ${actor_rollout_ref.model.path}
+        replace_image_tokens_for_logging: true  # Y8:528 trainer.replace_image_tokens_for_logging
+        failure_policy: ${vagen.failure_policy}
+        stuck_warn: ${vagen.stuck_warn}
+        strict_version_check: ${vagen.async.strict_version_check}
+ray_kwargs:
+  ray_init:
+    include_dashboard: false         # Y8:569
+env_registry:                        # Y8:571-578 (the gym agent loop builds its env from it, GL:204)
+  Sokoban: vagen.envs.sokoban.sokoban_env.Sokoban
+  FrozenLake: vagen.envs.frozenlake.frozenlake_env.FrozenLake
+  SpatialGym: vagen.envs.spatial_gym.spatial_gym_env.SpatialGym
+  PrimitiveSkill: vagen.envs.primitive_skill.primitive_skill_env.PrimitiveSkillEnv
+  ActiveSpatial: vagen.envs.active_spatial.active_spatial_env.ActiveSpatialGymEnv
+  SpatialMCQ: vagen.envs.spatial_mcq.spatial_mcq_env.SpatialMCQEnv
+  RemoteEnv: vagen.envs_remote.GymImageEnvClient
+filter:                              # Y8:579-586; the run's group filter (S0 mixed_outcome, V4 keep_by_return_std)
+  enable: true
+  name: ???
+  filter_kwargs: ???
+vagen:                               # the q38 code's own settings (DESIGN_ASYNC 3.1)
+  trainer_impl: vagen                # stock: verl's own classes (smoke S0)
+  failure_policy: raise              # question 1 (recommended a)
+  ga_8b: 12                          # the 8B update's gradient accumulation (12 groups x 8 / 8 cards / micro 1): the KL conversion
+  onpolicy_shortcut: false           # phase 4, after S9 (question 8)
+  parity_mode: false                 # true only for the 8B parity run (section 5.3)
+  calib_entropy_t1_steps: [1]        # the entropy calibration step(s)
+  stuck_warn:                        # MF5: warn only
+    min_s: 300
+    factor: 3
+    repeat_s: 300
+  async:
+    strict_version_check: true       # MF3 (false for smoke S0)
+  contract:
+    allow_override: []               # contract.py: keys allowed to differ from its expectations
