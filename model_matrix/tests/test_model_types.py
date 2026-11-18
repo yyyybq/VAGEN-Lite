@@ -35,6 +35,9 @@ class ModelTypesTest(unittest.TestCase):
                                          "CAMBRIAN_SRC": M.CAMBRIAN_SRC, "TRANSFORMERS_ATTN_IMPLEMENTATION": "sdpa"})
         self.assertTrue(Path(M.CAMBRIAN_SRC).is_dir() or not Path("/mnt/umm").is_dir())
         self.assertEqual((q25.env, q3.env), ((), ()))
+        q35 = M.get("qwen3_5")  # q38: the trainer and evaluations in the q38 env, the V1 entry, no SFT tool yet
+        self.assertEqual((q35.python, q35.lf_launcher), (f"{M.Q38_ENV}/bin/python", None))
+        self.assertEqual(dict(q35.env), {"TRAIN_ENV_ROOT": M.Q38_ENV, "V10_PPO_MODULE": "vagen.q38.ppo_v1"})
         with self.assertRaises(ValueError):
             M.get("llava")
 
@@ -113,7 +116,10 @@ class JobsTest(unittest.TestCase):
 
     def test_job_script_switches(self):
         script = (ROOT / "examples/train/active_spatial/sco_interiorgs_v10_train.sh").read_text()
-        self.assertIn("\nPY=${VAGEN_LITE_PYTHON:-${ENV_ROOT}/bin/python}\n", script)
+        # q38: PY defaults to TRAIN_ENV_ROOT's, which unset is the render env (vagen-lite): the same Python as before
+        self.assertIn("\nPY=${VAGEN_LITE_PYTHON:-${TRAIN_ENV_ROOT}/bin/python}\n", script)
+        self.assertIn("\nTRAIN_ENV_ROOT=${TRAIN_ENV_ROOT:-${RENDER_ENV_ROOT}}\n", script)
+        self.assertIn("\nRENDER_ENV_ROOT=${RENDER_ENV_ROOT:-/mnt/umm/users/yinbaiqiao/.conda/envs/vagen-lite}\n", script)
         # the Qwen2.5-VL SFT command is the one of every earlier run
         self.assertIn("  accelerate launch --config_file examples/train/active_spatial/accelerate_fsdp_qwen25vl.yaml \\\n"
                       "    --num_processes \"$2\" -m llamafactory.launcher \"$1\"\n}", script)

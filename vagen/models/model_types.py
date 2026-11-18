@@ -27,6 +27,9 @@ QWEN3VL_RUNTIME_PYTHON = "/mnt/umm/users/yinbaiqiao/VAGEN-Lite/.venv-qwen3vl-run
 CAMBRIAN_CACHE = "/mnt/umm/shared_model/vagen-lite-models/hub"
 CAMBRIAN_TOKENS_PER_IMAGE = 756  # 27 x (27 + 1): SigLIP2's 729 patches and a newline per row
 CAMBRIAN_SRC = "/mnt/umm/users/yinbaiqiao/cambrian-s"  # the Cambrian source (cambrian_register's default is another machine's)
+# q38 (the Qwen3.8-27B rerun line, DESIGN_ASYNC 2.2 and question 6): the q38 env (torch 2.13 cu130, transformers 5.10.4,
+# vLLM 0.28, the worktree's verl/ -- pear's verl tree -- installed editable)
+Q38_ENV = "/mnt/umm/users/yinbaiqiao/q38/envs/verl"
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,13 @@ TYPES: Dict[str, ModelType] = {
                                     # 11k tokens of a 12-frame episode -- the first Cambrian RL smoke ran out of
                                     # memory on it (2026-10-25 07:08); SDPA is the same attention in O(L) memory
                                     ("TRANSFORMERS_ATTN_IMPLEMENTATION", "sdpa"))),
+    # q38: Qwen3.5 / Qwen3.8 (config.json model_type "qwen3_5", e.g. /mnt/umm/users/yinbaiqiao/q38/models/Qwen3.8-27B).
+    # Its jobs run their trainer and evaluations in the q38 env (the job script's TRAIN_ENV_ROOT; the render service
+    # stays in vagen-lite) and the trainer through the V1 entry vagen.q38.ppo_v1.  The CUDA 13 forward-compatibility
+    # libraries need no entry here: the job script adds them on a driver older than 580 (zoetrope's 550.90.07).  No
+    # SFT tool here yet (the SFT is LLaMA-Factory main, outside DESIGN_ASYNC)
+    "qwen3_5": ModelType("qwen3_5", f"{Q38_ENV}/bin/python", None, None, None,
+                         env=(("TRAIN_ENV_ROOT", Q38_ENV), ("V10_PPO_MODULE", "vagen.q38.ppo_v1"))),
 }
 
 

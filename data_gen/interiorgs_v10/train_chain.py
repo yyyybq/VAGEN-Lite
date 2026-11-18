@@ -178,6 +178,19 @@ folder}) trains a group on a folder built elsewhere: "render" and "sft_data" onl
 output_dir <folder>/model, "sft_epochs", one save per epoch); the SFT, its per-epoch evaluation and the pick then use
 that folder.  The model it trains from is its train.yaml's model_name_or_path.
 
+q38 (the Qwen3.8-27B rerun line, DESIGN_ASYNC questions 1, 4 and 6, the user's OK of 2026-11-17): plan "eval_cards"
+(default 1; job_sco.SPECS) is the cards of every action evaluation job (the evaluate step's and those of eval
+"stop_invalid"), 2 for the 27B model: the job script keeps card 0 for the render service and gives vLLM the others
+(VAGEN_LITE_EVAL_CARDS).  QA evaluation jobs keep one card (qa_eval runs easi_eval on the first visible card).  The
+plan's "model_type" "qwen3_5" (vagen/models/model_types.py) gives the jobs the q38 environment (TRAIN_ENV_ROOT and the
+V1 entry module) the way every model type gives its own (job_env); the job script adds the CUDA 13
+forward-compatibility libraries by itself on a node whose driver is older than 580.  A failed
+prompt group makes the q38 trainer raise (failure_policy "raise", question 1); the chain treats that as any trainer
+that ends before its endpoint (resubmitted from its latest checkpoint within plan "retries"), and the reason it keeps
+names the failed group (trainer_end_note).  Question 4, warnings only: a running trainer with no new update for
+max(stall_warn min_minutes, factor x its recent seconds per update) is listed in PROGRESS.md with the q38 sampler's
+own waiting warnings (stall_warning, plan rl "stall_warn"; false turns it off); nothing is stopped.
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -212,10 +225,17 @@ RL_STEPS = ("rl_config", "rl", "rl_extend")
 # new model type's RL path; the formal runs are SFT then RL)
 SFT_STEPS = ("render", "sft_data", "sft", "sft_eval", "pick_sft")
 # round 12: how a trainer that failed at Ray start-up ends its log (round 11, H800: "The current node timed out
-# during startup", after "GCS cannot find the node ... registration may not be complete")
+# during startup", after "GCS cannot find the node ... registration may not be complete").  q38 (2026-11-18): the
+# same four in the q38 env's Ray 2.58 (ray/_private/node.py:441 "The current node timed out during startup ... some of
+# the raylet failed to startup", ray/_private/state.py:161 "Failed to connect to GCS", "GCS cannot find the node" in
+# ray/_raylet.so); the V1 trainer's own start-up failures (TransferQueue, the vLLM servers) are not known yet:
+# TODO(q38 S0/S5): add their texts once the smokes have shown them
 STARTUP_FAILURE_MARKERS = ("timed out during startup", "GCS cannot find the node", "Failed to connect to GCS",
                            "raylet failed to start")
 STARTUP_DEFAULTS = {"retries": 2, "stall_minutes": 40}
+DEFAULT_EVAL_CARDS = 1  # q38: plan "eval_cards" (2 for the 27B model)
+# q38, question 4 (warnings only): plan rl "stall_warn" ({"min_minutes", "factor", "repeat_minutes"} or false)
+STALL_WARN_DEFAULTS = {"min_minutes": 60, "factor": 3.0, "repeat_minutes": 60}
 RENDERER_WAIT_S = 6 * 3600  # renderer_when_trainer_runs: how long a trainer waits for its render service
 ORDER_GAP_S = 2  # renderer_after_trainer: seconds between the submissions it orders (sco's create time is to the second)
 # renderer_repack: minutes between looks at the pools, between two moves of one run's render service, and how long
@@ -396,10 +416,29 @@ def guard_reason(log_text: str, guards: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# q38 (2026-11-18, read in the q38 env): both texts are still what the Qwen3.5 / Qwen3.8 path raises.  The M-RoPE
+# assignment is still position_ids[:, b, mask] = llm_positions of shape [3, N] (transformers 5.10.4
+# models/qwen3_5/modeling_qwen3_5.py:1395-1397; torch 2.13's libtorch_cpu.so still has "cannot be broadcast to indexing
+# result of shape"), and the feature check still raises "Image features and image tokens do not match, tokens: N,
+# features: M" as a ValueError (modeling_qwen3_5.py:1475-1478, torch_compilable_check's default error type,
+# utils/import_utils.py:1534).  In the q38 trainer the crash should not come at all: verl's vLLM server masks
+# <|image_pad|> / <|video_pad|> out of sampling (verl/workers/rollout/vllm_rollout/vllm_async_server.py:499-507,
+# workers/rollout/utils.py get_vision_placeholder_token_ids), so rule 91 stays as a net.  With failure_policy "raise",
+# an image-token crash in an agent loop (the rope index of verl's AgentLoopWorker, experimental/agent_loop/
+# agent_loop.py:1005) ends the trainer through the sampler's "agent loop raised", and the root exception's line above
+# it still matches.  TODO(q38 S5): vLLM 0.28's own text for an episode whose prompt and images disagree, and the texts
+# the S5 fault injection shows, before rule 91 is relied on in the new stack
 VISION_TOKEN_CRASHES = (
     re.compile(r"RuntimeError: shape mismatch: value tensor of shape \[3, \d+\] cannot be broadcast to indexing "
                r"result of shape \[3, \d+\]"),
     re.compile(r"ValueError: Image features and image tokens do not match"))
+# q38, question 1: how the q38 trainer ends on a failed prompt group (failure_policy "raise",
+# vagen/q38/sampler.py:330 _raise_failures: "q38 sampler: agent loop raised in N prompt group(s): ..."), and the
+# sampler's waiting warning (question 4, vagen/q38/sampler.py:378: "q38 sampler: step S has waited E s (threshold T s)
+# for draw batch B: ...").  Both as committed in cee1514a; a change of either text there must change these two
+# (test_train_chain Q38ChainTest has both texts)
+FAILED_GROUP = re.compile(r"q38 sampler: agent loop raised in \d+ prompt group")
+SAMPLER_STUCK = re.compile(r"q38 sampler: step \d+ has waited \d+ s")
 
 
 def vision_token_crash(log_text: str) -> Optional[str]:
@@ -412,6 +451,40 @@ def vision_token_crash(log_text: str) -> Optional[str]:
         if any(p.search(line) for p in VISION_TOKEN_CRASHES):
             found = line.strip()
     return found[:200] if found else None
+
+
+def trainer_end_note(log_text: str) -> Optional[str]:
+    """q38, question 1: why a trainer log ended, for the resubmission record -- the q38 sampler's failed prompt group
+    ("failed group: ...", the last such line) or the image-token crash of rule 91 ("image-token crash: ..."); None
+    otherwise.  Only a note: the trainer is handled as any trainer that ends before its endpoint."""
+    found = None
+    for line in log_text.splitlines():
+        if FAILED_GROUP.search(line):
+            found = line.strip()
+    if found:
+        return "failed group: " + found[found.find("q38 sampler:"):][:200]
+    crash = vision_token_crash(log_text)
+    return f"image-token crash: {crash}" if crash else None
+
+
+def sampler_stuck(log_text: str) -> Tuple[int, Optional[str]]:
+    """q38, question 4: (how many, the last) of the q38 sampler's waiting warnings in a trainer log."""
+    lines = [line.strip() for line in log_text.splitlines() if SAMPLER_STUCK.search(line)]
+    return len(lines), (lines[-1][lines[-1].find("q38 sampler:"):][:240] if lines else None)
+
+
+def stall_warning(last_update: int, quiet_s: float, seconds_per_update: Optional[float],
+                  settings: Dict[str, Any]) -> Optional[str]:
+    """q38, question 4 (warnings only, the user's OK of 2026-11-17: no timeout, no new stop rule): a running trainer
+    that has written no new update for max(min_minutes, factor x its recent seconds per update), after its first
+    update (before it, startup_problem watches the silence), or None."""
+    if last_update < 1:
+        return None
+    limit = max(float(settings["min_minutes"]) * 60, float(settings["factor"]) * float(seconds_per_update or 0.0))
+    if quiet_s < limit:
+        return None
+    return (f"no new update for {quiet_s / 60:.0f} minutes after update {last_update} "
+            f"(warning line {limit / 60:.0f} minutes)")
 
 
 def read_tail(path: Path, size: int = 2_000_000) -> str:
@@ -893,6 +966,52 @@ class Chain:
                     f"(last: {last[-1]['crash'][:120]})")
         return None
 
+    def trainer_note(self, run_dir: Path) -> Optional[str]:
+        """q38, question 1: trainer_end_note of a run's newest trainer log (None without one)."""
+        logs = sorted((run_dir / "logs").glob("rl-*.log")) if (run_dir / "logs").is_dir() else []
+        return trainer_end_note(read_tail(logs[-1])) if logs else None
+
+    def stall_watch(self, active: Dict[str, Dict[str, Any]], states: Dict[str, Any]) -> None:
+        """q38, question 4 (warnings only; the user's OK of 2026-11-17 of DESIGN_ASYNC section 7): one poll over the
+        running trainers.  The clock starts when the chain first sees a run's newest update number
+        (state["update_seen"]); a running trainer whose number has not moved for stall_warning's line gets a warning in
+        state["stall_warnings"][name] (with the q38 sampler's waiting warnings of its log), again every
+        "repeat_minutes" while it lasts.  Plan rl "stall_warn": false turns it off, a dict overrides
+        STALL_WARN_DEFAULTS.  Nothing is stopped or resubmitted."""
+        seen = self.state.setdefault("update_seen", {})
+        changed = False
+        for name, run in active.items():
+            opt = run["rl"].get("stall_warn", True)
+            if opt is False or states.get(f"{name}/rl") != "RUNNING":
+                continue
+            settings = {**STALL_WARN_DEFAULTS, **(opt if isinstance(opt, dict) else {})}
+            logs = job_logs(run["run_dir"], "rl", None)
+            if not logs:
+                continue
+            text = "\n".join(p.read_text(errors="ignore") for p in logs)
+            progress = rl_progress(text)
+            t = self.clock()
+            rec = seen.get(name) or {}
+            if rec.get("update") != progress["last_update"]:
+                seen[name] = {"update": progress["last_update"], "t": t}
+                changed = True
+                continue
+            warning = stall_warning(progress["last_update"], t - float(rec["t"]),
+                                    progress["seconds_per_update_mean_last10"], settings)
+            if warning is None:
+                continue
+            past = self.state.setdefault("stall_warnings", {}).setdefault(name, [])
+            if past and past[-1].get("update") == progress["last_update"] and \
+                    t - float(past[-1].get("t", 0)) < float(settings["repeat_minutes"]) * 60:
+                continue
+            count, last = sampler_stuck(text)
+            past.append({"utc": now(), "t": t, "update": progress["last_update"], "warning": warning,
+                         "sampler_warnings": count, "last_sampler_warning": last})
+            del past[:-20]  # the newest 20
+            changed = True
+        if changed:
+            self.save()
+
     def qa_jobs(self, models: Dict[str, Tuple[str, Optional[str], Sequence[str]]]) -> Dict[str, Tuple[Any, ...]]:
         """Plan "qa_eval" (decision 2 甲 of 2026-11-01; off unless given): {"out": folder, "easi": a list of EASI
         benchmark keys or "easi_8" (SITE as its image and video parts, qa_eval.EASI_8_JOBS), "models": result names
@@ -1113,7 +1232,20 @@ class Chain:
         if self.plan.get("trainer_attn"):  # the model line (2026-10-26): the trainer's attention (verl fsdp_workers
             # reads TRANSFORMERS_ATTN_IMPLEMENTATION), over the type's own; e.g. "sdpa" for the Qwen3-VL control
             env["TRANSFORMERS_ATTN_IMPLEMENTATION"] = str(self.plan["trainer_attn"])
+        if self.eval_cards() != DEFAULT_EVAL_CARDS:  # q38: the job script gives an eval / qa job that many cards
+            env["VAGEN_LITE_EVAL_CARDS"] = str(self.eval_cards())
         return env
+
+    def eval_cards(self) -> int:
+        """q38 (question 6 of DESIGN_ASYNC, the user's OK of 2026-11-17): plan "eval_cards" (default 1), the cards of
+        every action evaluation job -- eval_jobs (not its QA jobs: one card) and watch_checkpoints (eval
+        "stop_invalid"); 2 for Qwen3.8-27B (card 0 the render service, card 1 vLLM).  One of job_sco.SPECS."""
+        from . import job_sco
+
+        cards = int(self.plan.get("eval_cards", DEFAULT_EVAL_CARDS))
+        if cards not in job_sco.SPECS:
+            raise ChainError(f"plan eval_cards must be one of {sorted(job_sco.SPECS)}, not {cards}")
+        return cards
 
     def check_code(self) -> None:
         if self.plan.get("model_type") and self.plan.get("model"):  # the model line: the plan's type is the model's
@@ -1263,7 +1395,9 @@ class Chain:
                     if not (run / "job" / "submission.json").exists():
                         args = ([mode[0], str(eval_dir), result, str(model), *options] if mode else
                                 ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options])
-                        job_sco.prepare(run, 1, args, pool=self.job_pool(cards=1))
+                        # q38: 2 for the 27B model; a QA job keeps one (qa_eval uses the first visible card only)
+                        cards = 1 if mode else self.eval_cards()
+                        job_sco.prepare(run, cards, args, pool=self.job_pool(cards=cards))
                         job_sco.submit(run)
                     running[name] = run
                 for name, run in list(running.items()):
@@ -1676,9 +1810,12 @@ class Chain:
                         ended[name] = f"stopped: {crash_stop}"
                         active.pop(name)
                         continue
+                    # q38, question 1: a failed prompt group ends the trainer before its endpoint like any other end;
+                    # the record names it
+                    note = self.trainer_note(d) if rl_done and not reached else None
                     if rl_done and not reached and self.take_retry(  # round 12 batch: resume from the last checkpoint
-                            f"rl/{name}", "trainer", st_rl.get("job_id"), f"trainer ended {st_rl.get('state')}", used,
-                            hosts_rl):
+                            f"rl/{name}", "trainer", st_rl.get("job_id"),
+                            f"trainer ended {st_rl.get('state')}" + (f" ({note})" if note else ""), used, hosts_rl):
                         job_sco.delete(d, "job_rl")
                         if lazy:
                             drop_renderer(d)
@@ -1726,7 +1863,7 @@ class Chain:
                         continue
                     if rl_done:
                         (d / "STOP_RENDERER").touch()
-                        ended[name] = st_rl.get("state")
+                        ended[name] = f"{st_rl.get('state')} ({note})" if note else st_rl.get("state")
                         active.pop(name)
                     elif r_done:
                         (d / "STOP_RENDERER").touch()  # the render service died: the trainer cannot go on
@@ -1743,6 +1880,7 @@ class Chain:
                         self.state.setdefault("guard_stops", {})[name] = {"reason": reason, "utc": now()}
                         ended[name] = f"stopped: {reason}"
                         active.pop(name)
+                self.stall_watch(active, states)  # q38, question 4: warnings only
                 self.watch_checkpoints(active, ended)  # the model line: plan eval "stop_invalid"
                 self.repack(runs, active, states)  # round 12 batch: plan rl "renderer_repack"
                 self.mark(step, jobs={**states, **{f"{n}/ended": v for n, v in ended.items()}})
@@ -1829,8 +1967,9 @@ class Chain:
                     continue
                 if not (ev_run / "job" / "submission.json").exists():
                     ev_run.mkdir(parents=True, exist_ok=True)
-                    job_sco.prepare(ev_run, 1, ["eval", str(rule["dir"]), result, str(hf), "-",
-                                                *self.run_eval_options(options, run)], pool=self.job_pool(cards=1))
+                    cards = self.eval_cards()  # q38: as the evaluate step's job of the same checkpoint
+                    job_sco.prepare(ev_run, cards, ["eval", str(rule["dir"]), result, str(hf), "-",
+                                                    *self.run_eval_options(options, run)], pool=self.job_pool(cards=cards))
                     job_sco.submit(ev_run)
                     rec["job_id"] = json.loads((ev_run / "job" / "submission.json").read_text())["job_id"]
                     continue
@@ -2362,6 +2501,12 @@ def render_markdown(state: Dict[str, Any]) -> str:
                     f"{cells[f]['success']:.2f}（{cells[f]['episodes']}）" if f in cells else "—" for f in families) + " |")
     for name, g in (state.get("guard_stops") or {}).items():
         lines += ["", f"**RL {name} 被自动停止**（{g.get('utc')}）：{g.get('reason')}"]
+    for name, ws in (state.get("stall_warnings") or {}).items():  # q38, question 4: warnings only
+        w = ws[-1] if ws else None
+        if w and (state.get("update_seen") or {}).get(name, {}).get("update") == w.get("update"):  # still stuck
+            lines += ["", f"**RL {name} 可能卡住（只告警，不停）**（{w.get('utc')}，第 {len(ws)} 条）：{w.get('warning')}；"
+                          f"采样器的等待告警 {w.get('sampler_warnings')} 条" +
+                          (f"，最近一条：{w['last_sampler_warning']}" if w.get("last_sampler_warning") else "")]
     for name, d in ((state["steps"].get("rl_extend") or {}).get("decisions") or {}).items():
         vals = "，".join(f"{k} 次 {v:.3f}" for k, v in (d.get("val") or {}).items())
         lines += ["", f"**RL {name} 是否接着训**（{d.get('set')}：{vals}）："

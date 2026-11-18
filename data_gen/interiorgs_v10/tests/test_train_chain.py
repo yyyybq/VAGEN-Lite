@@ -2573,5 +2573,110 @@ class ChainTest(unittest.TestCase):
             self.assertIn("no output for 41 minutes", lazy.startup_check("x", run, st))
 
 
+class Q38ChainTest(unittest.TestCase):
+    """q38 (DESIGN_ASYNC questions 1, 4 and 6): two-card evaluations, the failed-group note, the stall warning."""
+
+    def test_eval_cards(self):
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            model = Path(tmp) / "m"
+            model.mkdir()
+            (model / "config.json").write_text("{}")
+            for cards, want_env in ((None, {}), (2, {"VAGEN_LITE_EVAL_CARDS": "2"})):
+                plan = {"tr": tmp, "sft_dir": tmp, "endpoint": 150, **({"eval_cards": cards} if cards else {})}
+                chain = T.Chain(plan, sleep=lambda s: None)
+                self.assertEqual(chain.eval_cards(), cards or 1)
+                self.assertEqual({k: v for k, v in chain.job_env().items() if k == "VAGEN_LITE_EVAL_CARDS"}, want_env)
+                prepared, pools = {}, []
+                chain.job_pool = lambda key=None, cards=8: pools.append(cards)
+
+                def prepare(run, gpus, args, job_dir="job", pool=None):
+                    prepared[run.name] = gpus
+                    (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+                def submit(run, job_dir="job"):
+                    (run / job_dir / "submission.json").write_text(json.dumps({"job_id": "pt-" + run.name}))
+
+                def status(run, job_dir="job"):
+                    out = Path(tmp) / "ev" / run.name
+                    out.mkdir(parents=True, exist_ok=True)
+                    (out / "done.json").write_text("{}")
+                    return {"state": "SUCCEEDED", "finished": True}
+
+                with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status,
+                                         delete=lambda *a, **k: None):
+                    chain.eval_jobs("evaluate", {f"r{cards}": (Path(tmp) / "ev", f"r{cards}", str(model), None, []),
+                                                 f"q{cards}": (Path(tmp) / "ev", f"q{cards}", str(model), None, [], "qa")})
+                # the action evaluation takes eval_cards, a QA job one card
+                self.assertEqual((prepared, sorted(pools)),
+                                 ({f"r{cards}": cards or 1, f"q{cards}": 1}, sorted([cards or 1, 1])))
+            with self.assertRaises(T.ChainError):
+                T.Chain({"tr": tmp, "sft_dir": tmp, "eval_cards": 3}, sleep=lambda s: None).eval_cards()
+
+    def test_trainer_end_note(self):
+        failed = ("(TaskRunner pid=9) RuntimeError: q38 sampler: agent loop raised in 1 prompt group(s): "
+                  "u1a2 (draw batch 6); failure_policy=raise. The root exception is logged above\n")
+        crash = ("RuntimeError: shape mismatch: value tensor of shape [3, 4801] cannot be broadcast to indexing result "
+                 "of shape [3, 4768]\n")
+        self.assertEqual(T.trainer_end_note("step:5 - x:1\n" + failed),
+                         "failed group: " + failed.strip()[failed.find("q38 sampler:"):])
+        # the root exception logged above the sampler's line is an image-token crash: the failed group is named
+        self.assertTrue(T.trainer_end_note(crash + failed).startswith("failed group: q38 sampler: agent loop raised"))
+        self.assertEqual(T.trainer_end_note(crash), "image-token crash: " + crash.strip())
+        self.assertIsNone(T.trainer_end_note("RuntimeError: CUDA out of memory\n"))
+
+    def test_stall_warning(self):
+        settings = dict(T.STALL_WARN_DEFAULTS)
+        self.assertIsNone(T.stall_warning(0, 10 * 3600, None, settings))  # before the first update: startup_problem's
+        self.assertIsNone(T.stall_warning(3, 59 * 60, 100.0, settings))
+        self.assertIn("no new update for 61 minutes after update 3", T.stall_warning(3, 61 * 60, 100.0, settings))
+        self.assertIsNone(T.stall_warning(3, 61 * 60, 1500.0, settings))  # 3 x 25 minutes per update: 75 minutes
+        self.assertIn("warning line 75 minutes", T.stall_warning(3, 76 * 60, 1500.0, settings))
+        log = ("(Runner) WARNING q38 sampler: step 7 has waited 900 s (threshold 300 s) for draw batch 6: 2 group(s) "
+               "not finished, e.g. ['a', 'b']\nq38 sampler: step 7 has waited 1200 s (threshold 300 s) for draw batch 6:"
+               " 1 group(s) not finished, e.g. ['b']\n")
+        n, last = T.sampler_stuck(log)
+        self.assertEqual(n, 2)
+        self.assertTrue(last.startswith("q38 sampler: step 7 has waited 1200 s"))
+        self.assertEqual(T.sampler_stuck("step:1 - x:1\n"), (0, None))
+
+    def test_stall_watch_only_warns(self):
+        clock = {"t": 1_000_000.0}
+        with tempfile.TemporaryDirectory() as tmp:
+            for opt, want in ((None, True), (False, False)):
+                chain = T.Chain({"tr": tmp, "sft_dir": tmp, "rl_runs": {"x": {}},
+                                 "rl": {} if opt is None else {"stall_warn": opt}}, clock=lambda: clock["t"])
+                chain.state.pop("update_seen", None)
+                chain.state.pop("stall_warnings", None)
+                runs = chain.rl_runs()
+                logs = runs["x"]["run_dir"] / "logs"
+                logs.mkdir(parents=True, exist_ok=True)
+                (logs / "rl-20261118T000000Z-h.log").write_text(
+                    "step:1 - timing_s/step:120.0\nstep:2 - timing_s/step:110.0\n"
+                    "q38 sampler: step 3 has waited 400 s (threshold 300 s) for draw batch 2: 1 group(s) not finished\n")
+                states = {"x/rl": "RUNNING"}
+                chain.stall_watch(dict(runs), states)  # the clock starts at update 2
+                clock["t"] += 30 * 60
+                chain.stall_watch(dict(runs), states)
+                self.assertNotIn("x", chain.state.get("stall_warnings") or {})
+                clock["t"] += 31 * 60
+                chain.stall_watch(dict(runs), states)
+                clock["t"] += 5 * 60
+                chain.stall_watch(dict(runs), states)  # again only after repeat_minutes
+                got = (chain.state.get("stall_warnings") or {}).get("x", [])
+                self.assertEqual(len(got), 1 if want else 0)
+                if want:
+                    self.assertIn("no new update for 61 minutes after update 2", got[0]["warning"])
+                    self.assertEqual(got[0]["sampler_warnings"], 1)
+                    self.assertIn("可能卡住（只告警，不停）", T.render_markdown(chain.state))
+                    (logs / "rl-20261118T000000Z-h.log").write_text("step:3 - timing_s/step:100.0\n", encoding="utf-8")
+                    chain.stall_watch(dict(runs), states)  # moving again: the warning is no longer shown
+                    self.assertNotIn("可能卡住", T.render_markdown(chain.state))
+                self.assertNotIn("x", chain.state.get("guard_stops") or {})  # never a stop
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,8 +18,9 @@ class JobScoTest(unittest.TestCase):
             prepared = json.loads((run / "job" / "prepared.json").read_text())
             self.assertEqual(prepared["spec"], "N4lS.Iq.I80.1")
             self.assertEqual(J.SPECS[8], "N4lS.Iq.I80.8")
+            self.assertEqual(J.SPECS[2], "N4lS.Iq.I80.2")  # q38: the 27B evaluations
             with self.assertRaises(ValueError):
-                J.prepare(run, 2, ["sft"])
+                J.prepare(run, 4, ["sft"])
             with self.assertRaises(ValueError):
                 J.prepare(run, 1, [])
             # the render service and the trainer of one PPO run: two job folders on one RUN
@@ -148,7 +149,7 @@ class JobScoTest(unittest.TestCase):
         self.assertIn("echo run --eval", body)
         with tempfile.TemporaryDirectory() as tmp:
             sh = Path(tmp) / "eval_args.sh"
-            sh.write_text("set -euo pipefail\n" + body + "\n")
+            sh.write_text("set -euo pipefail\nuse_train_env() { :; }\n" + body + "\n")  # q38: the env switch, stubbed
             out = lambda *a: subprocess.run(["bash", str(sh), *a], capture_output=True, text=True, check=True).stdout.split()  # noqa: E731
             base = ["run", "--eval", "E", "--name", "N", "--model", "M"]
             self.assertEqual(out("eval", "RUN", "E", "N", "M"), base)
@@ -222,6 +223,129 @@ class JobScoTest(unittest.TestCase):
             self.assertEqual((run / "renderer_endpoint_next.txt").read_text(), "http://10.1.2.3:8915/render\n")
             self.assertRegex((run / "started").read_text(), r"^32 .*/logs/renderer_service-\d{8}T\d{6}Z\.log\n$")
             self.assertEqual(sorted(p.name for p in run.iterdir() if p.suffix == ".tmp"), [])
+
+    def test_q38_variables_reach_the_job_script(self):
+        """q38: the trainer's environment, its entry module, the override of the CUDA forward-compatibility libraries
+        and the eval cards go from the preparing process to the job script; unset, the launch script is as before."""
+        import os
+        from unittest import mock
+
+        q38 = {"TRAIN_ENV_ROOT": "/q38/envs/verl", "V10_PPO_MODULE": "vagen.q38.ppo_v1", "Q38_CUDA_COMPAT": "0",
+               "VAGEN_LITE_EVAL_CARDS": "2"}
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            clean = {k: v for k, v in os.environ.items() if k not in q38}
+            with mock.patch.dict(os.environ, clean, clear=True):
+                plain = J.prepare(run, 2, ["eval", "/e"]).read_text()
+            self.assertNotIn("exec env ", plain)
+            self.assertEqual(json.loads((run / "job" / "prepared.json").read_text())["spec"], "N4lS.Iq.I80.2")
+            with mock.patch.dict(os.environ, q38):
+                text = J.prepare(run, 2, ["eval", "/e"]).read_text()
+            for k, v in q38.items():
+                self.assertIn(f"{k}={v}", text)
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        self.assertIn("\nPPO_MODULE=${V10_PPO_MODULE:-vagen.interiorgs_v10_ppo}\n", script)
+        self.assertNotIn('-m vagen.interiorgs_v10_ppo --config', script)  # every trainer call takes PPO_MODULE
+        self.assertIn('--conda-env "${RENDER_ENV_ROOT}"', script)  # the render service keeps vagen-lite
+        self.assertIn("\numask 022\n", script)
+        self.assertNotRegex(script, r"(?m)^\s*umask 077")  # (a comment names pear's)
+        # an eval job: the render service on card 0 first, then vLLM on eval_policy_cards in the trainer's env; a QA
+        # job stays on card 0
+        block = script.split("\n  eval)\n", 1)[1].split(";;", 1)[0]
+        order = [block.index(s) for s in ("CUDA_VISIBLE_DEVICES=0\n", "start_renderer 0\n", "use_train_env\n",
+                                          "CUDA_VISIBLE_DEVICES=$(eval_policy_cards)", "data_gen.interiorgs_v10.evaluation")]
+        self.assertEqual(order, sorted(order))
+        qa = script.split("\n  qa)\n", 1)[1].split(";;", 1)[0]
+        self.assertIn("export CUDA_VISIBLE_DEVICES=0", qa)
+        self.assertNotIn("eval_policy_cards", qa)
+
+    def test_q38_train_env_switch(self):
+        """q38: use_train_env (the trainer's CUDA 13 toolkit and library paths, its C compiler, the forward-
+        compatibility libraries on a driver older than 580 unless Q38_CUDA_COMPAT overrides) and eval_policy_cards,
+        run as the job script runs them."""
+        import os
+        import subprocess
+
+        script = (Path(__file__).resolve().parents[3] / J.SCRIPT).read_text()
+        funcs = "\neval_policy_cards() {" + script.split("\neval_policy_cards() {", 1)[1].split("\nlf_train() {", 1)[0]
+        probe_gcc = "/mnt/umm/users/yinbaiqiao/.conda/envs/probe-spatial/bin/x86_64-conda-linux-gnu-"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            train, compat, bin_dir = root / "train", root / "compat", root / "bin"
+            nvcc = train / "lib" / "python3.12" / "site-packages" / "nvidia" / "cu13" / "bin" / "nvcc"
+            nvcc.parent.mkdir(parents=True)
+            nvcc.write_text("#!/bin/sh\n")
+            nvcc.chmod(0o755)
+            compat.mkdir()
+            (compat / "libcuda.so.580.196.07").write_text("")
+            (compat / "libcuda.so.1").symlink_to("libcuda.so.580.196.07")
+            (compat / "libcuda.so").symlink_to("libcuda.so.1")
+            bin_dir.mkdir()
+
+            def run(train_root, compat_switch=None, driver="550.90.07", compat_dir=compat, cards=None, extra=None):
+                # driver None: nvidia-smi answers nothing
+                (bin_dir / "nvidia-smi").write_text("#!/bin/sh\n" + (f"echo {driver}\n" if driver else "exit 9\n"))
+                (bin_dir / "nvidia-smi").chmod(0o755)
+                head = (f"set -euo pipefail\nRENDER_ENV_ROOT=/render\nTRAIN_ENV_ROOT={train_root}\nPY=py\nPPO_MODULE=m\n"
+                        "BASE_LD_LIBRARY_PATH=/base/lib BASE_LIBRARY_PATH= BASE_CPATH=\n"
+                        "export LD_LIBRARY_PATH=/render/lib:/base/lib LIBRARY_PATH=/render/targets/lib "
+                        "CPATH=/render/include CURAND_LIBRARY_DIR=/render/curand CC=/render/gcc CXX=/render/g++\n")
+                tail = ('\neval_policy_cards\nuse_train_env\necho "CUDA_HOME=${CUDA_HOME:-}"\n'
+                        'echo "LD=${LD_LIBRARY_PATH:-}"\necho "LIB=${LIBRARY_PATH:-}"\necho "CPATH=${CPATH-unset}"\n'
+                        'echo "TL=${TRITON_LIBCUDA_PATH:-}"\necho "CURAND=${CURAND_LIBRARY_DIR-unset}"\n'
+                        'echo "CC=${CC:-}"\necho "CXX=${CXX:-}"\n')
+                env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", Q38_CUDA_COMPAT_DIR=str(compat_dir),
+                           TMPDIR=str(root))
+                for k in ("Q38_CUDA_COMPAT", "VAGEN_LITE_EVAL_CARDS", "TRAIN_CC", "TRAIN_CXX", "TRAIN_CUDA_HOME"):
+                    env.pop(k, None)
+                if compat_switch is not None:
+                    env["Q38_CUDA_COMPAT"] = compat_switch
+                if cards is not None:
+                    env["VAGEN_LITE_EVAL_CARDS"] = cards
+                env.update(extra or {})
+                res = subprocess.run(["bash", "-c", head + funcs + tail], capture_output=True, text=True, env=env)
+                lines = res.stdout.splitlines()
+                return res.returncode, lines[0] if lines else None, dict(l.split("=", 1) for l in lines if "=" in l
+                                                                         and not l.startswith("[")), res.stdout
+
+            # no separate trainer env: nothing changes
+            rc, cards, out, _ = run("/render")
+            self.assertEqual((rc, cards, out["LD"], out["LIB"], out["CPATH"], out["CC"]),
+                             (0, "0", "/render/lib:/base/lib", "/render/targets/lib", "/render/include", "/render/gcc"))
+            # an eval job's vLLM: card 0 with one card, card 1 with two (card 0 is the render service's)
+            self.assertEqual(run("/render", cards="2")[1], "1")
+            self.assertEqual(run("/render", cards="4")[1], "1,2,3")
+            self.assertNotEqual(run("/render", cards="two")[0], 0)
+            # the q38 env on zoetrope's driver (older than 580): the compatibility libraries by default
+            rc, _, out, text = run(train)
+            self.assertEqual(rc, 0, text)
+            self.assertEqual(out["CUDA_HOME"], str(nvcc.parent.parent))
+            self.assertEqual((out["LD"], out["LIB"], out["TL"]), (f"{compat}:/base/lib", str(compat), str(compat)))
+            self.assertEqual((out["CPATH"], out["CURAND"]), ("unset", "unset"))
+            self.assertEqual((out["CC"], out["CXX"]), (probe_gcc + "gcc", probe_gcc + "g++"))
+            self.assertIn("driver 550.90.07 (compatibility libraries below 580): Q38_CUDA_COMPAT=auto -> 1", text)
+            self.assertEqual(run(train, "auto")[2]["LD"], f"{compat}:/base/lib")
+            # a driver of 580 or newer (h800's 595.71.05 in pear's r6): not them
+            for driver in ("595.71.05", "580.65.06"):
+                rc, _, out, text = run(train, driver=driver)
+                self.assertEqual((rc, out["LD"]), (0, "/base/lib"))
+                self.assertTrue(out["LIB"] == out["TL"] and (out["LIB"] == "" or "/q38_cuda_link_" in out["LIB"]))
+                self.assertIn("Q38_CUDA_COMPAT=auto -> 0", text)
+            # no driver version: not them, with a warning
+            rc, _, out, text = run(train, driver=None)
+            self.assertEqual((rc, out["LD"]), (0, "/base/lib"))
+            self.assertIn("warning: no driver version from nvidia-smi", text)
+            # the overrides: 0 never, 1 always
+            self.assertEqual(run(train, "0")[2]["LD"], "/base/lib")
+            self.assertEqual(run(train, "1", driver="595.71.05")[2]["LD"], f"{compat}:/base/lib")
+            # needed but missing: the job stops (torch cu130 would see no GPU)
+            self.assertEqual(run(train, compat_dir=root / "nowhere")[0], 1)
+            self.assertEqual(run(train, "1", compat_dir=root / "nowhere")[0], 1)
+            self.assertEqual(run(train, "0", compat_dir=root / "nowhere")[0], 0)
+            self.assertEqual(run(train, driver="595.71.05", compat_dir=root / "nowhere")[0], 0)
+            # another compiler
+            out = run(train, extra={"TRAIN_CC": "/x/gcc", "TRAIN_CXX": "/x/g++"})[2]
+            self.assertEqual((out["CC"], out["CXX"]), ("/x/gcc", "/x/g++"))
 
 
 if __name__ == "__main__":

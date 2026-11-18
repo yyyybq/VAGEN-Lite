@@ -10,7 +10,9 @@ it): give each its own --job-dir, e.g. job_renderer and job_rl.
 
 Trials use one card (the user's rule for every job but the formal training); the formal SFT and PPO
 trainers use eight, the PPO render service one.  The pool is zoetrope unless a job is prepared with another one
-(--pool, the training chain's plan "pool"; round 11: h800 when zoetrope is full, the user's decision).
+(--pool, the training chain's plan "pool"; round 11: h800 when zoetrope is full, the user's decision).  q38 (the
+Qwen3.8-27B rerun line, question 6 of DESIGN_ASYNC, the user's OK of 2026-11-17): an evaluation of the 27B model takes
+two cards (--gpus 2; the chain's plan "eval_cards").
 
 Round 12 batch: ``pick_pool()`` returns the pool with the fewest jobs waiting for cards (the workspace's job list,
 every user's jobs); ``status`` also gives the job's creation and start times, so the chain can tell how long it
@@ -44,16 +46,22 @@ POOLS = ("zoetrope", "h800")  # same H800 cards, specs, image and storage
 # round 12 batch (the user's decision of 2026-10-20): a pool for the RL render services only (4 machines, same cards,
 # zone and network); a job is prepared there only when asked, pick_pool never chooses it
 RENDER_POOLS = ("zoe-cf-render",)
-SPECS = {1: "N4lS.Iq.I80.1", 8: "N4lS.Iq.I80.8"}  # H800 cards, 14 vCPU each
+# H800 cards, 14 vCPU each.  q38: the 2-card spec (28 vCPU, 480 GiB) is listed for zoetrope and h800 by "sco aec2
+# clusters list-workerspec --workspace-name=aigc --aec2-name=<pool>" (checked 2026-11-18; I80.4 is listed too)
+SPECS = {1: "N4lS.Iq.I80.1", 2: "N4lS.Iq.I80.2", 8: "N4lS.Iq.I80.8"}
 # the model line (2026-10-24): set in the preparing process (the training chain sets the first two from the plan's
 # model_type), these reach the job script through the launch script; the job script reads VAGEN_LITE_PYTHON (the model
 # type's Python) and VAGEN_LITE_MODEL_TYPE (its SFT launcher), the PPO trainer VAGEN_D0_3_SMOKE_DIR (the per-update
 # rollout-vs-trainer log-probability audit); HF_HUB_CACHE, SIGLIP_CACHE and CAMBRIAN_SRC come from a model type's
 # environment (Cambrian-S: the cache with its SigLIP2, which its adapter loads by repository name, and its source).
-# VAGEN_LITE_GPU_LOG (plan "gpu_log") makes the job script log each card's memory.  None set: every launch script as
-# before.
+# VAGEN_LITE_GPU_LOG (plan "gpu_log") makes the job script log each card's memory.  q38 (2026-11-18): TRAIN_ENV_ROOT
+# (the trainer's and the evaluations' Python environment, the q38 env) and V10_PPO_MODULE (the trainer's entry module)
+# from the q38 model type's environment; VAGEN_LITE_EVAL_CARDS (the chain's plan "eval_cards"): an eval job's cards;
+# Q38_CUDA_COMPAT, only an override (0 / 1) of the job script's own choice of the CUDA 13 forward-compatibility
+# libraries (added on a driver older than 580).  None set: every launch script as before.
 PASS_ENV = ("VAGEN_LITE_PYTHON", "VAGEN_LITE_MODEL_TYPE", "VAGEN_D0_3_SMOKE_DIR", "HF_HUB_CACHE", "SIGLIP_CACHE",
-            "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG", "TRANSFORMERS_ATTN_IMPLEMENTATION")
+            "CAMBRIAN_SRC", "VAGEN_LITE_GPU_LOG", "TRANSFORMERS_ATTN_IMPLEMENTATION",
+            "TRAIN_ENV_ROOT", "V10_PPO_MODULE", "Q38_CUDA_COMPAT", "VAGEN_LITE_EVAL_CARDS")
 FINISHED = {"SUCCEEDED", "FAILED", "STOPPED", "CANCELLED"}
 # created, no cards yet; sco spells it QUEUEING (round 12 batch: without it a job in that state counted as not waiting)
 WAITING = {"STARTING", "PENDING", "QUEUING", "QUEUEING", "QUEUED", "WAITING", "CREATING"}
