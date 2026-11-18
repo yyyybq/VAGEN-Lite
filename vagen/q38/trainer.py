@@ -24,6 +24,12 @@ five methods of verl/verl/trainer/ppo/v1/trainer_base.py (TB) and changes nothin
 - ``_update_actor`` (TB:1901-1944): the parent, then ``actor/kl_loss`` in the 8B unit (user question 3, MF1):
   kl_v1 x rows / (vagen.ga_8b x n_real) (``kl_to_8b_unit``), verl's own value as ``actor/kl_loss_v1``.
 
+Two more overrides change only the type of logged values, not the step: ``_compute_metrics`` (TB:1946-2074, the last
+step before ``self.logger.log``, TB:528-544) and ``_validate`` (TB:1092; its metrics are logged directly before
+training, TB:470) turn numpy integer / floating scalars into Python floats (``plain_metric_scalars``), so the console
+log has ``training/num_turns/max:12.0`` where numpy 2 printed ``np.int64(12)``, which the training chain's metric
+regex does not read (data_gen/interiorgs_v10/train_chain.py _METRIC).
+
 Metric names this module writes (all int or float; MetricsAggregator drops bools, V1/utils.py:57-71):
 actor/entropy, actor/entropy_v1, actor/kl_loss, actor/kl_loss_v1, vagen/guard/entropy_t1_calib,
 vagen/guard/entropy_t08_calib, vagen/guard/entropy_tokens, vagen/guard/calib_tokens, vagen/adv/real_rows,
@@ -38,6 +44,7 @@ import math
 import os
 from typing import Any, Sequence
 
+import numpy as np
 import torch
 import transfer_queue as tq
 from omegaconf import OmegaConf
@@ -120,6 +127,22 @@ def token_mean(values: torch.Tensor, mask: torch.Tensor, real: Sequence[bool]) -
     if count == 0:
         raise RuntimeError("q38 trainer: no response token in the real rows of the batch")
     return total / count, count
+
+
+def plain_metric_scalars(metrics: dict) -> int:
+    """Turn every numpy integer / floating scalar value of ``metrics`` into a Python float, in place; returns how many.
+
+    Only the type changes (``float(np.int64(12)) == 12.0``).  The console logger prints a value with its repr, and
+    numpy >= 2 writes ``np.int64(12)`` / ``np.float64(8.07)``, which the training chain's metric regex
+    (data_gen/interiorgs_v10/train_chain.py _METRIC) does not read; verl's _compute_metrics leaves such values for
+    num_turns/{min,max,mean} (compute_data_metrics), training/num_turns/* and training/off_policy/* (TB:2041-2070).
+    numpy bools and everything else stay as they are."""
+    count = 0
+    for key, value in metrics.items():
+        if isinstance(value, (np.integer, np.floating)):
+            metrics[key] = float(value)
+            count += 1
+    return count
 
 
 def _upper_threshold(spec: Any) -> float:
@@ -348,6 +371,23 @@ class VagenTrainerMixin:
         metrics["actor/kl_loss_v1"] = kl_v1
         metrics["actor/kl_loss"] = kl_to_8b_unit(kl_v1, rows, self._ga_8b(), n_real)
         return batch
+
+    # ---- 6. logged values as Python numbers ---------------------------------------------------------------------------
+
+    def _compute_metrics(self, batch: KVBatchMeta, metrics, timing_raw, global_steps, epoch):
+        """The parent (TB:1946-2074, the last metrics of the step: fit calls it at TB:528 and logs the dict at TB:544
+        with nothing in between that adds a metric), then numpy scalars as Python floats (plain_metric_scalars)."""
+        out = super()._compute_metrics(batch, metrics, timing_raw, global_steps, epoch)
+        plain_metric_scalars(metrics)
+        return out
+
+    def _validate(self, *args, **kwargs):
+        """The parent; numpy scalars of the validation metrics as Python floats (the val_before_train metrics go
+        to ``self.logger.log`` without passing _compute_metrics, TB:464-470)."""
+        val_metrics = super()._validate(*args, **kwargs)
+        if isinstance(val_metrics, dict):
+            plain_metric_scalars(val_metrics)
+        return val_metrics
 
 
 class VagenSyncTrainer(VagenTrainerMixin, PPOTrainerSync):

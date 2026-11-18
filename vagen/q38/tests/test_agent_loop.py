@@ -620,6 +620,86 @@ def test_t7_limit_images_and_logprobs_off():
         run_episode(model, FakeServer(model.tokenizer), sampling={**SAMPLING, "topk_log_probs": 4}, done_at=1)
 
 
+# ----------------------------------------------------------------- T7: the render service address after a resume
+
+# S3 phase b (2026-11-18): the row re-issued from global_step_7's TransferQueue snapshot carried phase a's address
+OLD_RENDER_URL = "http://10.119.28.126:8915/render"
+NEW_RENDER_URL = "http://10.119.29.141:8915/render"
+
+
+class RecordingEnv(FakeEnv):
+    """FakeEnv that keeps the env config it was built with."""
+
+    configs: list = []
+
+    def __init__(self, env_config):
+        RecordingEnv.configs.append(env_config)
+        super().__init__(env_config)
+
+
+def test_refresh_render_url():
+    from vagen.q38.gym_agent_loop_v1 import refresh_render_url
+
+    row_cfg = {"client_url": OLD_RENDER_URL, "render_backend": "http", "nested": {"a": 1}}
+    new, old = refresh_render_url(row_cfg, {"R1_RENDER_URL": NEW_RENDER_URL})
+    assert new == {**row_cfg, "client_url": NEW_RENDER_URL} and old == OLD_RENDER_URL
+    assert row_cfg["client_url"] == OLD_RENDER_URL  # the row's own dict is not edited
+    # unchanged (the same object): variable unset or empty, address already current, no client_url (another env)
+    for environ in ({}, {"R1_RENDER_URL": ""}, {"R1_RENDER_URL": OLD_RENDER_URL}):
+        same, old = refresh_render_url(row_cfg, environ)
+        assert same is row_cfg and old is None
+    other = {"done_at": 2}
+    assert refresh_render_url(other, {"R1_RENDER_URL": NEW_RENDER_URL}) == (other, None)
+    # an unresolved interpolation (a row that kept the yaml's text) gets the address as well
+    raw = {"client_url": "${oc.env:R1_RENDER_URL}"}
+    assert refresh_render_url(raw, {"R1_RENDER_URL": NEW_RENDER_URL})[0]["client_url"] == NEW_RENDER_URL
+
+
+def _run_rows(model, rows):
+    async def go():
+        outs = []
+        for kwargs in rows:
+            loop = make_loop(model, FakeServer(model.tokenizer))
+            outs.append(await loop.run(dict(SAMPLING), **kwargs))
+        return outs
+
+    return asyncio.run(go())
+
+
+def test_t7_env_gets_the_current_render_url(monkeypatch, caplog):
+    """A row carrying the old address (in-flight prompt restored after a resume): the env is built with the current
+    process's R1_RENDER_URL, the episode counts render_url_refreshed, the row is not edited, one warning per pair."""
+    import logging
+
+    model = default_model()
+    monkeypatch.setitem(GymAgentLoopV1._env_classes, "FakeEnv", RecordingEnv)
+    monkeypatch.setattr(GymAgentLoopV1, "_render_url_logged", set())
+    RecordingEnv.configs = []
+    monkeypatch.setenv("R1_RENDER_URL", NEW_RENDER_URL)
+    rows = [row(seed=s, done_at=2, client_url=OLD_RENDER_URL) for s in (0, 1)]
+    rows.append(row(seed=2, done_at=2, client_url=NEW_RENDER_URL))
+    with caplog.at_level(logging.WARNING):
+        outs = _run_rows(model, rows)
+    assert [c["client_url"] for c in RecordingEnv.configs] == [NEW_RENDER_URL] * 3
+    assert [o.extra_fields["vagen_stats"]["render_url_refreshed"] for o in outs] == [1, 1, 0]
+    assert [r["config"]["client_url"] for r in rows] == [OLD_RENDER_URL, OLD_RENDER_URL, NEW_RENDER_URL]
+    warned = [r for r in caplog.records if "render service address" in r.getMessage()]
+    assert len(warned) == 1 and OLD_RENDER_URL in warned[0].getMessage() and NEW_RENDER_URL in warned[0].getMessage()
+    assert all(o.extra_fields["vagen_stats"]["termination"] == "success" for o in outs)
+
+
+def test_t7_render_url_kept_without_the_variable(monkeypatch):
+    """R1_RENDER_URL unset: the row's address is used as before, nothing counted."""
+    model = default_model()
+    monkeypatch.setitem(GymAgentLoopV1._env_classes, "FakeEnv", RecordingEnv)
+    RecordingEnv.configs = []
+    monkeypatch.delenv("R1_RENDER_URL", raising=False)
+    kwargs = row(seed=0, done_at=2, client_url=OLD_RENDER_URL)
+    (out,) = _run_rows(model, [kwargs])
+    assert RecordingEnv.configs[0] is kwargs["config"] and RecordingEnv.configs[0]["client_url"] == OLD_RENDER_URL
+    assert out.extra_fields["vagen_stats"]["render_url_refreshed"] == 0
+
+
 # ----------------------------------------------------------------- T7: the real env against the 8B rollout dumps
 
 

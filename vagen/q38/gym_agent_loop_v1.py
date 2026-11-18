@@ -34,7 +34,13 @@ What is new:
   - the weight versions of the episode (extra_fields min_global_steps / max_global_steps, the min and the max over its
     generate calls, as tool_agent_loop.py:283-292) for the V1 staleness tags (agent_loop_tq.py:229-233) and the
     sampler's version check (MF3);
-  - extra_fields.vagen_stats: per-episode counters and timings for the sampler's vagen/env/* and vagen/gen/* metrics.
+  - extra_fields.vagen_stats: per-episode counters and timings for the sampler's vagen/env/* and vagen/gen/* metrics;
+  - the render service address is the current process's R1_RENDER_URL, not the one the row carries
+    (refresh_render_url): the env yaml has client_url: ${oc.env:R1_RENDER_URL}, which the dataset resolves when it
+    loads, and a resume re-issues the in-flight rows from the TransferQueue snapshot with the address of the run that
+    wrote the checkpoint, while the render service (its own sco job) has a new address after every restart.  An
+    episode whose row carried another address counts vagen_stats.render_url_refreshed = 1
+    (vagen/env/render_url_refreshed), and each process logs the first such replacement once (WARNING).
 
 Every extra field is JSON-style (str keys, lists, Python scalars): a tuple comes back from TransferQueue as a list, and
 every episode carries the same keys (TransferQueue's kv_batch_get refuses samples with different top-level fields).
@@ -56,6 +62,7 @@ import logging
 import os
 import time
 import traceback
+from collections.abc import Mapping
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -96,7 +103,13 @@ VAGEN_STATS_KEYS = (
     "gen_turns",
     "env_turns",
     "termination",
+    "render_url_refreshed",
 )
+
+# the render service address: the env yaml's client_url is ${oc.env:R1_RENDER_URL} (8B train_env.yaml), and every Ray
+# process gets R1_RENDER_URL from the entry (vagen/q38/ppo_v1.py runtime_env_vars)
+RENDER_URL_ENV = "R1_RENDER_URL"
+RENDER_URL_KEY = "client_url"
 
 # the keys of extra_fields.reward_extra_info: the 8B scalars (GL:339-352)
 REWARD_EXTRA_INFO_KEYS = (
@@ -134,6 +147,29 @@ def _plain(value: Any) -> Any:
 
 def _opt_int(value: Any) -> Optional[int]:
     return None if value is None else int(value)
+
+
+def refresh_render_url(env_config: Any, environ: Optional[Mapping[str, str]] = None) -> tuple[Any, Optional[str]]:
+    """The row's env config with client_url = the current R1_RENDER_URL; (config, the row's old address or None).
+
+    The dataset resolves ``client_url: ${oc.env:R1_RENDER_URL}`` when it loads the env yaml, so a row carries the
+    address of the process that loaded it; after a resume the in-flight rows come back from the TransferQueue snapshot
+    with the address of the run that wrote the checkpoint (S3 phase b, 2026-11-18).  The current process's variable
+    wins.  Returned unchanged (the same object, None) when R1_RENDER_URL is unset or empty, when the config has no
+    client_url key (another env), or when the address is already the current one; otherwise a shallow copy with the
+    new address (the row's own dict is not edited) and the address the row carried."""
+    environ = os.environ if environ is None else environ
+    current = environ.get(RENDER_URL_ENV)
+    if not current:
+        return env_config, None
+    if not isinstance(env_config, Mapping) or RENDER_URL_KEY not in env_config:
+        return env_config, None
+    old = env_config[RENDER_URL_KEY]
+    if old == current:
+        return env_config, None
+    refreshed = dict(env_config)
+    refreshed[RENDER_URL_KEY] = current
+    return refreshed, str(old)
 
 
 def attach_images(content: list[dict[str, Any]], images: list[Image.Image]) -> list[dict[str, Any]]:
@@ -197,6 +233,7 @@ class _Episode:
         self.turns_resumed = 0
         self.num_preempted: Optional[int] = None
         self.termination = ""
+        self.render_url_refreshed = 0
 
     @property
     def want_logprobs(self) -> bool:
@@ -231,6 +268,7 @@ class _Episode:
             "gen_turns": len(self.turn_gen_s),
             "env_turns": int(self.env_turns),
             "termination": str(self.termination),
+            "render_url_refreshed": int(self.render_url_refreshed),
         }
         assert tuple(stats) == VAGEN_STATS_KEYS
         return stats
@@ -262,6 +300,8 @@ class GymAgentLoopV1(AgentLoopBase):
 
     # env classes imported so far, shared by the episodes of a worker process
     _env_classes: dict[str, type] = {}
+    # (row address, current address) pairs already logged by this process (refresh_render_url)
+    _render_url_logged: set[tuple[str, str]] = set()
     # what the data rows must carry (MF8); None skips the check
     expected_max_turns: Optional[int] = contract.MAX_TURNS
     expected_turn_limit: Optional[int] = contract.RESPONSE_LENGTH_PER_TURN
@@ -312,6 +352,21 @@ class GymAgentLoopV1(AgentLoopBase):
             self._env_classes[env_name] = cls
         return cls(env_config=env_config)
 
+    def _env_config(self, ep: _Episode, env_config: Any) -> Any:
+        """The row's env config with the current render service address (refresh_render_url), counted in ep."""
+        env_config, old = refresh_render_url(env_config)
+        if old is not None:
+            ep.render_url_refreshed = 1
+            current = str(env_config[RENDER_URL_KEY])
+            if (old, current) not in self._render_url_logged:
+                self._render_url_logged.add((old, current))
+                logger.warning(
+                    "render service address: the data row carries %s=%s, using the current %s=%s (logged once per "
+                    "address pair; every such episode counts vagen/env/render_url_refreshed)",
+                    RENDER_URL_KEY, old, RENDER_URL_ENV, current,
+                )
+        return env_config
+
     async def _close_env(self, env) -> None:
         try:
             await env.close()
@@ -345,7 +400,7 @@ class GymAgentLoopV1(AgentLoopBase):
 
         ep = _Episode(request_id=uuid4().hex, want_logprobs=want_logprobs)  # one request id an episode (sticky server)
         self.episode = ep  # the instance lives for one episode; kept for inspection (tests)
-        env = self._make_env(kwargs["env_name"], kwargs["config"])
+        env = self._make_env(kwargs["env_name"], self._env_config(ep, kwargs["config"]))
         try:
             await self._reset(env, ep, kwargs)
             while True:

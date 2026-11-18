@@ -585,6 +585,115 @@ def test_kl_conversion_errors():
 
 
 # ======================================================================================================================
+# T12: logged values as Python numbers (the training chain's metric regex)
+# ======================================================================================================================
+
+TRAIN_CHAIN = REPO / "data_gen/interiorgs_v10/train_chain.py"
+
+
+def train_chain_metric_regex():
+    """data_gen/interiorgs_v10/train_chain.py's _METRIC, read from the source (the module is not imported)."""
+    import re
+
+    tree = ast.parse(TRAIN_CHAIN.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "_METRIC" for t in node.targets):
+            assert isinstance(node.value, ast.Call) and node.value.func.attr == "compile"
+            return re.compile(ast.literal_eval(node.value.args[0]))
+    raise AssertionError(f"no _METRIC in {TRAIN_CHAIN}")
+
+
+def numpy_metrics():
+    """The kinds of values verl's _compute_metrics leaves in the step's metrics (S1 log, 2026-11-18)."""
+    import numpy as np
+
+    turns = np.array([1, 12, 9])
+    lo, hi = np.array([5, 6, 6]), np.array([6, 6, 6])
+    return {
+        "num_turns/min": np.asarray(turns, dtype=np.int32).min(),
+        "num_turns/max": np.asarray(turns, dtype=np.int32).max(),
+        "training/num_turns/mean": turns.mean(),
+        "training/num_turns/max": turns.max(),
+        "training/off_policy/trajectory_spans/max": (hi - lo + 1).max(),
+        "training/off_policy/trajectory_staleness/min": ((7 - 1) - hi).min(),
+        "training/off_policy/trajectory_staleness_worst/max": ((7 - 1) - lo).max(),
+        "f32": np.float32(0.25),
+        "big": np.int64(2**40),
+        "neg": np.int64(-3),
+        "py_int": 3,
+        "py_float": 0.5,
+        "flag": np.bool_(True),
+        "name": "x",
+    }
+
+
+def test_plain_metric_scalars():
+    import numpy as np
+
+    from vagen.q38.trainer import plain_metric_scalars
+
+    metrics = numpy_metrics()
+    before = dict(metrics)
+    assert plain_metric_scalars(metrics) == 10
+    for key, value in before.items():
+        if isinstance(value, (np.integer, np.floating)):
+            assert type(metrics[key]) is float and metrics[key] == value, key  # the type changes, not the value
+        else:
+            assert metrics[key] is value, key  # Python numbers, numpy bools, strings untouched
+    assert metrics["num_turns/max"] == 12.0 and metrics["training/off_policy/trajectory_staleness/min"] == 0.0
+    assert metrics["big"] == float(2**40) and metrics["neg"] == -3.0
+
+
+def test_console_line_is_read_by_the_training_chain():
+    """verl's console line (aggregate_logger.concat_dict_to_str): with numpy values the training chain's regex misses
+    them (np.int64(12)); after plain_metric_scalars it reads every number with its value."""
+    from verl.utils.logger.aggregate_logger import concat_dict_to_str
+
+    from vagen.q38.trainer import plain_metric_scalars
+
+    regex = train_chain_metric_regex()
+    numeric = {k: v for k, v in numpy_metrics().items() if k not in ("flag", "name")}
+
+    def read(metrics):
+        return {m.group(1): float(m.group(2)) for m in regex.finditer(concat_dict_to_str(metrics, step=3))}
+
+    raw = read(numeric)
+    assert "training/off_policy/trajectory_spans/max" not in raw and "num_turns/min" not in raw  # the S1 problem
+    fixed = dict(numeric)
+    plain_metric_scalars(fixed)
+    got = read(fixed)
+    for key, value in numeric.items():
+        assert got[key] == pytest.approx(float(value), rel=1e-7), key
+
+
+def test_compute_metrics_and_validate_give_python_numbers(monkeypatch):
+    """The mixin's _compute_metrics / _validate: the parent's metrics, numpy scalars as floats, same values."""
+    import numpy as np
+    from verl.trainer.ppo.v1.trainer_base import PPOTrainer
+
+    calls = []
+
+    def parent_compute_metrics(self, batch, metrics, timing_raw, global_steps, epoch):
+        calls.append((batch, timing_raw, global_steps, epoch))
+        metrics.update(numpy_metrics())
+
+    def parent_validate(self):
+        return {"val-core/x/mean@1": np.float64(0.5), "val-aux/n": np.int64(4)}
+
+    monkeypatch.setattr(PPOTrainer, "_compute_metrics", parent_compute_metrics)
+    monkeypatch.setattr(PPOTrainer, "_validate", parent_validate)
+    t = make_trainer()
+    metrics = {"actor/kl_loss": 0.01}
+    t._compute_metrics("B", metrics, {"step": 1.0}, global_steps=7, epoch=0)
+    assert calls == [("B", {"step": 1.0}, 7, 0)]
+    assert not any(isinstance(v, (np.integer, np.floating)) for v in metrics.values())
+    assert metrics["training/num_turns/max"] == 12.0 and metrics["actor/kl_loss"] == 0.01
+    assert type(metrics["flag"]) is np.bool_
+    val = t._validate()
+    assert val == {"val-core/x/mean@1": 0.5, "val-aux/n": 4.0} and all(type(v) is float for v in val.values())
+
+
+# ======================================================================================================================
 # T8: the P8-0 formula check against the 8B code (F061 in the vagen-lite environment)
 # ======================================================================================================================
 

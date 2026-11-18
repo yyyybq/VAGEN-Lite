@@ -118,16 +118,22 @@ def _q38_stats(termination: str, preempted: int, **kw) -> dict:
     """One episode's vagen_stats as the q38 agent loop writes it (gym_agent_loop_v1.py vagen_stats)."""
     stats = {"step_exceptions": 0, "render_s": [0.2, 0.3], "turn_gen_s": [1.5, 2.5], "turn_max_tokens": [384, 384],
              "turn_spans": [[0, 10], [40, 52]], "endoftext_stops": 0, "length_stops": 0, "turns_resumed": 0,
-             "num_preempted": preempted, "gen_turns": 2, "env_turns": 2, "termination": termination}
+             "num_preempted": preempted, "gen_turns": 2, "env_turns": 2, "termination": termination,
+             "render_url_refreshed": 0}
     stats.update(kw)
     return stats
 
 
 def test_stats_metrics_of_the_q38_agent_loop():
     stats = [_q38_stats("success", 0), _q38_stats("max_turns", 2, length_stops=1, turn_gen_s=[4.0]),
-             _q38_stats("success", -1, step_exceptions=1), _q38_stats("", -1), _q38_stats("odd_reason", 1)]
+             _q38_stats("success", -1, step_exceptions=1, render_url_refreshed=1), _q38_stats("", -1),
+             _q38_stats("odd_reason", 1, render_url_refreshed=1)]
     m = stats_metrics(stats)
     assert m["vagen/gen/length_stops"] == 1 and m["vagen/env/step_exceptions"] == 1
+    assert m["vagen/env/render_url_refreshed"] == 2
+    # stats written before the counter existed (a trajectory restored from an older checkpoint) still aggregate
+    old = [{k: v for k, v in _q38_stats("success", 0).items() if k != "render_url_refreshed"}]
+    assert "vagen/env/render_url_refreshed" not in stats_metrics(old)
     assert m["vagen/gen/num_preempted"] == 3  # the -1 (not reported) episodes left out
     assert m["vagen/gen/turn_gen_s_max"] == 4.0
     assert m["vagen/env/termination/success"] == 2 and m["vagen/env/termination/max_turns"] == 1

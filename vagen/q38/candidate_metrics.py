@@ -129,6 +129,9 @@ _COUNTERS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("endoftext_stops", ("endoftext_stops", "endoftext_turns"), "vagen/gen/endoftext_stops"),
     ("length_stops", ("length_stops",), "vagen/gen/length_stops"),
     ("turns_resumed", ("turns_resumed", "resumed_turns"), "vagen/gen/turns_resumed"),
+    # episodes whose row carried another render service address than the current R1_RENDER_URL (rows re-issued from
+    # a checkpoint's TransferQueue snapshot; gym_agent_loop_v1.refresh_render_url)
+    ("render_url_refreshed", ("render_url_refreshed",), "vagen/env/render_url_refreshed"),
 )
 _DURATIONS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("render_s",), "vagen/env/render_s"),
@@ -155,7 +158,8 @@ def _first(stats: Mapping[str, Any], names: Sequence[str]) -> Any:
 def stats_metrics(stats: Sequence[Mapping[str, Any] | None]) -> dict[str, float | int]:
     """vagen/env/* and vagen/gen/* over the candidates' ``vagen_stats`` (one dict per episode, or None).
 
-    Counters are summed over the episodes (step_exceptions, endoftext_stops, length_stops, turns_resumed;
+    Counters are summed over the episodes (step_exceptions, endoftext_stops, length_stops, turns_resumed,
+    render_url_refreshed;
     num_preempted over the episodes that report it, i.e. not -1); the per-turn durations (render_s, turn_gen_s: a
     list of seconds per episode) give p50 / p95 / max over all turns of all episodes (vagen/env/render_s_{p50,p95,max},
     vagen/gen/turn_gen_s_{p50,p95,max}); the termination reasons are counted (vagen/env/termination/<reason>, every
