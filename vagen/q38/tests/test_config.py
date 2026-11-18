@@ -458,6 +458,8 @@ def _options(**over):
     {"progress_adv_weight": 0.5}, {"logprob_tokens": True}, {"greedy_val": True}, {"history_mode": "none"},
     {"history_mode": None}, {"opt_package": None}, {"opt_package": "p1gae"}, {"opt_package": "p1tgae"},
     {"test_freq": 25}, {"no_internal_val": False},
+    # phase 1 is p1's shape (the contract's data.train_batch_size 24): p2's 48 candidates are phase 2
+    {"opt_package": "p2"}, {"candidates": 48}, {"target_groups": 6}, {"rollouts": 4},
 ])
 def test_refused_options(over):
     with pytest.raises(SystemExit):
@@ -466,7 +468,7 @@ def test_refused_options(over):
 
 def test_accepted_options():
     tp.q38_check_options(_options())
-    tp.q38_check_options(_options(opt_package="p2"))
+    tp.q38_check_options(_options(candidates=24, target_groups=12, rollouts=8))  # p1's own values, given explicitly
 
 
 def test_refused_8b_configs(configs, work):

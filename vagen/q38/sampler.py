@@ -29,7 +29,8 @@ inside the step's "gen" timer.  One call:
 6. clears the groups it did not select from TransferQueue (prompt and trajectory keys) and returns the selected
    groups' trajectory keys (``_materialize_batch``);
 7. checks the selected trajectories' version tags (min/max_global_steps, written by the rollout): a missing tag
-   raises; (s-1) - min_global_steps <= 1 and max - min + 1 <= 2 or it is a violation (vagen/async/
+   raises; a tag outside the bounds of the trainer mode (``version_bounds_ok``: sync min = max = s-1;
+   colocate_async 0 <= (s-1) - max, (s-1) - min <= 1, max - min + 1 <= 2) is a violation (vagen/async/
    version_violations), which raises with strict_version_check.
 
 The factors stay in the driver process: ``adv_scale`` = {selected uid: factor} is replaced as a whole by every
@@ -197,6 +198,42 @@ def select_groups(
     fallback = bool(selected) and all(f == 0.0 for f in adv_scale.values())
     return Selection(selected=selected, adv_scale=adv_scale, metrics=filter_metrics, groups=groups,
                      fallback=fallback)
+
+
+# --------------------------------------------------------------------------------------------------------------
+# the version-tag bounds (MF3)
+# --------------------------------------------------------------------------------------------------------------
+#
+# The tag convention, from the verl sources (verl submodule 4bfa94d; paths under verl/verl):
+# - the rollout server's tag is the global_steps passed to update_weights: vllm_rollout.py:250 / 276 / 319 call
+#   set_global_steps(global_steps) after a weight update, vllm_async_server.py:939-941 stores it, and
+#   vllm_async_server.py:700 puts it into every generate output (extra_fields["global_steps"]); llm_server.py:
+#   161-162 / 281-334 turn it into min/max_global_steps per call (min/max over a partial-rollout resume), and
+#   vagen/q38/gym_agent_loop_v1.py takes the min / max over the episode's calls;
+# - the trainer passes 0 (or the resumed step R) at init (on_init_end: trainer_sync.py:31-33,
+#   trainer_colocate_async.py:30-32) and s after the update of step s (on_step_end: trainer_sync.py:35-38,
+#   trainer_colocate_async.py:37-42); trainer_base.py:479 / 546 count the steps from 1 (R+1 on resume).
+# So the weights during the sampling of step s are w_{s-1}:
+# - sync (no partial rollout; the step's own draw batch, generated after the update of step s-1): min = max = s-1;
+# - colocate_async (one-step-off; draw batch s-1 starts under w_{s-2} in step s-1 and may resume under w_{s-1}):
+#   0 <= (s-1) - max, (s-1) - min <= 1, max - min + 1 <= 2 (and min <= max).
+# Any other mode gets the colocate_async bounds.
+
+
+def version_bounds_ok(trainer_mode: str, global_steps: int, lo: int, hi: int) -> bool:
+    """Whether a trajectory's min/max_global_steps (lo, hi) fit the trainer mode at step ``global_steps``."""
+    cur = int(global_steps) - 1
+    lo, hi = int(lo), int(hi)
+    if trainer_mode == "sync":
+        return lo == hi == cur
+    return lo <= hi and cur - hi >= 0 and cur - lo <= 1 and hi - lo + 1 <= 2
+
+
+def version_bounds_text(trainer_mode: str, global_steps: int) -> str:
+    cur = int(global_steps) - 1
+    if trainer_mode == "sync":
+        return f"min = max = s-1 = {cur}"
+    return f"{cur - 1} <= min <= max <= {cur}, i.e. 0 <= (s-1)-max, (s-1)-min <= 1, max-min+1 <= 2"
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -446,7 +483,7 @@ class VagenStepBatchSampler(ReplayBufferAsync):
         metrics.update(stats_metrics(stats))
 
         # version tags (MF3), on the selected trajectories
-        lags, spans, violations, problems = [], [], 0, []
+        lags, best_lags, spans, violations, problems = [], [], [], 0, []
         dump_versions = []
         for k in keys:
             lo, hi = tags[k].get("min_global_steps"), tags[k].get("max_global_steps")
@@ -455,12 +492,13 @@ class VagenStepBatchSampler(ReplayBufferAsync):
                 continue
             if lo is None or hi is None:
                 raise RuntimeError(f"q38 sampler: trajectory {k} has no min/max_global_steps tag ({lo}, {hi})")
-            lag, span = (global_steps - 1) - int(lo), int(hi) - int(lo) + 1
-            lags.append(lag)
-            spans.append(span)
-            if lag > 1 or span > 2:
+            lo, hi = int(lo), int(hi)
+            lags.append((global_steps - 1) - lo)
+            best_lags.append((global_steps - 1) - hi)
+            spans.append(hi - lo + 1)
+            if not version_bounds_ok(self.trainer_mode, global_steps, lo, hi):
                 violations += 1
-                problems.append((k, int(lo), int(hi)))
+                problems.append((k, lo, hi))
 
         next_finished = sum(
             1 for u, (b, _) in draws.items() if b is not None and int(b) == target + 1 and u in self.finished_keys["train"]
@@ -479,6 +517,8 @@ class VagenStepBatchSampler(ReplayBufferAsync):
             "filter/step/stuck_warnings": int(stuck_warnings),
             "vagen/async/version_violations": int(violations),
             "vagen/async/version_lag_worst_max": int(max(lags)) if lags else 0,
+            # (s-1) - max_global_steps over the selected trajectories; < 0 is a tag ahead of the weights
+            "vagen/async/version_lag_best_min": int(min(best_lags)) if best_lags else 0,
             "vagen/async/version_spans_max": int(max(spans)) if spans else 0,
         })
 
@@ -492,8 +532,9 @@ class VagenStepBatchSampler(ReplayBufferAsync):
 
         if problems:
             message = (
-                f"q38 sampler: step {global_steps}: {violations} trajectories outside the version bounds "
-                f"((s-1)-min <= 1, max-min+1 <= 2), e.g. (key, min, max) {problems[:5]}"
+                f"q38 sampler: step {global_steps}: {violations} trajectories outside the version bounds of "
+                f"{self.trainer_mode} ({version_bounds_text(self.trainer_mode, global_steps)}), "
+                f"e.g. (key, min, max) {problems[:5]}"
             )
             if self.strict_version_check:
                 raise RuntimeError(message)

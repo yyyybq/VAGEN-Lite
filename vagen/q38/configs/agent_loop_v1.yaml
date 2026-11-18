@@ -1,0 +1,8 @@
+# q38 agent loop registry: actor_rollout_ref.rollout.agent.agent_loop_config_path points here
+# (verl/experimental/agent_loop/agent_loop.py:558-564 loads every entry into the registry by name).
+# The rows of AgenticDataset already carry agent_name "gym_agent" (vagen/gym_agent_dataset.py:219); the 8B
+# GymAgentLoop is not @register-ed, so this entry is the only "gym_agent" in a q38 run.
+# The per-turn token limit is not set here: GymAgentLoopV1 reads max_turns and response_length_per_turn from the
+# data row and checks them against vagen.q38.contract.MAX_TURNS / RESPONSE_LENGTH_PER_TURN (12 / 384, MF8).
+- name: gym_agent
+  _target_: vagen.q38.gym_agent_loop_v1.GymAgentLoopV1

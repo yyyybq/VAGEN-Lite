@@ -776,6 +776,11 @@ Q38_RUN_RENAMED = {"trainer.rollout_data_dir": "trainer.v1.sampler.sampler_kwarg
 # actor.optim.clip_grad, transformer_impl.py:859-876); a config showing it would suggest it acts
 Q38_REMOVED = ("actor_rollout_ref.actor.grad_clip",)
 Q38_PACKAGE_ESTIMATORS = ("grpo",)  # phase 1 (turn_credit, turn_gae and the critic come in phases 2-3)
+# phase 1 runs package p1 only: the runtime contract (vagen/q38/contract.py EXPECTED) fixes its shape, 24 candidates a
+# step (data.train_batch_size, Y8:291), 8 episodes a task and 12 kept groups; p2 (48 candidates) is phase 2 and would
+# be refused at start-up, so rl-config refuses it (and --candidates / --target-groups / --rollouts off p1) up front
+Q38_PACKAGES = ("p1",)
+Q38_PACKAGE_SHAPE = ("candidates", "target_groups", "rollouts")
 
 
 def _q38_flat(node: Any, prefix: str = "") -> Dict[str, Any]:
@@ -831,6 +836,14 @@ def q38_check_options(args: argparse.Namespace) -> None:
     estimator = OPT_PACKAGES.get(package, {}).get("adv_estimator", "grpo")
     if estimator not in Q38_PACKAGE_ESTIMATORS:
         raise SystemExit(f"--stack q38 has no {estimator!r} yet (phase 1: {Q38_PACKAGE_ESTIMATORS}): package {package}")
+    if package not in Q38_PACKAGES:
+        raise SystemExit(f"--stack q38 runs the packages {Q38_PACKAGES} in phase 1, not {package!r} (its shape is not "
+                         f"the contract's: vagen/q38/contract.py)")
+    for key in Q38_PACKAGE_SHAPE:
+        value = getattr(args, key, None)
+        if value and int(value) != OPT_PACKAGES[package][key]:
+            raise SystemExit(f"--stack q38 phase 1 keeps package {package}'s {key} {OPT_PACKAGES[package][key]} (the "
+                             f"contract fixes it): leave out --{key.replace('_', '-')} {value}")
     if getattr(args, "test_freq", None) or not getattr(args, "no_internal_val", False):
         raise SystemExit("--stack q38 trains without validation inside training: --no-internal-val (the standards set "
                          "it) and no --test-freq")

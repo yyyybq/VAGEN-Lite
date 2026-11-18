@@ -157,3 +157,23 @@ def test_decode_rows_padded_and_unpadded():
     assert rd.decode_rows(tok, [[10, 11, 12]], replace_image_tokens=False) == [
         "<|vision_start|><|image_pad|><|vision_end|>"]
     assert rd.unpad([0, 1, 0], 0, "left") == [1, 0] and rd.unpad([0, 1, 0], None, "right") == [0, 1, 0]
+
+
+MODEL_27B = os.environ.get("Q38_TEST_MODEL_27B", "/mnt/umm/users/yinbaiqiao/q38/models/Qwen3.8-27B")
+
+
+def test_decode_with_the_27b_tokenizer():
+    """The sampler loads the dump's tokenizer from model_path (verl hf_tokenizer, tokenizer files only, no weights)
+    and decodes real 27B token ids: special tokens kept, each image's token run as one <image>."""
+    if not os.path.isfile(os.path.join(MODEL_27B, "tokenizer_config.json")):
+        pytest.skip(f"{MODEL_27B} not readable")
+    sampler = fx.make_sampler(rollout_data_dir="/nonexistent/rollout_data", model_path=MODEL_27B)
+    tok = sampler._get_tokenizer()
+    text = ("<|im_start|>user\n<|vision_start|>" + "<|image_pad|>" * 64 + "<|vision_end|>Where is the chair?"
+            "<|im_end|>\n<|im_start|>assistant\n")
+    ids = tok.encode(text, add_special_tokens=False)
+    assert ids.count(tok.convert_tokens_to_ids("<|image_pad|>")) == 64  # one 256 px frame (TEMPLATE_CHECK item 5)
+    out = rd.decode_rows(tok, [torch.tensor(ids)], padded=False)
+    assert out == ["<|im_start|>user\n<image>Where is the chair?<|im_end|>\n<|im_start|>assistant\n"]
+    answer = tok.encode("<action>move_forward|</action><|im_end|>\n", add_special_tokens=False)
+    assert rd.decode_rows(tok, [answer]) == ["<action>move_forward|</action><|im_end|>\n"]

@@ -14,7 +14,7 @@ T4 (in-memory TransferQueue): step s takes draw batch s-1 under colocate_async (
 resumed sampler takes the restored batch by its preserved tag; batch / tag errors raise.
 T5: failed groups under failure_policy raise and skip; the zero-advantage fallback.
 Also: the version-tag check (MF3), the strict factor lookup (MF2), the stuck warning (MF5), the filter switched off,
-and one sample() through a real TransferQueue (Ray local, 2 CPUs).
+and one sample() through a real TransferQueue (Ray local, 2 CPUs; only with Q38_TEST_REAL_TQ=1, see real_tq).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sampler_fixtures as fx  # noqa: E402
 
-from vagen.q38.sampler import VagenStepBatchSampler, group_kind, select_groups  # noqa: E402
+from vagen.q38.sampler import VagenStepBatchSampler, group_kind, select_groups, version_bounds_ok  # noqa: E402
 
 RUNS = [r for r in fx.GOLDEN_RUNS if os.path.exists(fx.golden_path(r))]
 EPS = 1e-6  # FI:237
@@ -388,6 +388,59 @@ def test_version_tags(monkeypatch):
     _finish_batch(fake3, b3, 1, (None, None), kinds=[MIXED] * 24)
     with pytest.raises(RuntimeError, match="min/max_global_steps"):
         fx.make_sampler(strict_version_check=False).sample(global_steps=1, partition_id="train", batch_size=24)
+    # colocate_async, a tag ahead of the weights ((s-1) - max = -1): a violation, strict raises
+    fake4 = fx.FakeTQ().install(monkeypatch)
+    b4 = fx.dispatch(fake4, draw_batch=4, global_steps=4, n_groups=24)
+    _finish_batch(fake4, b4, 5, (4, 5), kinds=[MIXED] * 24)
+    with pytest.raises(RuntimeError, match="outside the version bounds of colocate_async"):
+        fx.make_sampler().sample(global_steps=5, partition_id="train", batch_size=24)
+    fake4b = fx.FakeTQ().install(monkeypatch)
+    b4b = fx.dispatch(fake4b, draw_batch=4, global_steps=4, n_groups=24)
+    _finish_batch(fake4b, b4b, 5, (4, 5), kinds=[MIXED] * 24)
+    _batch, m4 = fx.make_sampler(strict_version_check=False).sample(global_steps=5, partition_id="train",
+                                                                    batch_size=24)
+    assert m4["vagen/async/version_violations"] == 12 * 8 and m4["vagen/async/version_lag_best_min"] == -1
+
+
+def _sync_step_with_versions(monkeypatch, s, versions, **kw):
+    fake = fx.FakeTQ().install(monkeypatch)
+    b = fx.dispatch(fake, draw_batch=s, global_steps=s, n_groups=24)
+    _finish_batch(fake, b, s, versions, kinds=[MIXED] * 24)
+    return fx.make_sampler(mode="sync", **kw).sample(global_steps=s, partition_id="train", batch_size=24)
+
+
+def test_version_tags_sync(monkeypatch):
+    """sync: the weights of step s are w_{s-1} for the whole draw batch (min = max = s-1); a lag of 1 (a weight
+    sync that did not happen) and a tag ahead of the weights are violations, unlike under colocate_async."""
+    _batch, m = _sync_step_with_versions(monkeypatch, 5, (4, 4))
+    assert m["vagen/async/version_violations"] == 0
+    assert m["vagen/async/version_lag_worst_max"] == 0 and m["vagen/async/version_lag_best_min"] == 0
+    assert m["vagen/async/version_spans_max"] == 1
+    # lag 1 (the tags of w_{s-2}: the update of step s-1 did not reach the rollout)
+    with pytest.raises(RuntimeError, match="outside the version bounds of sync"):
+        _sync_step_with_versions(monkeypatch, 5, (3, 3))
+    _batch, m1 = _sync_step_with_versions(monkeypatch, 5, (3, 3), strict_version_check=False)
+    assert m1["vagen/async/version_violations"] == 12 * 8 and m1["vagen/async/version_lag_worst_max"] == 1
+    # lag 1 on part of the episode only (span 2) is a violation under sync as well
+    with pytest.raises(RuntimeError, match="outside the version bounds of sync"):
+        _sync_step_with_versions(monkeypatch, 5, (3, 4))
+    # a tag ahead of the weights (lag < 0)
+    with pytest.raises(RuntimeError, match="outside the version bounds of sync"):
+        _sync_step_with_versions(monkeypatch, 5, (5, 5))
+    _batch, m2 = _sync_step_with_versions(monkeypatch, 5, (5, 5), strict_version_check=False)
+    assert m2["vagen/async/version_violations"] == 12 * 8 and m2["vagen/async/version_lag_best_min"] == -1
+
+
+@pytest.mark.parametrize("mode,lo,hi,ok", [
+    # sync, step 5: only min = max = 4
+    ("sync", 4, 4, True), ("sync", 3, 3, False), ("sync", 3, 4, False), ("sync", 5, 5, False), ("sync", 4, 5, False),
+    # colocate_async, step 5: 3 <= min <= max <= 4
+    ("colocate_async", 4, 4, True), ("colocate_async", 3, 4, True), ("colocate_async", 3, 3, True),
+    ("colocate_async", 2, 3, False), ("colocate_async", 2, 4, False), ("colocate_async", 4, 5, False),
+    ("colocate_async", 5, 5, False), ("colocate_async", 4, 3, False),
+])
+def test_version_bounds_ok(mode, lo, hi, ok):
+    assert version_bounds_ok(mode, 5, lo, hi) is ok
 
 
 def test_adv_scale_strict_lookup(monkeypatch):
@@ -511,10 +564,21 @@ def test_sample_reads_the_rollouts_tensordict_columns(monkeypatch):
 # ------------------------------------------------------------------------------------------------------------
 
 
+# The real-TransferQueue test needs a local Ray.  It is skipped unless Q38_TEST_REAL_TQ=1 (the switch of
+# test_agent_loop.py's T6): on the fujian login node (2026-11-18) a local start (num_cpus=2, no dashboard, 200 MB
+# object store) fails with "The current node timed out during startup" after up to ten minutes of waiting, so the
+# default run would spend them on every call.  Run it with Q38_TEST_REAL_TQ=1 on a node where Ray starts (a one-card
+# job); the 4B smoke S0/S1 covers the same path.
+REAL_TQ = os.environ.get("Q38_TEST_REAL_TQ", "") == "1"
+
+
 @pytest.fixture(scope="module")
 def real_tq():
     import signal
 
+    if not REAL_TQ:
+        pytest.skip("real TransferQueue: set Q38_TEST_REAL_TQ=1 on a node where a local Ray starts (not the fujian "
+                    "login node, 2026-11-18); covered by the 4B smoke S0/S1")
     ray = pytest.importorskip("ray")
     import transfer_queue as tq
     from omegaconf import OmegaConf

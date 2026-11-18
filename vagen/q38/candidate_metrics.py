@@ -121,17 +121,28 @@ def candidate_metrics(extra: Mapping[str, Sequence[Any]], returns: Sequence[floa
     return metrics
 
 
-# the agent loop's per-episode counters (extra_fields.vagen_stats, DESIGN_ASYNC 2.5.3 item 7), with the names a
-# counter may carry; the first name is the one the q38 agent loop is specified with
+# the agent loop's per-episode counters (extra_fields.vagen_stats, DESIGN_ASYNC 2.5.3 item 7; the q38 loop's key set is
+# vagen/q38/gym_agent_loop_v1.py VAGEN_STATS_KEYS), with the names a counter may carry; the first name is the q38
+# loop's
 _COUNTERS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("step_exceptions", ("step_exceptions",), "vagen/env/step_exceptions"),
     ("endoftext_stops", ("endoftext_stops", "endoftext_turns"), "vagen/gen/endoftext_stops"),
+    ("length_stops", ("length_stops",), "vagen/gen/length_stops"),
     ("turns_resumed", ("turns_resumed", "resumed_turns"), "vagen/gen/turns_resumed"),
 )
 _DURATIONS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("render_s",), "vagen/env/render_s"),
-    (("gen_s", "turn_gen_s"), "vagen/gen/turn_gen_s"),
+    (("turn_gen_s", "gen_s"), "vagen/gen/turn_gen_s"),
 )
+# vLLM preemptions of the episode's requests; -1 = not reported by the server (summed over the episodes reporting)
+_PREEMPTED = ("num_preempted", "vagen/gen/num_preempted")
+# the episode's termination reason (GL:480-490 order in the q38 loop); each known reason is always logged, so the
+# metric names do not change from step to step; an unknown reason is logged under its own name as well
+_TERMINATION = ("termination", "vagen/env/termination")
+TERMINATION_REASONS = ("success", "env_done", "env_error", "max_turns", "response_budget", "obs_overflow")
+# per-episode values the sampler does not aggregate (per-turn detail for offline analysis, or already in
+# reward_extra_info: env_turns is n_turns)
+IGNORED_STATS = ("turn_max_tokens", "turn_spans", "gen_turns", "env_turns")
 
 
 def _first(stats: Mapping[str, Any], names: Sequence[str]) -> Any:
@@ -144,10 +155,12 @@ def _first(stats: Mapping[str, Any], names: Sequence[str]) -> Any:
 def stats_metrics(stats: Sequence[Mapping[str, Any] | None]) -> dict[str, float | int]:
     """vagen/env/* and vagen/gen/* over the candidates' ``vagen_stats`` (one dict per episode, or None).
 
-    Counters are summed over the episodes (step_exceptions, endoftext_stops, turns_resumed); the per-turn durations
-    (render_s, gen_s: a list of seconds per episode) give p50 / p95 / max over all turns of all episodes
-    (vagen/env/render_s_{p50,p95,max}, vagen/gen/turn_gen_s_{p50,p95,max}).  A counter no episode carries is not
-    logged; ``vagen/env/episodes_with_stats`` counts the episodes that carried a stats dict."""
+    Counters are summed over the episodes (step_exceptions, endoftext_stops, length_stops, turns_resumed;
+    num_preempted over the episodes that report it, i.e. not -1); the per-turn durations (render_s, turn_gen_s: a
+    list of seconds per episode) give p50 / p95 / max over all turns of all episodes (vagen/env/render_s_{p50,p95,max},
+    vagen/gen/turn_gen_s_{p50,p95,max}); the termination reasons are counted (vagen/env/termination/<reason>, every
+    reason of TERMINATION_REASONS always).  A counter no episode carries is not logged;
+    ``vagen/env/episodes_with_stats`` counts the episodes that carried a stats dict."""
     present = [s for s in stats if isinstance(s, Mapping)]
     metrics: dict[str, float | int] = {"vagen/env/episodes_with_stats": len(present)}
     if not present:
@@ -157,6 +170,15 @@ def stats_metrics(stats: Sequence[Mapping[str, Any] | None]) -> dict[str, float 
         values = [v for v in values if v is not None]
         if values:
             metrics[key] = int(sum(int(v) for v in values))
+    preempted = [int(s[_PREEMPTED[0]]) for s in present if s.get(_PREEMPTED[0]) is not None]
+    reported = [v for v in preempted if v >= 0]
+    if reported:
+        metrics[_PREEMPTED[1]] = int(sum(reported))
+    # an episode that ended without a reason (the loop's default "") is counted as "unset"
+    reasons = [str(s[_TERMINATION[0]]) or "unset" for s in present if s.get(_TERMINATION[0]) is not None]
+    if reasons:
+        for reason in dict.fromkeys(TERMINATION_REASONS + tuple(reasons)):
+            metrics[f"{_TERMINATION[1]}/{reason}"] = sum(1 for r in reasons if r == reason)
     for names, key in _DURATIONS:
         turns: list[float] = []
         for s in present:

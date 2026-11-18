@@ -18,7 +18,13 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sampler_fixtures as fx  # noqa: E402
 
-from vagen.q38.candidate_metrics import TRANSITION_METRICS, candidate_metrics, columns, stats_metrics  # noqa: E402
+from vagen.q38.candidate_metrics import (  # noqa: E402
+    TERMINATION_REASONS,
+    TRANSITION_METRICS,
+    candidate_metrics,
+    columns,
+    stats_metrics,
+)
 
 FAMILIES = ("episode/", "transition/", "train/traj_success/")
 RUNS = [r for r in fx.GOLDEN_RUNS if os.path.exists(fx.golden_path(r))]
@@ -104,3 +110,44 @@ def test_stats_metrics():
     assert m["vagen/gen/turn_gen_s_p50"] == pytest.approx(2.0)
     assert m["vagen/gen/turn_gen_s_p95"] == pytest.approx(float(np.percentile([1.0, 2.0, 3.0], 95)))
     assert stats_metrics([None, None]) == {"vagen/env/episodes_with_stats": 0}
+    assert not any(k.startswith(("vagen/env/termination", "vagen/gen/num_preempted", "vagen/gen/length_stops"))
+                   for k in m)  # not carried, not logged
+
+
+def _q38_stats(termination: str, preempted: int, **kw) -> dict:
+    """One episode's vagen_stats as the q38 agent loop writes it (gym_agent_loop_v1.py vagen_stats)."""
+    stats = {"step_exceptions": 0, "render_s": [0.2, 0.3], "turn_gen_s": [1.5, 2.5], "turn_max_tokens": [384, 384],
+             "turn_spans": [[0, 10], [40, 52]], "endoftext_stops": 0, "length_stops": 0, "turns_resumed": 0,
+             "num_preempted": preempted, "gen_turns": 2, "env_turns": 2, "termination": termination}
+    stats.update(kw)
+    return stats
+
+
+def test_stats_metrics_of_the_q38_agent_loop():
+    stats = [_q38_stats("success", 0), _q38_stats("max_turns", 2, length_stops=1, turn_gen_s=[4.0]),
+             _q38_stats("success", -1, step_exceptions=1), _q38_stats("", -1), _q38_stats("odd_reason", 1)]
+    m = stats_metrics(stats)
+    assert m["vagen/gen/length_stops"] == 1 and m["vagen/env/step_exceptions"] == 1
+    assert m["vagen/gen/num_preempted"] == 3  # the -1 (not reported) episodes left out
+    assert m["vagen/gen/turn_gen_s_max"] == 4.0
+    assert m["vagen/env/termination/success"] == 2 and m["vagen/env/termination/max_turns"] == 1
+    assert m["vagen/env/termination/unset"] == 1 and m["vagen/env/termination/odd_reason"] == 1
+    for reason in TERMINATION_REASONS:  # every known reason always, so the names stay the same from step to step
+        assert f"vagen/env/termination/{reason}" in m
+    assert m["vagen/env/termination/obs_overflow"] == 0
+    assert all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in m.values())
+    assert "vagen/gen/num_preempted" not in stats_metrics([_q38_stats("success", -1)])
+
+
+def test_stats_keys_follow_the_agent_loop():
+    """Every key of the q38 agent loop's vagen_stats is aggregated or deliberately ignored (catches a rename)."""
+    try:
+        from vagen.q38.gym_agent_loop_v1 import VAGEN_STATS_KEYS
+    except Exception as e:  # noqa: BLE001 - the loop's imports (vLLM, verl agent loop) may be missing on a node
+        pytest.skip(f"vagen.q38.gym_agent_loop_v1 does not import here: {e!r}")
+    from vagen.q38 import candidate_metrics as cm
+
+    handled = {n for _c, names, _k in cm._COUNTERS for n in names} | {n for names, _k in cm._DURATIONS for n in names}
+    handled |= {cm._PREEMPTED[0], cm._TERMINATION[0]} | set(cm.IGNORED_STATS)
+    assert set(VAGEN_STATS_KEYS) <= handled, sorted(set(VAGEN_STATS_KEYS) - handled)
+    assert set(_q38_stats("success", 0)) == set(VAGEN_STATS_KEYS)

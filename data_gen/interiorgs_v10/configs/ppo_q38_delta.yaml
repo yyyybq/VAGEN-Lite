@@ -10,7 +10,7 @@
 # Keys the recipe relies on at their verl default, so not repeated here (vagen/q38/contract.py and
 # vagen/q38/tests/test_config.py check them in the complete config):
 #   actor: ppo_epochs 1, shuffle false, clip_ratio / clip_ratio_low / clip_ratio_high 0.2, clip_ratio_c 3.0,
-#     kl_loss_type low_var_kl, policy_loss.loss_mode vanilla, use_dynamic_bsz false;
+#     kl_loss_type low_var_kl, policy_loss.loss_mode vanilla, use_dynamic_bsz false, loss_scale_factor null;
 #     optim: weight_decay 0.01, lr_warmup_steps_ratio 0.0 and lr_warmup_steps -1 (no warm-up), zero_indexed_step true;
 #   rollout: top_p 1 (R3; Y8 0.92), top_k -1, calculate_log_probs true (R2; Y8 false), logprobs_mode
 #     processed_logprobs, free_cache_engine true (RolloutConfig.enable_sleep_mode true), scheduling_policy fcfs;
@@ -22,7 +22,8 @@
 #     max_actor_ckpt_to_keep / max_critic_ckpt_to_keep null (Y8 2: the V1 worker would delete the milestones' HF),
 #     rollout_data_dir null (the sampler writes the rollouts), test_freq -1, val_only false, logger [console, wandb],
 #     resume_mode auto, critic_warmup 0;
-#   async_training: absent (partial_rollout must not be false: LS:347).
+#   reward.reward_model.enable false (reward_model.enable null), skip.{rollout,rollout_tq,async_rollout}.enable false;
+#   async_training: absent (a section without partial_rollout: true counts as false at LS:347).
 # Left at the 8B values until the 27B smoke decides them (DESIGN_ASYNC 3.1, last row of "sampling and agent loop"):
 #   rollout tensor_model_parallel_size / gpu_memory_utilization / max_num_seqs / enforce_eager, the FSDP offloads.
 
