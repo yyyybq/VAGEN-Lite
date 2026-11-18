@@ -189,6 +189,7 @@ use_train_env() {
         /usr/lib64/libcuda.so.1 /usr/local/nvidia/lib64/libcuda.so.1; do
       if [[ -e ${cand} ]]; then
         ln -sfn "${cand}" "${link_dir}/libcuda.so"
+        ln -sfn "${cand}" "${link_dir}/libcuda.so.1"  # Triton links -l:libcuda.so.1 (triton/backends/nvidia/driver.py:16)
         break
       fi
     done
