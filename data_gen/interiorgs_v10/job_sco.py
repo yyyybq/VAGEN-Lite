@@ -104,7 +104,7 @@ def submit(run: Path, job_dir: str = "job") -> str:
     prefix = os.environ.get("VAGEN_LITE_JOB_PREFIX") or "interiorgs-v10"
     name = f"{prefix}-{prepared['mode_args'][0]}-{run.name}".replace("_", "-")[-60:]
     command = [SCO, "acp", "jobs", "create", "--workspace-name=aigc", f"--aec2-name={prepared.get('pool', POOL)}", f"--job-name={name}",
-               "--priority=HIGHEST", "--quota-type=reserved", f"--container-image-url={IMAGE}",
+               f"--priority={os.environ.get('VAGEN_LITE_JOB_PRIORITY') or 'HIGHEST'}", "--quota-type=reserved", f"--container-image-url={IMAGE}",
                f"--storage-mount={MOUNT}", "--training-framework=pytorch", "--worker-nodes=1",
                f"--worker-spec={prepared['spec']}", f"--command=bash {job}/launch.sh"]
     res = subprocess.run(command, capture_output=True, text=True)
