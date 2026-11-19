@@ -68,6 +68,10 @@ gets those chat-template arguments at every chat call (enable_thinking False) an
 (generation_config "vllm"), and its model.json records them (model_type_record).  Every other model type (the 8B main
 line's qwen3_vl, qwen2_5_vl, cambrian_qwen, a folder without a readable config.json): no switch, every call and
 model.json exactly as before.  The rules (greedy, history, 12 turns, the env) are the same for every model type.
+q38 (smoke Z3 of DESIGN_ASYNC 5.4): --gpu-memory-utilization sets vLLM's share of its card; the 27B model's 55.6 GB of
+bf16 weights do not fit in VllmPolicy's default 0.6 of an 80 GB card (48 GB), so its 2-card evaluation (vLLM alone on
+card 1) gives 0.9.  Without the option (every run before it, the 8B main line's): the LLM gets 0.6 and model.json has
+no such key, exactly as before; with it model.json records gpu_memory_utilization (vllm_memory_kwargs).
 """
 
 from __future__ import annotations
@@ -698,6 +702,22 @@ def model_type_record(model: str) -> Dict[str, Any]:
             "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES")}
 
 
+GPU_MEMORY_UTILIZATION_MAX = 0.95  # q38: --gpu-memory-utilization's upper bound (vLLM needs some of the card besides)
+
+
+def vllm_memory_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
+    """q38: what a run's --gpu-memory-utilization gives VllmPolicy and model.json: {} without the option (VllmPolicy's
+    default 0.6 and no model.json key, as before), else {"gpu_memory_utilization": value}; a value outside
+    (0, GPU_MEMORY_UTILIZATION_MAX] stops the run before anything is written."""
+    value = getattr(args, "gpu_memory_utilization", None)
+    if value is None:
+        return {}
+    value = float(value)
+    if not 0.0 < value <= GPU_MEMORY_UTILIZATION_MAX:
+        raise SystemExit(f"--gpu-memory-utilization {value}: must be above 0 and at most {GPU_MEMORY_UTILIZATION_MAX}")
+    return {"gpu_memory_utilization": value}
+
+
 class VllmPolicy:  # pragma: no cover - needs a GPU
     def __init__(self, model: str, gpu_memory_utilization: float = 0.6, max_model_len: int = 8192,
                  max_images: int = 1, temperature: float = 0.0, top_p: float = 1.0, entropy: bool = False) -> None:
@@ -809,6 +829,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     from vagen.envs.active_spatial.env import ActiveSpatialEnv
     from vagen.envs.active_spatial.env_config import ActiveSpatialEnvConfig
 
+    memory = vllm_memory_kwargs(args)  # q38: {} without --gpu-memory-utilization; checked before anything is written
     ev = Path(args.eval)
     out = ev / args.name
     out.mkdir(parents=True, exist_ok=True)
@@ -860,7 +881,8 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
     policy = VllmPolicy(args.model, max_model_len=16384 if args.history else 8192,
                         max_images=int(args.max_turns) if args.history else 1,
                         temperature=float(args.temperature) if sampled else 0.0,
-                        top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)))
+                        top_p=float(args.top_p) if sampled else 1.0, entropy=bool(getattr(args, "entropy", False)),
+                        **memory)
     if side and hasattr(policy, "llm") and not hasattr(policy.llm, "preprocess_chat"):
         raise SystemExit("--grounding-side needs vLLM's LLM.preprocess_chat (vLLM 0.11)")
     (out / "model.json").write_text(json.dumps(model_record(args, cfg, switches, sampled, probe_key,
@@ -895,7 +917,7 @@ def cmd_run(args: argparse.Namespace) -> None:  # pragma: no cover - needs a GPU
 def model_record(args: argparse.Namespace, cfg: Dict[str, Any], switches: Dict[str, Any], sampled: bool,
                  probe_key: Dict[str, Any], load_seconds: Optional[float]) -> Dict[str, Any]:
     """model.json of a run (the keys in this order; the probes' keys last; q38: the model-type switch's keys, only for a
-    model type with one, before them)."""
+    model type with one, and gpu_memory_utilization, only with --gpu-memory-utilization, before them)."""
     return {"name": args.name, "model": args.model, "version": VERSION,
             "prompt_format": cfg["prompt_format"], "greedy": not sampled,
             "samples": int(args.samples) if sampled else 1,
@@ -906,7 +928,7 @@ def model_record(args: argparse.Namespace, cfg: Dict[str, Any], switches: Dict[s
             "history": bool(args.history),
             "sft_text": bool(args.sft_text),
             "entropy": bool(getattr(args, "entropy", False)),
-            "load_seconds": load_seconds, **model_type_record(args.model), **probe_key}
+            "load_seconds": load_seconds, **model_type_record(args.model), **vllm_memory_kwargs(args), **probe_key}
 
 
 # critic probe: what a resumed folder's model.json may differ in (q38: and the job's cards, which only a model type with
@@ -1262,6 +1284,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "scale 3.3333333333333335; model.json env_switches); frames as PNG, each turn also records the "
                         "truth at its observation's pose, the unrounded reward and the prompt's token digest "
                         "(repr_probe.py); needs --history; default off")
+    r.add_argument("--gpu-memory-utilization", type=float, default=None,
+                   help="q38 (smoke Z3): vLLM's share of its card, above 0 and at most 0.95 (the 27B model alone on "
+                        "its card: 0.9); model.json records it.  Default: VllmPolicy's 0.6, model.json as before")
     t = sub.add_parser("table")
     t.add_argument("--eval", required=True)
     m = sub.add_parser("terminal", help="round 12 batch: end progress, conditions met at the end, collision rate")
