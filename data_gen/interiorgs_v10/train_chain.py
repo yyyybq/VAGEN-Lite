@@ -191,6 +191,19 @@ names the failed group (trainer_end_note).  Question 4, warnings only: a running
 max(stall_warn min_minutes, factor x its recent seconds per update) is listed in PROGRESS.md with the q38 sampler's
 own waiting warnings (stall_warning, plan rl "stall_warn"; false turns it off); nothing is stopped.
 
+q38, P1 decisions 7 and 8 (docs/q38/P1_REPORT.md section 6, the user's "其他的按你的推荐来" of 2026-11-20): two more
+stop rules of plan "rl"."guards", off unless given, that stop a run as the other guards do.  "host_mem_max_gb" (the
+recommended 1600) stops a run once one of its host-memory logs (logs/host_mem_rl-*.jsonl, vagen/q38/host_mem_log.py,
+one per trainer job; every q38 config has vagen.host_mem_log.interval_s 10) has recorded the machine's used memory,
+MemTotal - MemAvailable, above it (host_mem_reason; the running peak of each file's last sample, so a peak between two
+polls counts; not the cgroup's memory.current, which counts the page cache a checkpoint save leaves).  "gen_slow"
+({"factor": 3, "baseline": 10, "consecutive": 3, "min_s": 60}) stops a run whose q38 sampler's
+filter/step/gen_s_2step_mean is above max(factor x the median of its first "baseline" values, min_s) in each of its
+last "consecutive" values after those (gen_slow_reason); the first update of every trainer log (a fresh start's
+warm-up, a resumed trainer's batch restored from the checkpoint, about 0 s) is left out, and a resumed trainer's value
+of an update replaces the earlier attempt's, so a resume keeps the run's median (user, P2_PREP_REPORT question 1,
+2026-11-20: keep the median after a resume, min_s 60).
+
 A failed job or check stops the chain: the step is marked failed with the reason, the jobs are deleted (their
 logs stay in the run folders) and nothing further starts.  Finished steps are marked done, so ``run`` again
 continues after the last one.  Every minute the chain writes TR/progress.json and TR/PROGRESS.md (current
@@ -204,6 +217,7 @@ import datetime
 import json
 import os
 import re
+import statistics
 import subprocess
 import sys
 import time
@@ -236,6 +250,11 @@ STARTUP_DEFAULTS = {"retries": 2, "stall_minutes": 40}
 DEFAULT_EVAL_CARDS = 1  # q38: plan "eval_cards" (2 for the 27B model)
 # q38, question 4 (warnings only): plan rl "stall_warn" ({"min_minutes", "factor", "repeat_minutes"} or false)
 STALL_WARN_DEFAULTS = {"min_minutes": 60, "factor": 3.0, "repeat_minutes": 60}
+# q38, P1 decisions 7 and 8 (stop rules, plan rl guards "host_mem_max_gb" and "gen_slow", off unless given)
+HOST_MEM_LOGS = "host_mem_rl-*.jsonl"  # vagen/q38/host_mem_log.py log_path, one file per trainer job
+HOST_MEM_TAIL = 262_144  # bytes read from the end of each file (a sample line is about 2 KB)
+GEN_SLOW_KEY = "filter/step/gen_s_2step_mean"  # vagen/q38/sampler.py: the mean of this and the last step's wait
+GEN_SLOW_DEFAULTS = {"factor": 3.0, "baseline": 10, "consecutive": 3, "min_s": 60.0}
 RENDERER_WAIT_S = 6 * 3600  # renderer_when_trainer_runs: how long a trainer waits for its render service
 ORDER_GAP_S = 2  # renderer_after_trainer: seconds between the submissions it orders (sco's create time is to the second)
 # renderer_repack: minutes between looks at the pools, between two moves of one run's render service, and how long
@@ -493,6 +512,95 @@ def read_tail(path: Path, size: int = 2_000_000) -> str:
         f.seek(0, 2)
         f.seek(max(0, f.tell() - size))
         return f.read().decode(errors="ignore")
+
+
+def host_mem_peak(log_dir: Path, tail: int = HOST_MEM_TAIL) -> Optional[Tuple[float, str, str]]:
+    """q38, P1 decision 7: (GB, its UTC, the file) of the highest machine-wide used memory (MemTotal - MemAvailable)
+    any of a run's host-memory logs has recorded: each file's last complete sample carries the trainer job's running
+    peak (vagen/q38/host_mem_log.py HostMemLogger.peak); a sample without it counts with its own value.  A half-written
+    last line and the logger's error lines are skipped.  None without such a sample."""
+    best: Optional[Tuple[float, str, str]] = None
+    for path in sorted(Path(log_dir).glob(HOST_MEM_LOGS)):
+        try:
+            text = read_tail(path, tail)
+        except OSError:
+            continue
+        for line in reversed(text.splitlines()):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            peak = rec.get("peak") if isinstance(rec.get("peak"), dict) else {}
+            used, utc = peak.get("used_gb"), peak.get("used_utc")
+            if used is None:
+                used, utc = (rec.get("mem") or {}).get("used_gb"), rec.get("utc")
+            if used is None:
+                continue
+            if best is None or float(used) > best[0]:
+                best = (float(used), str(utc), path.name)
+            break
+    return best
+
+
+def host_mem_reason(log_dir: Path, guards: Dict[str, Any]) -> Optional[str]:
+    """q38, P1 decision 7 (plan rl guards "host_mem_max_gb", off unless given): a reason to stop the run once the
+    machine's used memory went above the line, or None."""
+    limit = guards.get("host_mem_max_gb")
+    if limit is None:
+        return None
+    peak = host_mem_peak(log_dir)
+    if peak is None or peak[0] <= float(limit):
+        return None
+    return (f"host memory used {peak[0]:.0f} GB > {float(limit):g} GB (MemTotal - MemAvailable, at {peak[1]}, "
+            f"{peak[2]})")
+
+
+def gen_wait_series(log_texts: Sequence[str]) -> List[Tuple[int, float]]:
+    """q38, P1 decision 8: [(update, filter/step/gen_s_2step_mean)] of a run's trainer logs (one text per trainer job,
+    in order), by update.  The first update of each log is left out (a fresh start's warm-up generation; a resumed
+    trainer's first update trains the batch restored from the checkpoint, its wait about 0 s), also the earlier
+    attempts' value of that update; a later log's value of an update replaces an earlier one's."""
+    values: Dict[int, float] = {}
+    for text in log_texts:
+        own: Dict[int, float] = {}
+        for line in text.splitlines():
+            m = re.search(r"step:(\d+) - (.*)", line)
+            if not m:
+                continue
+            value = dict(_METRIC.findall(m.group(2))).get(GEN_SLOW_KEY)
+            if value is not None:
+                own[int(m.group(1))] = float(value)
+        if not own:
+            continue
+        first = min(own)
+        values.pop(first, None)
+        values.update({s: v for s, v in own.items() if s != first})
+    return sorted(values.items())
+
+
+def gen_slow_reason(log_texts: Sequence[str], guards: Dict[str, Any]) -> Optional[str]:
+    """q38, P1 decision 8 (plan rl guards "gen_slow", off unless given; true = GEN_SLOW_DEFAULTS): a reason to stop the
+    run when each of the last "consecutive" values of gen_wait_series after the first "baseline" ones is above
+    max(factor x the median of those first ones, min_s), or None."""
+    opt = guards.get("gen_slow")
+    if not opt:
+        return None
+    s = {**GEN_SLOW_DEFAULTS, **(opt if isinstance(opt, dict) else {})}
+    n0, nc = int(s["baseline"]), int(s["consecutive"])
+    series = gen_wait_series(log_texts)
+    if n0 < 1 or nc < 1 or len(series) < n0 + nc:
+        return None
+    base = series[:n0]
+    median = statistics.median(v for _, v in base)
+    line = max(float(s["factor"]) * median, float(s["min_s"]))
+    tail = series[n0:][-nc:]
+    if not all(v > line for _, v in tail):
+        return None
+    return (f"generation wait {GEN_SLOW_KEY} above {line:.1f} s ({float(s['factor']):g} x the median {median:.1f} s "
+            f"of updates {base[0][0]}-{base[-1][0]}) in each of updates {tail[0][0]}-{tail[-1][0]} ("
+            + ", ".join(f"{v:.1f}" for _, v in tail) + ")")
 
 
 def block_stats(rollout_dir: Path, log_text: str = "", block: int = 25) -> Dict[str, Dict[str, Any]]:
@@ -1020,7 +1128,9 @@ class Chain:
         follow-up of 2026-11-03; optional, "p0_res" its resolution, default 256)} -- the evaluate step's jobs
         {"qa_<benchmark>__<name>": (out/<benchmark>, name, model, None, options, "qa")}, one single-card job a model
         and benchmark (data_gen.interiorgs_v10.qa_eval easi, or p0 for "p0", with the plan's model type);
-        out/<benchmark>/<name>/done.json marks one as done."""
+        out/<benchmark>/<name>/done.json marks one as done.  q38 (base zero-shot, 2026-11-20): "probe" (a probe file,
+        the matrix's P1 probe of 838 questions; optional, off unless given) adds one job a model, qa_eval probe
+        (vagen.q38.qa_probe), results out/probe/<name>; "probe_models" names its models (default: "models")."""
         qa = self.plan.get("qa_eval")
         if not qa:
             return {}
@@ -1031,13 +1141,14 @@ class Chain:
         names = list(qa.get("models") or (self.plan.get("eval") or {}).get("models") or {})
         easi_names = list(qa.get("easi_models") or names)  # 2026-11-03: the QA RL pilot names each kind's models
         p0_names = list(qa.get("p0_models") or names)
+        probe_names = list(qa.get("probe_models") or names) if qa.get("probe") else []  # q38
         stopped = set(self.state.get("guard_stops") or {})
 
         def reached(n: str) -> bool:  # a checkpoint a guard-stopped run never reached is not evaluated (evaluate)
             run, _, step = n.rpartition("_")
             return not (run in stopped and step.isdigit())
 
-        wanted = [n for n in dict.fromkeys(easi_names + p0_names) if n in models or reached(n)]
+        wanted = [n for n in dict.fromkeys(easi_names + p0_names + probe_names) if n in models or reached(n)]
         missing = [n for n in wanted if n not in models]
         if unknown or missing:
             raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
@@ -1051,6 +1162,10 @@ class Chain:
             jobs.update({f"qa_p0__{n}": (out / "p0", n, models[n][0], None,
                                          ["p0", "--selection", str(qa["p0"]), "--res", str(qa.get("p0_res", 256)),
                                           "--model-type", kind, *limit], "qa") for n in p0_names if n in models})
+        if qa.get("probe"):  # q38 (2026-11-20): the P1 probe, one single-card job a model
+            jobs.update({f"qa_probe__{n}": (out / "probe", n, models[n][0], None,
+                                            ["probe", "--probe", str(qa["probe"]), "--model-type", kind, *limit], "qa")
+                         for n in probe_names if n in models})
         return jobs
 
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
@@ -1873,7 +1988,11 @@ class Chain:
                 for name, run in list(active.items()):  # round 11: the stop conditions (plan rl.guards)
                     guards = run["rl"].get("guards")
                     logs = sorted((run["run_dir"] / "logs").glob("rl-*.log")) if guards else []
-                    reason = guard_reason("\n".join(p.read_text(errors="ignore") for p in logs), guards) if logs else None
+                    texts = [p.read_text(errors="ignore") for p in logs]
+                    # q38, P1 decisions 7 and 8 (host memory, generation wait): off unless the guards give them
+                    reason = ((host_mem_reason(run["run_dir"] / "logs", guards) if guards else None)
+                              or (guard_reason("\n".join(texts), guards) if logs else None)
+                              or (gen_slow_reason(texts, guards) if logs else None))
                     if reason:
                         (run["run_dir"] / "STOP_RENDERER").touch()
                         job_sco.delete(run["run_dir"], "job_rl")

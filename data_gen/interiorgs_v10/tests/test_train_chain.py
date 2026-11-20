@@ -2678,5 +2678,201 @@ class Q38ChainTest(unittest.TestCase):
                 self.assertNotIn("x", chain.state.get("guard_stops") or {})  # never a stop
 
 
+def _host_mem_line(utc, used, peak=None):
+    """One sample line as vagen/q38/host_mem_log.py writes it (the fields the guard reads, plus some others)."""
+    rec = {"utc": utc, "t": 1.0, "mem": {"MemTotal_gb": 2015.0, "used_gb": used, "Shmem_gb": 590.0},
+           "cgroup": {"current_gb": used + 300.0, "limit_gb": 1920.0}, "by_kind": {}, "worker_dict": [],
+           "top_other": []}
+    if peak is not None:
+        rec["peak"] = {"used_gb": peak[0], "used_utc": peak[1], "cgroup_gb": 1560.0}
+    return json.dumps(rec, separators=(",", ":")) + "\n"
+
+
+# the 27B smoke Z1's values of filter/step/gen_s_2step_mean (q38-smoke-27b-z1/logs, steps 1-5 and, resumed, 6-10)
+Z1_GEN = {1: 106.07, 2: 53.04, 3: 29.02, 4: 31.02, 5: 28.02, 6: 0.0016, 7: 33.02, 8: 47.04, 9: 17.02, 10: 31.03}
+
+
+def _gen_log(values):
+    return "".join(f"(TaskRunner pid=1) step:{s} - filter/step/wait_s:1.0 - {T.GEN_SLOW_KEY}:{v} - "
+                   f"actor/entropy:0.2 - timing_s/step:90.0\n" for s, v in values)
+
+
+class Q38GuardTest(unittest.TestCase):
+    """q38, P1 decisions 7 and 8: the host-memory and generation-wait stop rules (plan rl guards, off unless given)."""
+
+    def test_host_mem_peak(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = Path(tmp)
+            self.assertIsNone(T.host_mem_peak(logs))  # no log: nothing to read
+            # job A: its running peak 903 GB at a save, the last sample lower; job B: a half-written last line and an
+            # error line after the last complete sample
+            (logs / "host_mem_rl-20261119T190638Z.jsonl").write_text(
+                _host_mem_line("a1", 800.0, (800.0, "a1")) + _host_mem_line("a2", 903.0, (903.0, "a2"))
+                + _host_mem_line("a3", 641.0, (903.0, "a2")))
+            (logs / "host_mem_rl-20261119T195018Z.jsonl").write_text(
+                _host_mem_line("b1", 950.0, (950.0, "b1")) + json.dumps({"utc": "b2", "error": "OSError: x"}) + "\n"
+                + _host_mem_line("b3", 1700.0, (1700.0, "b3"))[:40])
+            self.assertEqual(T.host_mem_peak(logs), (950.0, "b1", "host_mem_rl-20261119T195018Z.jsonl"))
+            # a sample without the running peak counts with its own value
+            (logs / "host_mem_rl-20261120T000000Z.jsonl").write_text(_host_mem_line("c1", 1000.5))
+            self.assertEqual(T.host_mem_peak(logs), (1000.5, "c1", "host_mem_rl-20261120T000000Z.jsonl"))
+            # only the tail is read: the running peak of the last sample stands for the lines before it
+            big = logs / "host_mem_rl-20261121T000000Z.jsonl"
+            big.write_text(_host_mem_line("d0", 1900.0, (1900.0, "d0")) + "x" * 5000 + "\n"
+                           + _host_mem_line("d1", 700.0, (1650.0, "d0")))
+            self.assertEqual(T.host_mem_peak(logs, tail=1000)[:2], (1650.0, "d0"))
+
+    def test_host_mem_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = Path(tmp)
+            f = logs / "host_mem_rl-20261120T000000Z.jsonl"
+            self.assertIsNone(T.host_mem_reason(logs, {"host_mem_max_gb": 1600}))  # no log yet
+            f.write_text(_host_mem_line("u1", 1600.0, (1600.0, "u1")))
+            self.assertIsNone(T.host_mem_reason(logs, {"host_mem_max_gb": 1600}))  # at the line is not above it
+            f.write_text(f.read_text() + _host_mem_line("u2", 1612.4, (1612.4, "u2")))
+            self.assertEqual(T.host_mem_reason(logs, {"host_mem_max_gb": 1600}),
+                             "host memory used 1612 GB > 1600 GB (MemTotal - MemAvailable, at u2, "
+                             "host_mem_rl-20261120T000000Z.jsonl)")
+            self.assertIsNone(T.host_mem_reason(logs, {"kl_max": 0.2}))  # off unless given
+            # the cgroup's counter (page cache included) is not read: 1912 GB there, 900 GB used
+            f.write_text(_host_mem_line("v1", 900.0, (900.0, "v1")).replace('"current_gb":1200.0', '"current_gb":1912.0'))
+            self.assertIsNone(T.host_mem_reason(logs, {"host_mem_max_gb": 1600}))
+
+    def test_gen_wait_series(self):
+        a = _gen_log((s, Z1_GEN[s]) for s in range(1, 6))
+        b = _gen_log((s, Z1_GEN[s]) for s in range(6, 11))
+        # the first update of each trainer log is left out: step 1 (warm-up, 106 s) and step 6 (resumed, 0 s)
+        self.assertEqual(T.gen_wait_series([a, b]), [(s, Z1_GEN[s]) for s in (2, 3, 4, 5, 7, 8, 9, 10)])
+        self.assertEqual(T.gen_wait_series([a + b]), [(s, Z1_GEN[s]) for s in range(2, 11)])  # one log: one start
+        # a trainer resumed from update 4 after it had logged 5: its values of 5.. replace the first attempt's, and its
+        # first update (5) is left out with the first attempt's value of it
+        c = _gen_log(((5, 0.002), (6, 40.0), (7, 41.0)))
+        self.assertEqual(T.gen_wait_series([a, c]), [(2, 53.04), (3, 29.02), (4, 31.02), (6, 40.0), (7, 41.0)])
+        # numpy-style and missing values; lines without the key do not count as a log's first update
+        d = "step:1 - timing_s/step:400.0\nstep:2 - filter/step/gen_s_2step_mean:np.float64(12.5)\n" + _gen_log([(3, 9.0)])
+        self.assertEqual(T.gen_wait_series([d]), [(3, 9.0)])
+        self.assertEqual(T.gen_wait_series(["", "no metrics\n"]), [])
+
+    def test_gen_slow_reason(self):
+        guards = {"gen_slow": {"factor": 3, "baseline": 10, "consecutive": 3, "min_s": 0}}
+        # the run's baseline: updates 2-11 of one log (Z1's values, then 31 s), median 31.01 s, line 93.03 s
+        start = _gen_log([(s, Z1_GEN.get(s, 31.0)) for s in range(1, 12)])
+        base = sorted(Z1_GEN.get(s, 31.0) for s in range(2, 12))
+        self.assertAlmostEqual((base[4] + base[5]) / 2, 31.01)
+        self.assertIsNone(T.gen_slow_reason([start], guards))
+        slow2 = start + _gen_log([(12, 120.0), (13, 150.0)])
+        self.assertIsNone(T.gen_slow_reason([slow2], guards))  # two in a row: not yet
+        self.assertEqual(T.gen_slow_reason([slow2 + _gen_log([(14, 94.0)])], guards),
+                         "generation wait filter/step/gen_s_2step_mean above 93.0 s (3 x the median 31.0 s of updates "
+                         "2-11) in each of updates 12-14 (120.0, 150.0, 94.0)")
+        self.assertIsNone(T.gen_slow_reason([slow2 + _gen_log([(14, 93.0)])], guards))  # at the line is not above
+        self.assertIsNone(T.gen_slow_reason([slow2 + _gen_log([(14, 50.0), (15, 200.0)])], guards))  # reset
+        # values inside the baseline window never stop the run (they make the median)
+        early = _gen_log([(s, 10.0) for s in range(1, 9)] + [(s, 500.0) for s in (9, 10, 11)]
+                         + [(s, 10.0) for s in (12, 13, 14)])
+        self.assertIsNone(T.gen_slow_reason([early], guards))
+        self.assertIn("above 30.0 s (3 x the median 10.0 s",
+                      T.gen_slow_reason([early + _gen_log([(s, 31.0) for s in (15, 16, 17)])], guards))
+        # a resume keeps the run's median: its first update (0 s) is left out, the next ones are checked against 93 s
+        resumed = _gen_log([(12, 0.001), (13, 100.0), (14, 110.0)])
+        self.assertIsNone(T.gen_slow_reason([start, resumed], guards))
+        self.assertIn("updates 13-15", T.gen_slow_reason([start, resumed + _gen_log([(15, 99.0)])], guards))
+        # min_s: a floor under the line (a median near 0 s would otherwise stop on any wait)
+        fast = _gen_log([(s, 0.01) for s in range(1, 12)] + [(12, 5.0), (13, 6.0), (14, 7.0)])
+        self.assertIn("above 0.0 s", T.gen_slow_reason([fast], guards))
+        self.assertIsNone(T.gen_slow_reason([fast], {"gen_slow": {**guards["gen_slow"], "min_s": 60}}))
+        # the default floor is 60 s (user 2026-11-20); a run at Z1's 31 s median (line 93 s) is not affected by it
+        self.assertEqual(T.GEN_SLOW_DEFAULTS["min_s"], 60.0)
+        self.assertIsNone(T.gen_slow_reason([fast], {"gen_slow": {"factor": 3, "baseline": 10, "consecutive": 3}}))
+        self.assertIsNone(T.gen_slow_reason([fast], {"gen_slow": True}))
+        self.assertIn("above 60.0 s", T.gen_slow_reason([fast + _gen_log([(15, 61.0), (16, 62.0), (17, 63.0)])],
+                                                        {"gen_slow": True}))
+        # true = the defaults (3 x the median of 10, 3 in a row); off unless given
+        self.assertIsNotNone(T.gen_slow_reason([slow2 + _gen_log([(14, 94.0)])], {"gen_slow": True}))
+        self.assertIsNone(T.gen_slow_reason([slow2 + _gen_log([(14, 94.0)])], {"kl_max": 0.2}))
+        self.assertIsNone(T.gen_slow_reason([slow2 + _gen_log([(14, 94.0)])], {"gen_slow": False}))
+
+    def test_runs_stopped_by_the_q38_guards(self):
+        """In the chain: a run over the host-memory line and a run whose generation wait ran away are stopped as a
+        guard stops a run (its trainer deleted, its render service told to stop, the step does not fail); a run under
+        both lines goes on to its endpoint; the entropy guard reads the trainer's actor/entropy as before."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            guards = {"kl_max": 1.0, "entropy_max": 0.3, "entropy_window": 5, "host_mem_max_gb": 1600,
+                      "gen_slow": {"factor": 3, "baseline": 10, "consecutive": 3}}
+            chain = T.Chain({"tr": tmp, "sft_dir": str(root / "sft"), "endpoint": 100, "ppo_template": "/S0.yaml",
+                             "gs_root": "/ply", "sft_groups": {"formal": "sft_trajectories.jsonl"},
+                             "rl": {"save_freq": 50, "task_pool": "reserve", "rows": "/rl_rows.jsonl",
+                                    "guards": guards},
+                             "rl_runs": {"mem": {"reward_preset": "S0"}, "gen": {"reward_preset": "S0"},
+                                         "ok": {"reward_preset": "S0"}},
+                             "eval_sets": {"val": str(root / "val")}, "eval": {"every": 50}}, sleep=lambda s: None)
+            chain.state["steps"]["pick_sft"]["decision"] = {"best": "sft_formal_e9", "model": "/lf/e9",
+                                                            "select_by": "val", "scores": {"sft_formal_e9": 0.42}}
+            chain.sh = lambda args, **k: None
+            chain.rl_config()
+            polls = {"n": 0}
+
+            def prepare(run, gpus, args, job_dir="job", pool=None):
+                (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+            def submit(run, job_dir="job"):
+                (run / job_dir / "submission.json").write_text(json.dumps({"job_id": f"pt-{run.name}-{job_dir}"}))
+
+            def status(run, job_dir="job"):
+                if job_dir == "job_renderer":
+                    return {"state": "RUNNING", "finished": False}
+                logs = run / "logs"
+                logs.mkdir(exist_ok=True)
+                mem = logs / "host_mem_rl-20261120T000000Z.jsonl"
+                if run.name == "rl_run_ok":
+                    polls["n"] += 1
+                    (logs / "rl-20261120T000000Z-a.log").write_text(_gen_log([(s, 30.0) for s in range(1, 14)]))
+                    mem.write_text(_host_mem_line("x", 950.0, (1599.0, "x")))
+                    if polls["n"] > 3:
+                        for s in (50, 100):
+                            (run / "checkpoints" / f"global_step_{s}" / "actor" / "huggingface").mkdir(
+                                parents=True, exist_ok=True)
+                        return {"state": "SUCCEEDED", "finished": True}
+                elif run.name == "rl_run_mem":
+                    (logs / "rl-20261120T000000Z-a.log").write_text(_gen_log([(s, 30.0) for s in range(1, 6)]))
+                    mem.write_text(_host_mem_line("m1", 1650.0, (1650.0, "m1")))
+                else:
+                    (logs / "rl-20261120T000000Z-a.log").write_text(
+                        _gen_log([(s, 30.0) for s in range(1, 12)] + [(12, 100.0), (13, 120.0), (14, 140.0)]))
+                    mem.write_text(_host_mem_line("g1", 900.0, (900.0, "g1")))
+                return {"state": "RUNNING", "finished": False}
+
+            deleted = []
+
+            def delete(run, job_dir="job"):
+                deleted.append((run.name, job_dir))
+                receipt = run / job_dir / "submission.json"
+                if receipt.exists():
+                    receipt.replace(receipt.with_name("submission_deleted.json"))
+
+            with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status, delete=delete):
+                chain.rl()  # does not raise: mem and gen were stopped by a guard, ok reached the endpoint
+            stops = chain.state["guard_stops"]
+            self.assertEqual(sorted(stops), ["gen", "mem"])
+            self.assertTrue(stops["mem"]["reason"].startswith("host memory used 1650 GB > 1600 GB"))
+            self.assertTrue(stops["gen"]["reason"].startswith("generation wait filter/step/gen_s_2step_mean above 90.0"))
+            for name in ("mem", "gen"):
+                self.assertIn((f"rl_run_{name}", "job_rl"), deleted)
+                self.assertTrue((root / f"rl_run_{name}" / "STOP_RENDERER").exists())
+            self.assertIn("**RL mem 被自动停止**", T.render_markdown(chain.state))
+            # the trainer's actor/entropy (q38: T 0.8, the kept episodes' tokens) is what the entropy guard reads;
+            # verl's own value, renamed actor/entropy_v1, and actor/entropy_loss are not
+            line = lambda s, e: (f"step:{s} - actor/entropy_v1:0.9 - actor/entropy_loss:0.9 - "  # noqa: E731
+                                 f"actor/entropy:{e} - {T.GEN_SLOW_KEY}:30.0\n")
+            self.assertIsNone(T.guard_reason("".join(line(s, 0.25) for s in range(1, 8)), guards))
+            self.assertIn("entropy above 0.3 in each of updates 3-7",
+                          T.guard_reason("".join(line(s, 0.25 if s < 3 else 0.31) for s in range(1, 8)), guards))
+
+
 if __name__ == "__main__":
     unittest.main()
