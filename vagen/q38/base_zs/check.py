@@ -107,10 +107,11 @@ def qa(checks, record):
     if s:
         meta = s.get("meta") or {}
         ref = load(REF_8B_P0).get("meta") or {}
-        checks["p0: 5,590 questions, the 8B's request count, qwen3_5 thinking off, 0.9"] = (
+        checks["p0: 5,590 questions, the 8B's request count, qwen3_5 thinking off, eager, 0.9"] = (
             meta.get("questions") == 5590 and meta.get("requests") == ref.get("requests", 20082)
             and meta.get("model") == MODEL and meta.get("chat_template_kwargs") == {"enable_thinking": False}
-            and meta.get("llm_kwargs") == {"generation_config": "vllm"} and meta.get("gpu_memory_utilization") == GPU)
+            and meta.get("llm_kwargs") == {"generation_config": "vllm", "enforce_eager": True}
+            and meta.get("gpu_memory_utilization") == GPU)
         preds = load(out / "predictions.jsonl", True)
         checks["p0: every request answered, no thinking text"] = (
             len(preds) == meta.get("requests") and all("reply" in p for p in preds)

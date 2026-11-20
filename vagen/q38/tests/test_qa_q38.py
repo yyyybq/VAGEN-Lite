@@ -6,7 +6,8 @@ fakes:
 
 - data_gen/interiorgs_qa/evaluate.py (P0 in-domain QA): the LLM(...) arguments, the chat-template call, the video
   input (with metadata) and the sampling parameters; for qwen3_5 enable_thinking False, generation_config "vllm",
-  the video metadata and --gpu-memory-utilization;
+  the video metadata and --gpu-memory-utilization; enforce_eager (2026-11-20: vLLM 0.28's CUDA-graph check refused
+  the 27B hybrid model, max_num_seqs 1024 > 307 Mamba cache blocks), and no max_num_seqs;
 - data_gen/interiorgs_v10/qa_eval.py: the easi and p0 commands and environments; the new probe command;
 - scripts/easi_eval.py: the EASI runner's command (qwen3_5: lmms-eval's qwen3_vl class with enable_thinking=False);
 - vagen/q38/qa_probe.py (the q38 copy of eval/diagnostics/qa_probe.py): the run path's vLLM calls against the
@@ -163,6 +164,15 @@ class EvaluateP0(unittest.TestCase):
                 m = _model_dir(root, t)
                 self.assertEqual(self._calls(self.new, m), self._calls(self.old, m, kw=False), t)
 
+    def test_other_types_no_eager(self):
+        """The eager switch is the q38 type's only (the 8B P0 ran with CUDA graphs, vLLM 0.11, 2026-11-03)."""
+        with tempfile.TemporaryDirectory() as root:
+            for t in ("qwen3_vl", "qwen2_5_vl", None):
+                llm = [c[1] for c in self._calls(self.new, _model_dir(root, t)) if c[0] == "LLM"][0]
+                self.assertEqual(sorted(llm), ["gpu_memory_utilization", "limit_mm_per_prompt", "max_model_len",
+                                               "model", "seed"], t)
+                self.assertEqual(self.new.q38_record(t or "", None), {}, t)
+
     def test_qwen3_5(self):
         with tempfile.TemporaryDirectory() as root:
             m = _model_dir(root, "qwen3_5")
@@ -170,6 +180,8 @@ class EvaluateP0(unittest.TestCase):
             llm = [c[1] for c in calls if c[0] == "LLM"][0]
             self.assertEqual(llm["gpu_memory_utilization"], 0.9)
             self.assertEqual(llm["generation_config"], "vllm")
+            self.assertIs(llm["enforce_eager"], True)  # 2026-11-20: CUDA graphs refused (Mamba cache blocks)
+            self.assertNotIn("max_num_seqs", llm)  # vLLM's default, as every other evaluator of the line
             chats = [c[1] for c in calls if c[0] == "apply_chat_template"]
             self.assertEqual(len(chats), 2)
             self.assertTrue(all(c["enable_thinking"] is False for c in chats))
@@ -185,6 +197,7 @@ class EvaluateP0(unittest.TestCase):
         self.assertEqual(self.new.q38_record("", None), {})
         r = self.new.q38_record("qwen3_5", 0.9)
         self.assertEqual(r["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertEqual(r["llm_kwargs"], {"generation_config": "vllm", "enforce_eager": True})
         self.assertEqual(r["gpu_memory_utilization"], 0.9)
 
 

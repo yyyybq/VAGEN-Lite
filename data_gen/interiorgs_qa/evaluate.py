@@ -17,10 +17,12 @@ q38 (the Qwen3.8-27B rerun line, base zero-shot, 2026-11-20): a model whose conf
 (Qwen3.5 / Qwen3.8; vLLM 0.28 builds its multimodal processor from Qwen3-VL's) gets its videos with the same metadata
 as Qwen3-VL, its chat template called with enable_thinking False (the template thinks unless told not to, and 512
 tokens of thinking would leave no answer) and vLLM's own sampling defaults (generation_config "vllm"), as
-data_gen/interiorgs_v10/evaluation.py does for it (MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS there); its
-summary.json meta records them.  --gpu-memory-utilization (default: 0.85 as before) gives vLLM a larger share of
-the card for the 27B model.  Every other model type runs exactly as before (vagen/q38/tests/test_qa_q38.py compares
-the calls with a264ae46's).
+data_gen/interiorgs_v10/evaluation.py does for it (MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS there), and
+vLLM in eager mode (enforce_eager, as evaluation.py's VllmPolicy and vagen/q38/qa_probe.py build their LLM: with
+CUDA graphs vLLM 0.28 refuses the hybrid model when max_num_seqs, 1024 by default, is above its Mamba cache blocks,
+307 at 0.9 -- the P0 job of 2026-11-20 failed so three times); its summary.json meta records them.
+--gpu-memory-utilization (default: 0.85 as before) gives vLLM a larger share of the card for the 27B model.  Every
+other model type runs exactly as before (vagen/q38/tests/test_qa_q38.py compares the calls with a264ae46's).
 
 Scoring (scoring.py): every question in the original benchmark format ("orig", evaluation group 1) and in the
 held-out wording ("h1", evaluation group 2). MMSI-Bench and 3DSRBench questions are also asked once per rotation
@@ -53,10 +55,13 @@ CIRCULAR = ("MMSI-Bench", "3DSRBench")
 CHANCE_OVERRIDE = {"M6": 0.5}
 # q38: the model types whose vLLM video processor needs the metadata (qwen3_5: vLLM 0.28's Qwen3.5 model reuses
 # Qwen3-VL's multimodal processor, vllm/model_executor/models/qwen3_5.py), and the q38 type's chat-template and vLLM
-# arguments (as data_gen/interiorgs_v10/evaluation.py MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS)
+# arguments (as data_gen/interiorgs_v10/evaluation.py MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS; enforce_eager as
+# its VllmPolicy and vagen/q38/qa_probe.py give every model: vLLM 0.28's CUDA-graph check needs max_num_seqs (1024)
+# <= the hybrid model's Mamba cache blocks (307 for the 27B at 0.9), vllm/config/compilation.py
+# resolve_cudagraph_mode_and_sizes; eager mode captures no graphs, so the check does not apply)
 VIDEO_METADATA_TYPES = ("qwen3_vl", "qwen3_5")
 MODEL_TYPE_CHAT_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"enable_thinking": False}}
-MODEL_TYPE_LLM_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"generation_config": "vllm"}}
+MODEL_TYPE_LLM_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"generation_config": "vllm", "enforce_eager": True}}
 DEFAULT_GPU_MEMORY_UTILIZATION = 0.85
 
 
