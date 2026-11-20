@@ -781,6 +781,13 @@ Q38_PACKAGE_ESTIMATORS = ("grpo",)  # phase 1 (turn_credit, turn_gae and the cri
 # be refused at start-up, so rl-config refuses it (and --candidates / --target-groups / --rollouts off p1) up front
 Q38_PACKAGES = ("p1",)
 Q38_PACKAGE_SHAPE = ("candidates", "target_groups", "rollouts")
+# P1 decision 4 (docs/q38/VERL_PATCHES.md P1): the recipe's HF export in bf16 with A_log in fp32
+# (actor.checkpoint.hf_dtype / hf_fp32_modules) was checked on readings for Qwen3.5 only (runs/q38-bf16check,
+# PASS_IDENTICAL on the 27B), so rl-config keeps the two keys for these start-model types and drops them for any other
+# type or an unreadable config.json (e.g. the 8B parity runs on qwen3_vl), whose export then stays fp32 as before
+Q38_HF_EXPORT_TYPES = ("qwen3_5",)
+Q38_HF_EXPORT_KEYS = ("hf_dtype", "hf_fp32_modules")  # under actor_rollout_ref.actor.checkpoint
+Q38_HF_EXPORT = {"hf_dtype": "bfloat16", "hf_fp32_module": "A_log"}  # what a qwen3_5 config must hold
 
 
 def _q38_flat(node: Any, prefix: str = "") -> Dict[str, Any]:
@@ -891,6 +898,7 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
         if found:
             parent, last = key.rsplit(".", 1)
             _q38_get(cfg, parent)[1].pop(last)
+    hf_export = q38_hf_export(cfg)
     # the learning-rate horizon is the recipe's (V1 fixes it at start-up, TB:792-813); the 8B template must agree
     horizon = int(cfg["trainer"]["total_training_steps"])
     if trainer8.get("total_training_steps") != horizon:
@@ -933,8 +941,31 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
               "trainer_mode": cfg["trainer"]["v1"]["trainer_mode"], "lr_horizon": horizon,
               "steps_per_epoch": steps_per_epoch, "total_epochs": cfg["trainer"]["total_epochs"],
               "ga_8b": cfg["vagen"]["ga_8b"], "removed": [k for k in Q38_REMOVED],
-              "host_mem_log_interval_s": interval, "run_keys_over_recipe": overrides or None}
+              "host_mem_log_interval_s": interval, "hf_export": hf_export, "run_keys_over_recipe": overrides or None}
     return cfg, report
+
+
+def q38_hf_export(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """P1 decision 4, gated by the start model's type (Q38_HF_EXPORT_TYPES): a qwen3_5 config keeps the recipe's
+    actor.checkpoint.hf_dtype bfloat16 with A_log in hf_fp32_modules (refused otherwise); any other type (or a model
+    folder without a readable config.json) gets both keys removed, so its config is the one without them.  Changes
+    ``cfg`` in place; returns what the report records."""
+    from vagen.models.model_types import of_checkpoint
+
+    model_type = of_checkpoint(str(cfg["actor_rollout_ref"]["model"]["path"]))
+    ckpt = cfg["actor_rollout_ref"]["actor"].get("checkpoint") or {}
+    if model_type not in Q38_HF_EXPORT_TYPES:
+        dropped = [k for k in Q38_HF_EXPORT_KEYS if k in ckpt]
+        for k in dropped:
+            ckpt.pop(k)
+        return {"model_type": model_type, "hf_dtype": None, "dropped": dropped}
+    dtype, fp32_modules = ckpt.get("hf_dtype"), ckpt.get("hf_fp32_modules")
+    if dtype != Q38_HF_EXPORT["hf_dtype"] or not isinstance(fp32_modules, list) \
+            or sorted(map(str, fp32_modules)) != [Q38_HF_EXPORT["hf_fp32_module"]]:
+        raise SystemExit(f"a {model_type} q38 config saves its HF export in bf16 with A_log in fp32 (P1 decision 4): "
+                         f"actor_rollout_ref.actor.checkpoint.hf_dtype {Q38_HF_EXPORT['hf_dtype']} and hf_fp32_modules "
+                         f"[{Q38_HF_EXPORT['hf_fp32_module']}], not {dtype!r} / {fp32_modules!r}")
+    return {"model_type": model_type, "hf_dtype": dtype, "hf_fp32_modules": list(fp32_modules)}
 
 
 def cmd_rl_config(args: argparse.Namespace) -> None:

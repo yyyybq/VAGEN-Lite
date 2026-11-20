@@ -51,6 +51,13 @@ actor_rollout_ref:
     checkpoint:
       # Y8:72-76: with hf_model, or rank 0 still writes a config and the chain evaluates an empty folder (PEAR m7)
       save_contents: [model, hf_model, optimizer, extra]
+      # P1 decision 4 (docs/q38/VERL_PATCHES.md P1; verl q38 f95280ef): the HF export in bf16 with the GDN A_log kept
+      # in fp32, as vLLM holds them (27B: 109.4 -> 54.7 GB a milestone).  On after runs/q38-bf16check gave
+      # PASS_IDENTICAL (2026-11-20: the bf16 copy of the 27B step-10 export, 64 of 64 trajectories identical to the
+      # fp32 one).  Model-type gated: rl-config keeps the two keys only for a qwen3_5 start model and drops them for
+      # any other type (training_prep.Q38_HF_EXPORT_TYPES), whose export stays as it was
+      hf_dtype: bfloat16
+      hf_fp32_modules: [A_log]
   ref:
     log_prob_micro_batch_size_per_gpu: 1  # Y8:114
     fsdp_config:

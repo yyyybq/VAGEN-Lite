@@ -142,6 +142,15 @@ NEW = [
     ("trainer.checkpoint_callback_class", "stack:new", "retention callback (DESIGN 2.5.5)"),
     ("trainer.ckpt_keep_latest", "stack:new", "the 8B's 2 latest kept, now the callback's"),
 ]
+# keys only the config of a qwen3_5 start model has (P1 decision 4, model-type gated: training_prep.q38_hf_export);
+# the RUNS above start from the 8B qwen3_vl model, whose config has neither (test_hf_export_*)
+HF_EXPORT_NEW = [
+    ("actor_rollout_ref.actor.checkpoint.hf_dtype", "stack:d4",
+     "bfloat16: HF export in bf16 (VERL_PATCHES.md P1; runs/q38-bf16check PASS_IDENTICAL), qwen3_5 only"),
+    ("actor_rollout_ref.actor.checkpoint.hf_fp32_modules", "stack:d4",
+     "[A_log]: the GDN A_log stays fp32 in the export, as vLLM holds it; qwen3_5 only"),
+]
+HF_KEYS = ("hf_dtype", "hf_fp32_modules")
 # 8B key -> q38 key holding the same value
 RENAMED_VALUES = {"actor_rollout_ref.actor.grad_clip": "actor_rollout_ref.actor.optim.clip_grad",
                   "actor_rollout_ref.rollout.update_weights_bucket_megabytes":
@@ -340,6 +349,9 @@ def test_recipe_keys(configs, name):
     assert cfg["trainer"]["total_epochs"] == math.ceil(700 / 449) + 1 == 3
     assert cfg["trainer"]["total_epochs"] * 449 >= ENDPOINT
     assert report["q38"]["run_keys_over_recipe"] is None  # the 8B runs override nothing of the recipe
+    # P1 decision 4 is gated to qwen3_5: the 8B (qwen3_vl) start model keeps its fp32 export, both keys dropped
+    assert not set(HF_KEYS) & set(cfg["actor_rollout_ref"]["actor"]["checkpoint"])
+    assert report["q38"]["hf_export"] == {"model_type": "qwen3_vl", "hf_dtype": None, "dropped": list(HF_KEYS)}
     # the group filter of the run
     if name == "v4":
         assert cfg["filter"] == {"name": "keep_by_return_std", "enable": True,
@@ -514,3 +526,113 @@ def test_refused_8b_configs(configs, work):
     cfg, report = tp.q38_ppo_config(over, 10798)
     assert cfg["actor_rollout_ref"]["actor"]["optim"]["lr"] == 1e-6
     assert report["run_keys_over_recipe"] == {"actor_rollout_ref.actor.optim.lr": {"recipe": 2e-6, "run": 1e-6}}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# P1 decision 4: the HF export in bf16 with A_log in fp32, gated by the start model's type
+
+
+def _model_dir(root: Path, model_type: str) -> str:
+    """A model folder holding only a config.json of the given type (q38_hf_export reads nothing else)."""
+    d = root / f"model_{model_type}"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "config.json").write_text('{"model_type": "%s"}' % model_type)
+    return str(d)
+
+
+def _with_model(y8: dict, path: str) -> dict:
+    out = copy.deepcopy(y8)
+    out["actor_rollout_ref"]["model"]["path"] = path
+    return out
+
+
+def _delta_variant(work: Path, name: str, edit) -> Path:
+    delta = yaml.safe_load(tp.Q38_DELTA.read_text())
+    edit(delta["actor_rollout_ref"]["actor"]["checkpoint"])
+    path = work / f"delta_{name}.yaml"
+    path.write_text(yaml.safe_dump(delta, sort_keys=False))
+    return path
+
+
+def test_hf_export_in_the_recipe():
+    """The recipe file holds the two keys with the values the readings checked."""
+    ckpt = yaml.safe_load(tp.Q38_DELTA.read_text())["actor_rollout_ref"]["actor"]["checkpoint"]
+    assert ckpt["hf_dtype"] == "bfloat16" and ckpt["hf_fp32_modules"] == ["A_log"]
+    default = yaml.safe_load(tp.Q38_VERL_DEFAULT.read_text())["actor_rollout_ref"]["actor"]["checkpoint"]
+    assert not set(HF_KEYS) & set(default)  # verl's generated default leaves them to the dataclass (null / [A_log])
+
+
+def test_hf_export_qwen3_5(configs, work):
+    """A qwen3_5 start model: the config has hf_dtype bfloat16 and hf_fp32_modules [A_log], registered; apart from
+    them (and the model path) it is the 8B-model config key for key; the contract passes it."""
+    from omegaconf import OmegaConf
+
+    from vagen.q38 import contract
+
+    c8 = configs["v4"]
+    y8 = c8["y8"]
+    model35 = _model_dir(work, "qwen3_5")
+    cfg, report = tp.q38_ppo_config(_with_model(y8, model35), 10798)
+    ckpt = cfg["actor_rollout_ref"]["actor"]["checkpoint"]
+    assert ckpt["hf_dtype"] == "bfloat16" and ckpt["hf_fp32_modules"] == ["A_log"]
+    assert report["hf_export"] == {"model_type": "qwen3_5", "hf_dtype": "bfloat16", "hf_fp32_modules": ["A_log"]}
+    # every difference to the 8B config is registered: the q38 register plus the two decision-4 keys
+    subs = c8["subs8"] + [(model35, MODEL8)]
+    _, q, dropped, changed, new = _differences({"y8": y8, "subs8": c8["subs8"], "cfg": cfg, "subs": subs})
+    problems = [k for k in dropped if not _match(k, DROPPED)] + [k for k in changed if not _match(k, CHANGED)]
+    problems += [k for k in new if not _match(k, NEW + HF_EXPORT_NEW)]
+    assert not problems, problems
+    assert {p for p, _, _ in HF_EXPORT_NEW} <= set(new)
+    # the same 8B config with the qwen3_vl model: equal but for the two keys and the model path
+    cfg8, _ = tp.q38_ppo_config(copy.deepcopy(y8), 10798)
+    f35, f8 = _flat(cfg), _flat(cfg8)
+    differ = sorted(k for k in set(f35) | set(f8) if f35.get(k, "<absent>") != f8.get(k, "<absent>"))
+    assert differ == ["actor_rollout_ref.actor.checkpoint.hf_dtype", "actor_rollout_ref.actor.checkpoint.hf_fp32_modules",
+                      "actor_rollout_ref.model.path"], differ
+    assert contract.evaluate(OmegaConf.create(cfg), ENDPOINT)["passed"]
+    # without the keys the contract refuses a qwen3_5 config
+    bare = copy.deepcopy(cfg)
+    for k in HF_KEYS:
+        bare["actor_rollout_ref"]["actor"]["checkpoint"].pop(k)
+    violations = contract.evaluate(OmegaConf.create(bare), ENDPOINT)["violations"]
+    assert {"actor_rollout_ref.actor.checkpoint.hf_dtype", "actor_rollout_ref.actor.checkpoint.hf_fp32_modules"} \
+        <= set(violations), violations
+
+
+@pytest.mark.parametrize("name,edit", [
+    ("fp16", lambda c: c.update(hf_dtype="float16")),
+    ("no_dtype", lambda c: c.pop("hf_dtype")),
+    ("no_alog", lambda c: c.update(hf_fp32_modules=[])),
+    ("no_modules", lambda c: c.pop("hf_fp32_modules")),
+    ("visual_too", lambda c: c.update(hf_fp32_modules=["A_log", "visual"])),
+])
+def test_hf_export_refused_for_qwen3_5(configs, work, name, edit):
+    """A recipe that would not save the qwen3_5 export as checked is refused by rl-config; for another model type the
+    same recipe goes through with both keys dropped (the gate)."""
+    y8 = configs["v4"]["y8"]
+    path = _delta_variant(work, name, edit)
+    with pytest.raises(SystemExit, match="P1 decision 4"):
+        tp.q38_ppo_config(_with_model(y8, _model_dir(work, "qwen3_5")), 10798, delta_path=path)
+    cfg, report = tp.q38_ppo_config(copy.deepcopy(y8), 10798, delta_path=path)
+    assert not set(HF_KEYS) & set(cfg["actor_rollout_ref"]["actor"]["checkpoint"])
+    assert report["hf_export"]["model_type"] == "qwen3_vl" and report["hf_export"]["hf_dtype"] is None
+
+
+@pytest.mark.parametrize("name", sorted(RUNS))
+@pytest.mark.parametrize("model_type", ["qwen3_vl", "qwen2_5_vl", None])
+def test_hf_export_other_types_byte_identical(configs, work, name, model_type):
+    """The gate leaves every non-qwen3_5 config byte-identical to the one of the recipe without the two keys (the
+    recipe before decision 4): the 8B runs' own model (qwen3_vl), another type, and a folder without config.json."""
+    y8 = configs[name]["y8"]
+    if model_type is None:
+        y8 = _with_model(y8, str(work / "no_config_json"))
+    elif model_type != "qwen3_vl":
+        y8 = _with_model(y8, _model_dir(work, model_type))
+    before = _delta_variant(work, "without_hf", lambda c: [c.pop(k) for k in HF_KEYS])
+    cfg_new, rep_new = tp.q38_ppo_config(copy.deepcopy(y8), 10798)
+    cfg_old, rep_old = tp.q38_ppo_config(copy.deepcopy(y8), 10798, delta_path=before)
+    assert yaml.safe_dump(cfg_new, sort_keys=False) == yaml.safe_dump(cfg_old, sort_keys=False)
+    assert rep_new["hf_export"] == {"model_type": model_type, "hf_dtype": None, "dropped": list(HF_KEYS)}
+    assert rep_old["hf_export"] == {"model_type": model_type, "hf_dtype": None, "dropped": []}
+    same = ("delta", "delta_sha256", "hf_export")
+    assert {k: v for k, v in rep_new.items() if k not in same} == {k: v for k, v in rep_old.items() if k not in same}

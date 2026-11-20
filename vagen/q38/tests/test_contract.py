@@ -12,6 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
+import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -440,6 +441,109 @@ class ExpectedTest(Base):
     def test_constants(self):
         self.assertEqual((C.MAX_TURNS, C.RESPONSE_LENGTH_PER_TURN, C.LIMIT_IMAGES), (12, 384, 13))
         self.assertEqual(12 * 8 // 12, C.KL_8B_FACTOR)
+
+
+HF_RULES = (A + ".checkpoint.hf_dtype", A + ".checkpoint.hf_fp32_modules")
+P8_CONFIGS = [Path("/mnt/umm/users/yinbaiqiao/q38/runs") / r / "rl" / "ppo.yaml" for r in ("q38-p8-2", "q38-p8-3")]
+
+
+class HFExportTest(Base):
+    """P1 decision 4 (HF export in bf16, A_log fp32), gated by the start model's config.json model_type."""
+
+    def model_dir(self, model_type):
+        d = Path(self.tmp.name) / f"model_{model_type}"
+        d.mkdir(exist_ok=True)
+        (d / "config.json").write_text(json.dumps({"model_type": model_type}))
+        return str(d)
+
+    def without_hf_keys(self, cfg):
+        for key in HF_RULES:
+            delete(cfg, key)
+        return cfg
+
+    def evaluate_without_the_hf_rules(self, cfg, endpoint=300):
+        """The contract as it was before decision 4 (its three rules left out)."""
+        rules = [r for r in C.EXPECTED if r.key not in HF_RULES]
+        with unittest.mock.patch.object(C, "EXPECTED", rules):
+            return self.evaluate(cfg, endpoint)
+
+    @unittest.skipUnless(C.model_type(OmegaConf.load(SMOKE)) == "qwen3_5", "the 4B smoke model is not on this machine")
+    def test_qwen3_5_needs_the_export(self):
+        cfg = self.base()
+        report = self.evaluate(cfg)
+        self.assertTrue(report["passed"], C.summary(report))
+        self.assertEqual(report["derived"]["model_type"], "qwen3_5")
+        applied = {(e["key"], e["applies"]) for e in report["expected"] if e["key"] in HF_RULES}
+        self.assertEqual(applied, {(HF_RULES[0], True), (HF_RULES[1], True), (HF_RULES[0], False)})
+        cases = [(HF_RULES[0], None), (HF_RULES[0], "float16"), (HF_RULES[0], "float32"), (HF_RULES[1], []),
+                 (HF_RULES[1], ["A_log", "visual"]), (HF_RULES[1], ["visual"]), (HF_RULES[1], "A_log")]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                cfg = self.base()
+                put(cfg, key, value)
+                self.assertViolates(cfg, key)
+        for key in HF_RULES:
+            with self.subTest(missing=key):
+                cfg = self.base()
+                delete(cfg, key)
+                self.assertViolates(cfg, key)
+
+    def test_other_types_keep_the_export(self):
+        """Another model type must not set hf_dtype (null or absent pass); hf_fp32_modules alone is not checked."""
+        for model_type in ("qwen3_vl", "qwen2_5_vl"):
+            with self.subTest(model_type=model_type):
+                cfg = self.without_hf_keys(self.base())
+                put(cfg, "actor_rollout_ref.model.path", self.model_dir(model_type))
+                report = self.evaluate(cfg)
+                self.assertTrue(report["passed"], C.summary(report))
+                self.assertEqual(report["derived"]["model_type"], model_type)
+                applied = {(e["key"], e["applies"]) for e in report["expected"] if e["key"] in HF_RULES}
+                self.assertEqual(applied, {(HF_RULES[0], False), (HF_RULES[1], False), (HF_RULES[0], True)})
+                put(cfg, HF_RULES[0], None)
+                self.assertTrue(self.evaluate(cfg)["passed"])
+                put(cfg, HF_RULES[0], "bfloat16")
+                self.assertViolates(cfg, HF_RULES[0])
+
+    def test_unreadable_model_type_gets_no_rule(self):
+        cfg = self.without_hf_keys(self.base())
+        put(cfg, "actor_rollout_ref.model.path", str(Path(self.tmp.name) / "no_such_model"))
+        report = self.evaluate(cfg)
+        self.assertTrue(report["passed"], C.summary(report))
+        self.assertIsNone(report["derived"]["model_type"])
+        self.assertFalse(any(e["applies"] for e in report["expected"] if e["key"] in HF_RULES))
+
+    def test_non_qwen3_5_verdicts_unchanged(self):
+        """For a config without the two keys and a model of another (or no readable) type, the contract's verdict and
+        violations are those of the contract without the decision-4 rules, for the base config and for every
+        FORBIDDEN and EXPECTED case of this file."""
+        variants = [[]] + list(FORBIDDEN_CASES.values()) + [[(k, v)] for k, v in [
+            (A + ".optim.lr", 1e-6), (R + ".temperature", 1.0), ("trainer.save_freq", 10), ("vagen.profile", "q5"),
+            (A + ".checkpoint.save_contents", ["model", "optimizer", "extra"])]]
+        paths = [self.model_dir("qwen3_vl"), self.model_dir("qwen2_5_vl"), str(Path(self.tmp.name) / "no_such_model")]
+        for path in paths:
+            for changes in variants:
+                with self.subTest(model=Path(path).name, changes=changes):
+                    cfg = self.without_hf_keys(self.base())
+                    put(cfg, "actor_rollout_ref.model.path", path)
+                    for key, value in changes:
+                        put(cfg, key, value)
+                    new, old = self.evaluate(cfg), self.evaluate_without_the_hf_rules(cfg)
+                    self.assertEqual((new["passed"], new["violations"], new["overridden"], new["problems"]),
+                                     (old["passed"], old["violations"], old["overridden"], old["problems"]))
+
+    @unittest.skipUnless(all(p.is_file() for p in P8_CONFIGS), "the P8 parity configs are not on this machine")
+    def test_p8_parity_configs_unchanged(self):
+        """The prepared 8B (qwen3_vl) parity configs: same verdict with and without the decision-4 rules."""
+        for path, endpoint in zip(P8_CONFIGS, (C.PARITY_ENDPOINT, 10)):
+            with self.subTest(config=str(path)):
+                cfg = OmegaConf.load(path)
+                new = C.evaluate(cfg, endpoint, check_paths=True)
+                rules = [r for r in C.EXPECTED if r.key not in HF_RULES]
+                with unittest.mock.patch.object(C, "EXPECTED", rules):
+                    old = C.evaluate(cfg, endpoint, check_paths=True)
+                self.assertEqual(new["derived"]["model_type"], "qwen3_vl")
+                self.assertEqual((new["passed"], new["violations"]), (old["passed"], old["violations"]))
+                self.assertFalse(any(e["key"] in HF_RULES and e["applies"] and not e["ok"] for e in new["expected"]))
 
 
 class CheckFilesTest(Base):

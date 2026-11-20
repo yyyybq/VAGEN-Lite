@@ -5,8 +5,8 @@
 - EXPECTED: config key -> expected value, each with its source (the 8B run, the asynchronous recipe, or a decision of
   the user).  Rules can depend on the run's profile: ``vagen.trainer_impl`` (``vagen``, or ``stock`` for smoke S0),
   ``vagen.parity_mode`` (the 8B parity run, DESIGN 5.3), ``vagen.profile`` (``main``, the default: the main line
-  and the matrix; ``q5_pt``: the update shape of the Q5 PT arm, DESIGN 3.1 last rows and smoke S4) and whether a
-  group filter is on;
+  and the matrix; ``q5_pt``: the update shape of the Q5 PT arm, DESIGN 3.1 last rows and smoke S4), whether a
+  group filter is on, and (the HF export dtype, P1 decision 4) the start model's config.json model_type;
 - FORBIDDEN: combinations that silently change the recipe (the table at the end of DESIGN 3.1);
 - PATHS: the inputs a run reads (env yamls, the model, the filter's task rows) must exist;
 - endpoint rules: the endpoint must lie within the learning-rate horizon and within total_epochs x steps_per_epoch
@@ -58,6 +58,12 @@ AGENT_LOOP_CONFIG = "vagen/q38/configs/agent_loop_v1.yaml"
 AGENT_NAME = "gym_agent"
 CHECKPOINT_CALLBACK = "vagen.q38.ckpt_callback.VagenCheckpointCallback"
 SAVE_CONTENTS = ["model", "hf_model", "optimizer", "extra"]
+# P1 decision 4 (docs/q38/VERL_PATCHES.md P1): the HF export in bf16 with the GDN A_log in fp32, for the model types
+# checked on readings (runs/q38-bf16check, PASS_IDENTICAL on the 27B); the start model's config.json model_type
+# decides (data_gen/interiorgs_v10/training_prep.py Q38_HF_EXPORT_TYPES writes the keys for the same types)
+HF_EXPORT_TYPES = ("qwen3_5",)
+HF_DTYPE = "bfloat16"
+HF_FP32_MODULES = ["A_log"]
 # the 8B parity run (DESIGN 5.3, P8-2): train-side T=1 through rollout.temperature, the agent loop samples like 8B
 PARITY_SAMPLING = {"temperature": 0.8, "top_p": 0.92}
 # P8-2 compares its first 20 updates with the first 20 of the three 8B V4 seeds (DESIGN 5.3)
@@ -212,6 +218,28 @@ def _grpo(cfg) -> bool:
 
 def _always(cfg) -> bool:
     return True
+
+
+def model_type(cfg: DictConfig) -> Optional[str]:
+    """The config.json model_type of actor_rollout_ref.model.path (None when it cannot be read)."""
+    from vagen.models.model_types import of_checkpoint
+
+    try:
+        path = get(cfg, "actor_rollout_ref.model.path")
+    except Exception:  # an interpolation that does not resolve
+        return None
+    return of_checkpoint(os.path.expanduser(path)) if isinstance(path, str) and path else None
+
+
+def _hf_export_type(cfg) -> bool:
+    """A start model of a type whose bf16 HF export was checked on readings (P1 decision 4)."""
+    return model_type(cfg) in HF_EXPORT_TYPES
+
+
+def _other_known_type(cfg) -> bool:
+    """A start model of another (readable) type: its HF export stays as it was."""
+    found = model_type(cfg)
+    return found is not None and found not in HF_EXPORT_TYPES
 
 
 def _colocated(cfg) -> bool:
@@ -604,6 +632,15 @@ EXPECTED: List[Expect] = [
            "trainer_impl stock (smoke S0)", _stock),
     Expect(A + ".checkpoint.save_contents", SameSet(SAVE_CONTENTS),
            Y8 + ":72-76 (without hf_model the chain would evaluate an empty folder, PEAR m7)"),
+    # P1 decision 4: verl q38 f95280ef, fsdp_checkpoint_manager.py cast_hf_state_dict; on after runs/q38-bf16check
+    # PASS_IDENTICAL (2026-11-20).  Model-type gated (the start model's config.json): qwen3_5 must have it, another
+    # readable type must not set hf_dtype (its export stays fp32 as before); an unreadable config.json gets neither rule
+    Expect(A + ".checkpoint.hf_dtype", HF_DTYPE,
+           "P1 decision 4: HF export in bf16 (VERL_PATCHES.md P1; runs/q38-bf16check PASS_IDENTICAL)", _hf_export_type),
+    Expect(A + ".checkpoint.hf_fp32_modules", SameSet(HF_FP32_MODULES),
+           "P1 decision 4: vLLM keeps the GDN A_log in fp32 (qwen_gdn_linear_attn.py:446-454)", _hf_export_type),
+    Expect(A + ".checkpoint.hf_dtype", AbsentOr(None),
+           "P1 decision 4 is checked on qwen3_5 only: other model types keep the export as it was", _other_known_type),
     Expect("trainer.test_freq", -1, Y8 + ":517"),
     Expect("trainer.val_before_train", False, Y8 + ":515"),
     Expect("trainer.val_only", False, Y8 + ":516"),
@@ -967,7 +1004,8 @@ def evaluate(cfg: DictConfig, endpoint: Optional[int] = None, *, check_paths: bo
         "profile": {"trainer_impl": trainer_impl(cfg), "parity_mode": parity_mode(cfg),
                     "trainer_mode": jsonable(get(cfg, "trainer.v1.trainer_mode")), "filter": filter_on(cfg),
                     "shape": profile(cfg)},
-        "derived": {"run_dir": None if ctx.run_dir is None else str(ctx.run_dir), "dataset_size": ctx.dataset_size,
+        "derived": {"run_dir": None if ctx.run_dir is None else str(ctx.run_dir), "model_type": model_type(cfg),
+                    "dataset_size": ctx.dataset_size,
                     "steps_per_epoch": ctx.steps_per_epoch, "env_specs": ctx.env_specs, "errors": ctx.errors},
         "passed": not violations and not problems,
         "violations": violations,
