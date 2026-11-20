@@ -1,4 +1,4 @@
 [submodule "verl"]
 	path = verl
-	url = https://github.com/yyyybq/verl.git
-	branch = vagen-lite
+	url = /mnt/umm/users/yinbaiqiao/q38/git/verl.git
+	branch = q38

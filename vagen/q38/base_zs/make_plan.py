@@ -94,7 +94,7 @@ def write_set(top: Path, name: str, lines, source: Dict) -> None:
 
 def base_plan(tr: Path, commit: str) -> dict:
     return {"tr": str(tr), "sft_dir": str(tr / "sft_unused"), "commit": commit, "eval_only": True,
-            "model_type": "qwen3_5", "model": str(MODEL), "job_prefix": "q38-bz", "pool": "auto",
+            "model_type": "qwen3_5", "model": str(MODEL), "job_prefix": "q38-bz", "pool": "zoetrope",
             "eval_cards": 2, "max_eval_jobs": 8, "retries": 2, "suspended_grace_min": 10}
 
 
