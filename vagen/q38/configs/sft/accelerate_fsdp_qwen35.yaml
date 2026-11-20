@@ -1,0 +1,30 @@
+# q38: accelerate + FSDP1 for LLaMA-Factory main's full fine-tuning of Qwen3.8-27B (model_type qwen3_5), the 8B
+# model_matrix/sft/accelerate_fsdp_qwen3vl.yaml with Qwen3.5's classes (SFT_OPTIONS.md 2.3; Qwen3.5 has no deepstack
+# mergers).  Wrap units must hold one dtype: LLaMA-Factory upcasts trainable weights to fp32 and leaves the frozen
+# vision encoder (visual.pos_embed / patch_embed / blocks, LF's composite model "qwen3_5") in bf16; the merger
+# (projector) trains.  So every vision block, the patch embedding, the patch merger and each embedding (the frozen
+# vision position embedding; the token embedding) get units of their own, every decoder layer (full attention or
+# gated delta net) one unit, and the root unit holds only trainable fp32 weights (final norm, lm_head).
+# vagen.q38.sft.check_lf_qwen35 fsdp checks the classes and the one-dtype rule on a weightless model.
+compute_environment: LOCAL_MACHINE
+distributed_type: FSDP
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+machine_rank: 0
+main_training_function: main
+rdzv_backend: static
+same_network: true
+use_cpu: false
+fsdp_config:
+  fsdp_version: 1
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer,Qwen3_5VisionBlock,Qwen3_5VisionPatchEmbed,Qwen3_5VisionPatchMerger,Embedding
+  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_forward_prefetch: false
+  fsdp_state_dict_type: FULL_STATE_DICT
+  fsdp_offload_params: false
+  fsdp_sync_module_states: true
+  fsdp_use_orig_params: true
+  fsdp_cpu_ram_efficient_loading: true
