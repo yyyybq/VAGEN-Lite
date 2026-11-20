@@ -1137,7 +1137,10 @@ class Chain:
         qwen3_vl class (one process, device_map "auto") spreads the model over them; the inputs and the decoding are
         unchanged (the 27B model's SITE video, 32 frames of up to 2560x1920 as 153,600 visual tokens, OOMed on one
         card).  A benchmark with more cards has a seventh element, its cards: (..., options, "qa", cards); every other
-        job is as before."""
+        job is as before.  q38 (2026-11-20; off unless given; EXPLORATORY, the user's OK for the 27B base model):
+        "probe_variants" {VARIANT: {"max_tokens": N}} (probe_variants) adds, beside the main probe, one job a probe
+        model "qa_<VARIANT>__<name>" -- the main probe's arguments and --max-tokens N (qa_eval probe, qa_probe run),
+        one card, results out/<VARIANT>/<name>, so a variant never writes to or mixes into out/probe."""
         qa = self.plan.get("qa_eval")
         if not qa:
             return {}
@@ -1160,6 +1163,7 @@ class Chain:
         if unknown or missing:
             raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
         cards = self.qa_cards(benchmarks)  # q38: {benchmark: cards > 1}; empty without plan qa_eval "cards"
+        variants = self.probe_variants()  # q38: {variant: {"max_tokens": N}}; empty without qa_eval "probe_variants"
         kind = str(self.plan.get("model_type") or "qwen2_5_vl")
         out = Path(qa["out"])
         limit = ["--limit", str(qa["limit"])] if qa.get("limit") else []
@@ -1178,7 +1182,37 @@ class Chain:
             jobs.update({f"qa_probe__{n}": (out / "probe", n, models[n][0], None,
                                             ["probe", "--probe", str(qa["probe"]), "--model-type", kind, *limit], "qa")
                          for n in probe_names if n in models})
+        for v, spec in variants.items():  # q38: the exploratory probe variants, each in its own folder out/<variant>
+            jobs.update({f"qa_{v}__{n}": (out / v, n, models[n][0], None,
+                                          ["probe", "--probe", str(qa["probe"]), "--model-type", kind, *limit,
+                                           "--max-tokens", str(spec["max_tokens"])], "qa")
+                         for n in probe_names if n in models})
         return jobs
+
+    PROBE_VARIANT_MAX_TOKENS = 3072  # q38: a variant's budget at most (the probe's vLLM max_model_len is 4096)
+
+    def probe_variants(self) -> Dict[str, Dict[str, int]]:
+        """q38 (2026-11-20): plan "qa_eval" "probe_variants" {VARIANT: {"max_tokens": N}}, exploratory variants of the
+        P1 probe (needs qa_eval "probe").  VARIANT an identifier starting with "probe" other than "probe" (its jobs'
+        folder and name; never the main probe's, an EASI benchmark's or p0's); the value only "max_tokens", an int in
+        1..PROBE_VARIANT_MAX_TOKENS.  Empty without the key (the QA jobs as before)."""
+        qa = self.plan.get("qa_eval") or {}
+        given = qa.get("probe_variants")
+        if given is None or given == {}:
+            return {}
+        if not isinstance(given, dict):
+            raise ChainError(f"qa_eval probe_variants must be {{variant: {{\"max_tokens\": N}}}}, not {given!r}")
+        if not qa.get("probe"):
+            raise ChainError("qa_eval probe_variants needs qa_eval probe (the probe file)")
+        top = self.PROBE_VARIANT_MAX_TOKENS
+        bad = {k: v for k, v in given.items()
+               if not (isinstance(k, str) and k.isidentifier() and k.startswith("probe") and k != "probe")
+               or not (isinstance(v, dict) and set(v) == {"max_tokens"} and isinstance(v["max_tokens"], int)
+                       and not isinstance(v["max_tokens"], bool) and 1 <= v["max_tokens"] <= top)}
+        if bad:
+            raise ChainError(f"qa_eval probe_variants: {bad} -- each key an identifier starting with \"probe\" (not "
+                             f"\"probe\" itself), each value {{\"max_tokens\": an int in 1..{top}}}")
+        return {k: {"max_tokens": int(v["max_tokens"])} for k, v in given.items()}
 
     def qa_cards(self, benchmarks: Sequence[str]) -> Dict[str, int]:
         """q38 (2026-11-20): plan "qa_eval" "cards" {EASI benchmark: cards}, the benchmarks given more than one card

@@ -47,6 +47,11 @@ job the training chain gave N cards (plan qa_eval "cards"): EASI's lmms-eval run
 "auto", spreads the model's layers over them -- the inputs, the model's settings and the decoding stay the same;
 PYTORCH_CUDA_ALLOC_CONF expandable_segments:True (unless set) against the fragmentation the one-card OOM reported
 (7 GiB reserved but unallocated).  done.json records the cards (vagen/q38/tests/test_qa_cards.py).
+
+q38 (2026-11-20, an EXPLORATORY probe variant the user approved for the 27B base model): probe --max-tokens N (default:
+not passed on, qa_probe's 256, everything as before) hands N to qa_probe run --max-tokens; done.json records
+"max_tokens" only when it was given.  The training chain passes it only for plan qa_eval "probe_variants", whose jobs
+write to their own folder (OUT/<variant>, not OUT/probe; vagen/q38/tests/test_train_chain_probe.py).
 """
 
 from __future__ import annotations
@@ -172,15 +177,19 @@ def probe(a: argparse.Namespace) -> int:
            "--model", f"{a.name}={a.model}"]
     if a.model_type == "qwen3_5":
         cmd += ["--gpu-memory-utilization", Q38_GPU_MEMORY_UTILIZATION]
+    if a.max_tokens is not None:  # q38: the exploratory variant only (plan qa_eval "probe_variants")
+        cmd += ["--max-tokens", str(a.max_tokens)]
     print("$", " ".join(cmd), flush=True)
     rc = subprocess.run(cmd, cwd=WORKTREE, env=env).returncode
     result = own / f"{a.name}.json"
     if rc != 0 or not result.is_file():
         return rc or 1
     res = json.loads(result.read_text())
-    (own / "done.json").write_text(json.dumps({"benchmark": "probe", "model": a.model, "model_type": a.model_type,
-                                               "probe": str(src), "limit": a.limit,
-                                               "accuracy": (res.get("all") or {}).get("accuracy")}) + "\n")
+    done = {"benchmark": "probe", "model": a.model, "model_type": a.model_type, "probe": str(src), "limit": a.limit,
+            "accuracy": (res.get("all") or {}).get("accuracy")}
+    if a.max_tokens is not None:  # q38: only a variant records it (without it done.json is as before)
+        done["max_tokens"] = a.max_tokens
+    (own / "done.json").write_text(json.dumps(done) + "\n")
     return 0
 
 
@@ -210,6 +219,9 @@ def main() -> int:
     r.add_argument("--probe", required=True, help="the probe questions (p1_probe.jsonl)")
     r.add_argument("--model-type", default="qwen3_vl", choices=MODEL_TYPES)
     r.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
+    r.add_argument("--max-tokens", type=int, default=None,
+                   help="q38: the exploratory variant's new-token budget, passed to qa_probe run (default: not "
+                        "passed, qa_probe's 256; done.json records it only when given)")
     a = ap.parse_args()
     return {"easi": easi, "p0": p0, "probe": probe}[a.cmd](a)
 

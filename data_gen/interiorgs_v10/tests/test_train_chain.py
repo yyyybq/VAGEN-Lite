@@ -2701,6 +2701,42 @@ class Q38ChainTest(unittest.TestCase):
                 with self.assertRaises(T.ChainError, msg=bad):
                     T.Chain({**plan, "qa_eval": {**plan["qa_eval"], "cards": bad}}, sleep=lambda s: None).qa_jobs(models)
 
+    def test_qa_eval_probe_variants(self):
+        """q38 (2026-11-20, exploratory): plan "qa_eval" "probe_variants" {"probe1024": {"max_tokens": 1024}} adds one
+        one-card job a probe model, qa_probe1024__<name>, the main probe's arguments and --max-tokens 1024, results
+        out/probe1024/<name>; every other job -- and every job of a plan without the key -- is as before (the 17c6894a
+        comparison is vagen/q38/tests/test_train_chain_probe.py)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "base").mkdir()
+            (root / "base" / "config.json").write_text("{}")
+            models = {"q38base": (str(root / "base"), None, [])}
+            plan = {"tr": tmp, "sft_dir": tmp, "eval_only": True, "model_type": "qwen3_5", "eval_cards": 2,
+                    "eval": {"models": {"q38base": {"model": str(root / "base")}}},
+                    "qa_eval": {"out": str(root / "qa"), "easi": [], "p0": str(root / "sel.jsonl"),
+                                "probe": str(root / "p1.jsonl"), "cards": {}}}
+            want = {"qa_p0__q38base": (root / "qa" / "p0", "q38base", str(root / "base"), None,
+                                       ["p0", "--selection", str(root / "sel.jsonl"), "--res", "256",
+                                        "--model-type", "qwen3_5"], "qa"),
+                    "qa_probe__q38base": (root / "qa" / "probe", "q38base", str(root / "base"), None,
+                                          ["probe", "--probe", str(root / "p1.jsonl"), "--model-type", "qwen3_5"], "qa")}
+            self.assertEqual(T.Chain(plan, sleep=lambda s: None).qa_jobs(models), want)
+            self.assertEqual(T.Chain(plan, sleep=lambda s: None).probe_variants(), {})
+            var = {**plan, "qa_eval": {**plan["qa_eval"], "probe_variants": {"probe1024": {"max_tokens": 1024}}}}
+            got = T.Chain(var, sleep=lambda s: None).qa_jobs(models)
+            self.assertEqual(got, {**want, "qa_probe1024__q38base": (
+                root / "qa" / "probe1024", "q38base", str(root / "base"), None,
+                ["probe", "--probe", str(root / "p1.jsonl"), "--model-type", "qwen3_5", "--max-tokens", "1024"], "qa")})
+            for bad in ({"probe": {"max_tokens": 1024}}, {"p1024": {"max_tokens": 1024}},
+                        {"probe1024": {"max_tokens": 4096}}, {"probe1024": {"max_tokens": True}},
+                        {"probe1024": {"max_tokens": 1024, "x": 1}}, ["probe1024"]):
+                with self.assertRaises(T.ChainError, msg=bad):
+                    T.Chain({**var, "qa_eval": {**var["qa_eval"], "probe_variants": bad}},
+                            sleep=lambda s: None).qa_jobs(models)
+            with self.assertRaises(T.ChainError):  # needs the main probe
+                T.Chain({**var, "qa_eval": {k: v for k, v in var["qa_eval"].items() if k != "probe"}},
+                        sleep=lambda s: None).qa_jobs(models)
+
     def test_trainer_end_note(self):
         failed = ("(TaskRunner pid=9) RuntimeError: q38 sampler: agent loop raised in 1 prompt group(s): "
                   "u1a2 (draw batch 6); failure_policy=raise. The root exception is logged above\n")

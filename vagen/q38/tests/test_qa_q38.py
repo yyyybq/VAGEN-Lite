@@ -45,6 +45,24 @@ def _git_source(path: str):
         return None
 
 
+BEFORE_MAX_TOKENS = "17c6894a"  # the q38 branch's HEAD before probe --max-tokens (the exploratory probe variant)
+
+
+def _before_max_tokens(path: str, package: str = ""):
+    """``path`` at BEFORE_MAX_TOKENS as a module, from this tree's git or Q38_BEFORE_GIT (another checkout of the
+    branch); None when neither has the commit."""
+    for repo in (REPO, os.environ.get("Q38_BEFORE_GIT")):
+        if not repo:
+            continue
+        try:
+            src = subprocess.run(["git", "-C", str(repo), "show", f"{BEFORE_MAX_TOKENS}:{path}"], capture_output=True,
+                                 text=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        return _module_from_source(src, f"_before_mt_{path.replace('/', '_')[:-3]}", REPO / path, package)
+    return None
+
+
 def _module_from_source(src: str, name: str, file: Path, package: str = ""):
     mod = types.ModuleType(name)
     mod.__file__ = str(file)
@@ -286,6 +304,60 @@ class QaEval(unittest.TestCase):
             self.assertEqual(rc, 1)  # no n.json written: not done
             self.assertFalse((out / "n" / "done.json").exists())
 
+    def _probe_full(self, mod, argv, out: Path):
+        """qa_eval probe with qa_probe faked: (rc, [(command, folder, full environment)], done.json text)."""
+        seen = []
+
+        def fake_run(cmd, cwd=None, env=None):
+            seen.append((list(cmd), cwd, dict(env or {})))
+            (out / "m" / "m.json").write_text(json.dumps({"all": {"accuracy": 0.5}}))
+            return types.SimpleNamespace(returncode=0)
+
+        with mock.patch.object(mod.subprocess, "run", side_effect=fake_run), mock.patch.object(sys, "argv", argv), \
+                mock.patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0"}):
+            rc = mod.main()
+        done = out / "m" / "done.json"
+        return rc, seen, done.read_text() if done.is_file() else None
+
+    def test_probe_without_max_tokens_unchanged(self):
+        """q38 (2026-11-20): probe without --max-tokens -- the same command, folder, environment and done.json bytes as
+        17c6894a's qa_eval."""
+        import shutil
+
+        old = _before_max_tokens("data_gen/interiorgs_v10/qa_eval.py")
+        if old is None:
+            self.skipTest(f"git or {BEFORE_MAX_TOKENS} not available (set Q38_BEFORE_GIT)")
+        with tempfile.TemporaryDirectory() as d:
+            probe = Path(d) / "probe.jsonl"
+            probe.write_text("".join(json.dumps({"sample_id": f"s{i}"}) + "\n" for i in range(5)))
+            out = Path(d) / "probe_out"
+            for kind in ("qwen3_5", "qwen3_vl"):
+                for extra in ([], ["--limit", "3"]):
+                    argv = ["qa_eval", "probe", "--name", "m", "--model", d, "--out", str(out), "--probe", str(probe),
+                            "--model-type", kind, *extra]
+                    got = []
+                    for mod in (self.new, old):
+                        shutil.rmtree(out, ignore_errors=True)
+                        got.append(self._probe_full(mod, argv, out))
+                    self.assertEqual(got[0], got[1], argv)
+                    self.assertNotIn("--max-tokens", got[0][1][0][0])
+                    self.assertNotIn("max_tokens", json.loads(got[0][2]))
+
+    def test_probe_max_tokens(self):
+        """probe --max-tokens 1024: the same command and --max-tokens 1024; done.json with "max_tokens": 1024."""
+        with tempfile.TemporaryDirectory() as d:
+            probe = Path(d) / "probe.jsonl"
+            probe.write_text(json.dumps({"sample_id": "s0"}) + "\n")
+            out = Path(d) / "probe_out"
+            argv = ["qa_eval", "probe", "--name", "m", "--model", d, "--out", str(out), "--probe", str(probe),
+                    "--model-type", "qwen3_5"]
+            rc0, plain, done0 = self._probe_full(self.new, argv, out)
+            rc1, more, done1 = self._probe_full(self.new, argv + ["--max-tokens", "1024"], out)
+            self.assertEqual((rc0, rc1), (0, 0))
+            self.assertEqual(more[0][0], plain[0][0] + ["--max-tokens", "1024"])
+            self.assertEqual(more[0][1:], plain[0][1:])
+            self.assertEqual(json.loads(done1), {**json.loads(done0), "max_tokens": 1024})
+
 
 class EasiEval(unittest.TestCase):
     """scripts/easi_eval.py: the EASI runner's command."""
@@ -357,7 +429,7 @@ class QaProbe(unittest.TestCase):
         self.assertEqual(changed, {"run_one", "cmd_run", "main"})
         self.assertEqual(set(a) - set(b), {"model_type_of", "q38_record"})
 
-    def _run_one(self, mod, model, gpu=None, new=True):
+    def _run_one(self, mod, model, gpu=None, new=True, **kw):
         rec = _Rec()
         with tempfile.TemporaryDirectory() as d:
             probe = Path(d) / "p.jsonl"
@@ -368,7 +440,7 @@ class QaProbe(unittest.TestCase):
             probe.write_text(json.dumps(row) + "\n")
             with mock.patch.dict(sys.modules, rec.modules()):
                 if new:
-                    mod.run_one("m", model, probe, Path(d), False, gpu)
+                    mod.run_one("m", model, probe, Path(d), False, gpu, **kw)
                 else:
                     mod.run_one("m", model, probe, Path(d), False)
             meta = json.loads((Path(d) / "m.json").read_text())
@@ -404,6 +476,72 @@ class QaProbe(unittest.TestCase):
             self.new.cmd_run(args)
         self.assertEqual(seen[0][1:3], ["-m", "vagen.q38.qa_probe"])
         self.assertEqual(seen[0][-2:], ["--gpu-memory-utilization", "0.9"])
+
+    def test_run_max_tokens(self):
+        """q38 (2026-11-20): run_one without max_tokens samples at most 256 new tokens and writes OUT/<name>.json
+        exactly as 17c6894a's (the same calls, keys and key order); max_tokens 1024 samples 1,024 and records
+        "max_tokens"; 256 given explicitly is the default."""
+        old = _before_max_tokens("vagen/q38/qa_probe.py")
+        with tempfile.TemporaryDirectory() as root:
+            for t, gpu in (("qwen3_5", 0.9), ("qwen3_5", None), ("qwen3_vl", None), (None, None)):
+                m = _model_dir(root, t)
+                calls, meta = self._run_one(self.new, m, gpu)
+                self.assertEqual([c[1] for c in calls if c[0] == "SamplingParams"],
+                                 [{"temperature": 0.0, "max_tokens": 256}], t)
+                self.assertNotIn("max_tokens", meta)
+                self.assertEqual(self.new.MAX_TOKENS, 256)
+                if old is not None:
+                    calls_old, meta_old = self._run_one(old, m, gpu)
+                    self.assertEqual(calls, calls_old, t)
+                    self.assertEqual(list(meta.items()), list(meta_old.items()), t)
+                self.assertEqual(self._run_one(self.new, m, gpu, max_tokens=256), (calls, meta), t)
+                calls2, meta2 = self._run_one(self.new, m, gpu, max_tokens=1024)
+                self.assertEqual([c[1] for c in calls2 if c[0] == "SamplingParams"],
+                                 [{"temperature": 0.0, "max_tokens": 1024}], t)
+                self.assertEqual([c for c in calls2 if c[0] != "SamplingParams"],
+                                 [c if c[0] != "chat" else (c[0], c[1], ("params", (("max_tokens", 1024),
+                                                                                    ("temperature", 0.0))), c[3])
+                                  for c in calls if c[0] != "SamplingParams"], t)
+                self.assertEqual(meta2, {**meta, "max_tokens": 1024}, t)
+            if old is None:
+                self.skipTest(f"git or {BEFORE_MAX_TOKENS} not available (set Q38_BEFORE_GIT): compared without it")
+
+    def test_cmd_run_max_tokens(self):
+        """cmd_run passes --max-tokens to the per-model process only when it is not 256, and to run_one in process."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+
+        def sub_cmd(**kw):
+            seen = []
+            args = argparse.Namespace(out=f"{tmp.name}/sub", model=["m=/x"], from_eval="", names="", probe="p.jsonl",
+                                      no_images=False, in_process=False, gpu_memory_utilization=0.9, **kw)
+            with mock.patch.object(self.new.subprocess, "run", side_effect=lambda cmd, env=None: seen.append(cmd)
+                                   or types.SimpleNamespace(returncode=0)):
+                self.new.cmd_run(args)
+            return seen[0]
+
+        plain = sub_cmd()
+        self.assertEqual(sub_cmd(max_tokens=256), plain)
+        self.assertEqual(sub_cmd(max_tokens=1024), plain + ["--max-tokens", "1024"])
+        with self.assertRaises(SystemExit):
+            sub_cmd(max_tokens=0)
+        for i, (kw, want) in enumerate((({}, 256), ({"max_tokens": 1024}, 1024))):
+            ran = []
+            args = argparse.Namespace(out=f"{tmp.name}/in{i}", model=["m=/x"], from_eval="", names="", probe="p.jsonl",
+                                      no_images=False, in_process=True, gpu_memory_utilization=None, **kw)
+
+            def fake_run_one(name, model, probe, out_dir, blind, gpu, max_tokens=None):
+                ran.append(max_tokens)
+                (out_dir / f"{name}.json").write_text(json.dumps({"all": {}}))
+
+            with mock.patch.object(self.new, "run_one", side_effect=fake_run_one):
+                self.new.cmd_run(args)
+            self.assertEqual(ran, [want])
+        parsed = []
+        with mock.patch.object(self.new, "cmd_run", side_effect=parsed.append):
+            self.new.main(["run", "--probe", "p", "--out", "o"])
+            self.new.main(["run", "--probe", "p", "--out", "o", "--max-tokens", "1024"])
+        self.assertEqual([a.max_tokens for a in parsed], [256, 1024])
 
     def test_scores_8b_base_answers_as_stored(self):
         """The 8B base model's probe answers (2026-11-01) are read and scored exactly as stored."""

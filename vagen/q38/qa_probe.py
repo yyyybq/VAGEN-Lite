@@ -9,6 +9,11 @@ config.json model_type is "qwen3_5" (Qwen3.5 / Qwen3.8) is asked with its chat t
 vLLM's own sampling defaults (generation_config "vllm"), as data_gen/interiorgs_v10/evaluation.py does for it;
 ``--gpu-memory-utilization`` (default 0.85 as before) gives vLLM a larger share of the card for the 27B model; the
 per-model subprocess runs this module.  OUT/<name>.json records model_type and those arguments only for such a run.
+q38 (2026-11-20, an EXPLORATORY variant the user approved for the 27B base model, which reasons at length: 218 of its
+219 unreadable answers were cut at 256 tokens): ``run --max-tokens N`` (default MAX_TOKENS, 256: everything as
+before) lets the model write up to N new tokens; OUT/<name>.json records "max_tokens" only when N is not 256.  The
+training chain runs it only as plan qa_eval "probe_variants" (its own folder, never the main probe's).  ``curve``
+still says MAX_TOKENS in its text: run it on the main probe's results only.
 Reading, scoring, curves and comparisons are the original's, byte for byte (vagen/q38/tests/test_qa_q38.py).  The
 ``confusion`` command imports data_gen.transition_qa, which the q38 branch does not have.
 
@@ -374,19 +379,24 @@ def model_type_of(model: str) -> str:
         return ""
 
 
-def q38_record(model_type: str, gpu_memory_utilization: Optional[float]) -> Dict[str, Any]:
-    """What a q38 run adds to OUT/<name>.json: nothing for the other model types without the option."""
+def q38_record(model_type: str, gpu_memory_utilization: Optional[float],
+               max_tokens: int = MAX_TOKENS) -> Dict[str, Any]:
+    """What a q38 run adds to OUT/<name>.json: nothing for the other model types without the options (max_tokens
+    only when it is not MAX_TOKENS, the exploratory probe variant)."""
     rec: Dict[str, Any] = {}
     if model_type in MODEL_TYPE_CHAT_KWARGS or model_type in MODEL_TYPE_LLM_KWARGS:
         rec.update(model_type=model_type, chat_template_kwargs=dict(MODEL_TYPE_CHAT_KWARGS.get(model_type, {})),
                    llm_kwargs=dict(MODEL_TYPE_LLM_KWARGS.get(model_type, {})))
     if gpu_memory_utilization is not None:
         rec["gpu_memory_utilization"] = gpu_memory_utilization
+    if max_tokens != MAX_TOKENS:
+        rec["max_tokens"] = max_tokens
     return rec
 
 
 def run_one(name: str, model: str, probe: Path, out: Path, blind: bool = False,
-            gpu_memory_utilization: Optional[float] = None) -> None:  # pragma: no cover - GPU
+            gpu_memory_utilization: Optional[float] = None,
+            max_tokens: int = MAX_TOKENS) -> None:  # pragma: no cover - GPU
     from vllm import LLM, SamplingParams
 
     rows = [json.loads(l) for l in probe.read_text().splitlines() if l.strip()]
@@ -398,7 +408,7 @@ def run_one(name: str, model: str, probe: Path, out: Path, blind: bool = False,
               enforce_eager=True, limit_mm_per_prompt={"image": 2}, trust_remote_code=False,
               **MODEL_TYPE_LLM_KWARGS.get(kind, {}))
     load = time.time() - t0
-    params = SamplingParams(temperature=0.0, max_tokens=MAX_TOKENS)
+    params = SamplingParams(temperature=0.0, max_tokens=max_tokens)  # q38: MAX_TOKENS unless run --max-tokens
     res = llm.chat([chat(r, blind) for r in rows], sampling_params=params, use_tqdm=False,
                    **({"chat_template_kwargs": dict(chat_kwargs)} if chat_kwargs else {}))
     answers = score(rows, [r.outputs[0].text for r in res])
@@ -408,7 +418,7 @@ def run_one(name: str, model: str, probe: Path, out: Path, blind: bool = False,
     (out / f"{name}.json").write_text(json.dumps({"name": name, "model": model, "probe": str(probe),
                                                   "images": not blind, "load_seconds": round(load, 1),
                                                   "answer_seconds": round(time.time() - t0 - load, 1),
-                                                  **q38_record(kind, gpu_memory_utilization),
+                                                  **q38_record(kind, gpu_memory_utilization, max_tokens),
                                                   **summary(answers)}, indent=1))
 
 
@@ -449,12 +459,16 @@ def cmd_run(args: argparse.Namespace) -> None:
             print(f"{name}: done before", flush=True)
             continue
         gpu = getattr(args, "gpu_memory_utilization", None)
+        max_tokens = getattr(args, "max_tokens", MAX_TOKENS)  # q38: the exploratory variant's budget, else 256
+        if max_tokens < 1:
+            raise SystemExit(f"--max-tokens must be at least 1, not {max_tokens}")
         if args.in_process:
-            run_one(name, model, Path(args.probe), out, args.no_images, gpu)
+            run_one(name, model, Path(args.probe), out, args.no_images, gpu, max_tokens)
         else:  # a fresh process per model: vLLM releases the card only when its process ends
             cmd = [sys.executable, "-m", "vagen.q38.qa_probe", "run", "--probe", args.probe, "--out", str(out),
                    "--model", f"{name}={model}", "--in-process"] + (["--no-images"] if args.no_images else []) \
-                + (["--gpu-memory-utilization", str(gpu)] if gpu is not None else [])
+                + (["--gpu-memory-utilization", str(gpu)] if gpu is not None else []) \
+                + (["--max-tokens", str(max_tokens)] if max_tokens != MAX_TOKENS else [])
             rc = subprocess.run(cmd, env=os.environ.copy()).returncode
             print(f"{name}: exit {rc}", flush=True)
             continue
@@ -957,6 +971,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     r.add_argument("--in-process", action="store_true", help=argparse.SUPPRESS)
     r.add_argument("--gpu-memory-utilization", type=float, default=None,
                    help="q38: vLLM's share of the card (default 0.85, as before); 0.9 for the 27B model")
+    r.add_argument("--max-tokens", type=int, default=MAX_TOKENS,
+                   help=f"q38: new tokens an answer may have (default {MAX_TOKENS}, as before; the exploratory "
+                        "variant of the probe only)")
     r.set_defaults(func=cmd_run)
     x = sub.add_parser("confusion", help="action_between: the true action against the kind of option chosen")
     x.add_argument("--probe", required=True)
