@@ -40,6 +40,13 @@ the training chain passes the plan's model type).  For it:
   results OUT/NAME/NAME.json(l) (qa_probe's files) and OUT/NAME/done.json once they are written; --limit runs the
   first N questions of a copy of the probe in OUT/NAME (a smoke; done.json records it).
 The other model types run exactly as before (vagen/q38/tests/test_qa_q38.py).
+
+q38 (2026-11-20, the 27B model's SITE video OOMed on one card): easi --cards N (default 1: everything as before) for a
+job the training chain gave N cards (plan qa_eval "cards"): EASI's lmms-eval run sees cards 0..N-1
+(CUDA_VISIBLE_DEVICES; easi_eval.py only sets it when unset) and its qwen3_vl class, one process with device_map
+"auto", spreads the model's layers over them -- the inputs, the model's settings and the decoding stay the same;
+PYTORCH_CUDA_ALLOC_CONF expandable_segments:True (unless set) against the fragmentation the one-card OOM reported
+(7 GiB reserved but unallocated).  done.json records the cards (vagen/q38/tests/test_qa_cards.py).
 """
 
 from __future__ import annotations
@@ -97,6 +104,11 @@ def easi(a: argparse.Namespace) -> int:
                                             "file=sys.stderr)\n")
         env["PYTHONPATH"] = str(d) + os.pathsep + env.get("PYTHONPATH", "")
     gpus = [g for g in os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",") if g.strip()]
+    if a.cards > 1:  # q38: a job with N cards (plan qa_eval "cards"): lmms-eval's one process sees all of them
+        env["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in range(a.cards))
+        env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        print(f"[qa_eval] {a.cards} cards: CUDA_VISIBLE_DEVICES={env['CUDA_VISIBLE_DEVICES']} "
+              f"PYTORCH_CUDA_ALLOC_CONF={env['PYTORCH_CUDA_ALLOC_CONF']}", flush=True)
     cmd = [py, str(WORKTREE / "scripts/easi_eval.py"), "--ckpts", "",
            "--add", f"{a.name}:{a.model}:{a.model_type}", "--benchmarks", a.benchmark, "--output_dir", str(out),
            "--gpu", gpus[0], "--nproc", "1", "--no-summary"]
@@ -111,11 +123,11 @@ def easi(a: argparse.Namespace) -> int:
     # own score; the EASI-8 SITE comes from both parts' lmms-eval files together (EASI's adapter, as easi_compare.py)
     key = "site" if a.benchmark in ("site_image", "site_video") else a.benchmark
     if scores.get(key) is not None and (rc == 0 or key != a.benchmark):  # a smoke run (--limit) says so
-        (out / a.name / "done.json").write_text(json.dumps({"benchmark": a.benchmark, "model": a.model,
-                                                            "model_type": a.model_type, "limit": a.limit,
-                                                            "score": scores[key],
-                                                            "sub_scores": (payload.get("subScores") or {}).get(key)})
-                                                + "\n")
+        done = {"benchmark": a.benchmark, "model": a.model, "model_type": a.model_type, "limit": a.limit,
+                "score": scores[key], "sub_scores": (payload.get("subScores") or {}).get(key)}
+        if a.cards > 1:  # q38: only a run with more cards records them (one card: done.json as before)
+            done["cards"] = a.cards
+        (out / a.name / "done.json").write_text(json.dumps(done) + "\n")
         return 0
     return rc or 1
 
@@ -182,6 +194,7 @@ def main() -> int:
     e.add_argument("--benchmark", required=True, help="one EASI benchmark key (vsi_bench, site, ...)")
     e.add_argument("--model-type", default="qwen3_vl", choices=MODEL_TYPES)
     e.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
+    e.add_argument("--cards", type=int, default=1, help="q38: the job's cards, all shown to lmms-eval (default 1)")
     q = sub.add_parser("p0")
     q.add_argument("--name", required=True, help="the model's name in the results")
     q.add_argument("--model", required=True, help="HF model folder")

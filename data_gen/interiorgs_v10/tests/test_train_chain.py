@@ -2616,6 +2616,91 @@ class Q38ChainTest(unittest.TestCase):
             with self.assertRaises(T.ChainError):
                 T.Chain({"tr": tmp, "sft_dir": tmp, "eval_cards": 3}, sleep=lambda s: None).eval_cards()
 
+    def test_qa_eval_cards(self):
+        """q38 (2026-11-20): plan "qa_eval" "cards" {benchmark: N} gives that EASI benchmark's QA jobs N cards and
+        qa_eval easi --cards N; every other job -- and every job of a plan without the key -- is as before (six
+        elements, one card, the same job script arguments)."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "base").mkdir()
+            (root / "base" / "config.json").write_text("{}")
+            models = {"q38base": (str(root / "base"), None, [])}
+            plan = {"tr": tmp, "sft_dir": tmp, "eval_only": True, "model_type": "qwen3_5", "eval_cards": 2,
+                    "eval": {"models": {"q38base": {"model": str(root / "base")}}},
+                    "qa_eval": {"out": str(root / "qa"), "easi": "easi_8", "p0": str(root / "sel.jsonl"),
+                                "probe": str(root / "p1.jsonl")}}
+            before = T.Chain(plan, sleep=lambda s: None).qa_jobs(models)
+            # without "cards" (and with cards 1): the jobs as the formula before the change gives them
+            want = {f"qa_{b}__q38base": (root / "qa" / b, "q38base", str(root / "base"), None,
+                                         ["easi", "--benchmark", b, "--model-type", "qwen3_5"], "qa")
+                    for b in ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site_image", "site_video",
+                              "blink", "3dsrbench", "embspatial")}
+            want["qa_p0__q38base"] = (root / "qa" / "p0", "q38base", str(root / "base"), None,
+                                      ["p0", "--selection", str(root / "sel.jsonl"), "--res", "256",
+                                       "--model-type", "qwen3_5"], "qa")
+            want["qa_probe__q38base"] = (root / "qa" / "probe", "q38base", str(root / "base"), None,
+                                         ["probe", "--probe", str(root / "p1.jsonl"), "--model-type", "qwen3_5"], "qa")
+            self.assertEqual(before, want)
+            ones = {**plan, "qa_eval": {**plan["qa_eval"], "cards": {"site_video": 1}}}
+            self.assertEqual(T.Chain(ones, sleep=lambda s: None).qa_jobs(models), want)
+            self.assertEqual(T.Chain(plan, sleep=lambda s: None).qa_cards(list(want)), {})
+            two = {**plan, "qa_eval": {**plan["qa_eval"], "cards": {"site_video": 2}}}
+            chain = T.Chain(two, sleep=lambda s: None)
+            got = chain.qa_jobs(models)
+            self.assertEqual({k: v for k, v in got.items() if k != "qa_site_video__q38base"},
+                             {k: v for k, v in want.items() if k != "qa_site_video__q38base"})
+            self.assertEqual(got["qa_site_video__q38base"],
+                             (root / "qa" / "site_video", "q38base", str(root / "base"), None,
+                              ["easi", "--benchmark", "site_video", "--model-type", "qwen3_5", "--cards", "2"], "qa",
+                              2))
+            # the evaluate step: the job of site_video gets 2 cards, every other QA job 1, the action evaluation
+            # eval_cards; the job script arguments carry --cards only for site_video
+            for c, jobs in (("two", got), ("none", before)):
+                prepared, pools = {}, []
+                chain.job_pool = lambda key=None, cards=8: pools.append(cards)
+
+                def prepare(run, gpus, args, job_dir="job", pool=None):
+                    prepared[run.name] = (gpus, list(args))
+                    (run / job_dir).mkdir(parents=True, exist_ok=True)
+
+                def submit(run, job_dir="job"):
+                    (run / job_dir / "submission.json").write_text(json.dumps({"job_id": "pt-" + run.name}))
+
+                def status(run, job_dir="job"):
+                    j = all_jobs[run.name]
+                    (j[0] / j[1]).mkdir(parents=True, exist_ok=True)
+                    (j[0] / j[1] / "done.json").write_text("{}")
+                    return {"state": "SUCCEEDED", "finished": True}
+
+                all_jobs = {**jobs, "val__q38base": (root / "ev", "q38base", str(root / "base"), None, [])}
+                for j in all_jobs.values():
+                    (j[0] / j[1] / "done.json").unlink(missing_ok=True)
+                for d in (root / "eval_runs").glob("*"):
+                    for f in d.glob("job/*"):
+                        f.unlink()
+                with mock.patch.multiple(job_sco, prepare=prepare, submit=submit, status=status,
+                                         delete=lambda *a, **k: None):
+                    chain.eval_jobs("evaluate", all_jobs)
+                for name, (gpus, args) in prepared.items():
+                    j = all_jobs[name]
+                    many = c == "two" and name == "qa_site_video__q38base"
+                    self.assertEqual(gpus, 2 if (many or name == "val__q38base") else 1, (c, name))
+                    if name != "val__q38base":
+                        self.assertEqual(args, ["qa", str(j[0]), "q38base", str(root / "base"), *j[4]], (c, name))
+                        self.assertEqual("--cards" in args, many, (c, name))
+                self.assertEqual(len(prepared), 12)
+                self.assertEqual(sorted(pools), sorted(2 if (n == "val__q38base" or (
+                    c == "two" and n == "qa_site_video__q38base")) else 1 for n in prepared))
+            # a key that is not one of the plan's EASI benchmarks, or cards job_sco has no spec for: no jobs at all
+            for bad in ({"site": 2}, {"p0": 2}, {"site_video": 3}, {"site_video": True}, {"site_video": "2"},
+                        ["site_video"]):
+                with self.assertRaises(T.ChainError, msg=bad):
+                    T.Chain({**plan, "qa_eval": {**plan["qa_eval"], "cards": bad}}, sleep=lambda s: None).qa_jobs(models)
+
     def test_trainer_end_note(self):
         failed = ("(TaskRunner pid=9) RuntimeError: q38 sampler: agent loop raised in 1 prompt group(s): "
                   "u1a2 (draw batch 6); failure_policy=raise. The root exception is logged above\n")

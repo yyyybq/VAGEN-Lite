@@ -181,7 +181,8 @@ that folder.  The model it trains from is its train.yaml's model_name_or_path.
 q38 (the Qwen3.8-27B rerun line, DESIGN_ASYNC questions 1, 4 and 6, the user's OK of 2026-11-17): plan "eval_cards"
 (default 1; job_sco.SPECS) is the cards of every action evaluation job (the evaluate step's and those of eval
 "stop_invalid"), 2 for the 27B model: the job script keeps card 0 for the render service and gives vLLM the others
-(VAGEN_LITE_EVAL_CARDS).  QA evaluation jobs keep one card (qa_eval runs easi_eval on the first visible card).  The
+(VAGEN_LITE_EVAL_CARDS).  QA evaluation jobs keep one card (qa_eval runs easi_eval on the first visible card),
+unless plan "qa_eval" "cards" gives an EASI benchmark more (qa_jobs; the 27B model's SITE video OOMed on one card).  The
 plan's "model_type" "qwen3_5" (vagen/models/model_types.py) gives the jobs the q38 environment (TRAIN_ENV_ROOT and the
 V1 entry module) the way every model type gives its own (job_env); the job script adds the CUDA 13
 forward-compatibility libraries by itself on a node whose driver is older than 580.  A failed
@@ -1130,7 +1131,13 @@ class Chain:
         and benchmark (data_gen.interiorgs_v10.qa_eval easi, or p0 for "p0", with the plan's model type);
         out/<benchmark>/<name>/done.json marks one as done.  q38 (base zero-shot, 2026-11-20): "probe" (a probe file,
         the matrix's P1 probe of 838 questions; optional, off unless given) adds one job a model, qa_eval probe
-        (vagen.q38.qa_probe), results out/probe/<name>; "probe_models" names its models (default: "models")."""
+        (vagen.q38.qa_probe), results out/probe/<name>; "probe_models" names its models (default: "models").
+        q38 (2026-11-20; off unless given): "cards" {EASI benchmark: cards (job_sco.SPECS)} gives that benchmark's
+        jobs more than one card -- the job gets them and qa_eval easi --cards N shows all N to lmms-eval, whose
+        qwen3_vl class (one process, device_map "auto") spreads the model over them; the inputs and the decoding are
+        unchanged (the 27B model's SITE video, 32 frames of up to 2560x1920 as 153,600 visual tokens, OOMed on one
+        card).  A benchmark with more cards has a seventh element, its cards: (..., options, "qa", cards); every other
+        job is as before."""
         qa = self.plan.get("qa_eval")
         if not qa:
             return {}
@@ -1152,12 +1159,17 @@ class Chain:
         missing = [n for n in wanted if n not in models]
         if unknown or missing:
             raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
+        cards = self.qa_cards(benchmarks)  # q38: {benchmark: cards > 1}; empty without plan qa_eval "cards"
         kind = str(self.plan.get("model_type") or "qwen2_5_vl")
         out = Path(qa["out"])
         limit = ["--limit", str(qa["limit"])] if qa.get("limit") else []
         jobs = {f"qa_{b}__{n}": (out / b, n, models[n][0], None,
                                  ["easi", "--benchmark", b, "--model-type", kind, *limit], "qa")
                 for b in benchmarks for n in easi_names if n in models}
+        for name, job in jobs.items():  # q38: the benchmarks given more cards (none without plan qa_eval "cards")
+            b = job[0].name
+            if b in cards:
+                jobs[name] = (*job[:4], [*job[4], "--cards", str(cards[b])], "qa", cards[b])
         if qa.get("p0"):
             jobs.update({f"qa_p0__{n}": (out / "p0", n, models[n][0], None,
                                          ["p0", "--selection", str(qa["p0"]), "--res", str(qa.get("p0_res", 256)),
@@ -1167,6 +1179,22 @@ class Chain:
                                             ["probe", "--probe", str(qa["probe"]), "--model-type", kind, *limit], "qa")
                          for n in probe_names if n in models})
         return jobs
+
+    def qa_cards(self, benchmarks: Sequence[str]) -> Dict[str, int]:
+        """q38 (2026-11-20): plan "qa_eval" "cards" {EASI benchmark: cards}, the benchmarks given more than one card
+        (a QA job's default); each must be one of qa_jobs' EASI benchmarks and its cards one of job_sco.SPECS.  Empty
+        without the key (every QA job one card, as before)."""
+        from . import job_sco
+
+        given = (self.plan.get("qa_eval") or {}).get("cards") or {}
+        if not isinstance(given, dict):
+            raise ChainError(f"qa_eval cards must be {{benchmark: cards}}, not {given!r}")
+        bad = {b: c for b, c in given.items()
+               if b not in benchmarks or isinstance(c, bool) or not isinstance(c, int) or c not in job_sco.SPECS}
+        if bad:
+            raise ChainError(f"qa_eval cards: {bad} -- each key one of this plan's EASI benchmarks {list(benchmarks)}, "
+                             f"each value one of {sorted(job_sco.SPECS)}")
+        return {b: c for b, c in given.items() if c > 1}
 
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
         """Round 12 freeze (the user's decision of 2026-10-24): a render service outside sco (renderer_external.json),
@@ -1488,7 +1516,8 @@ class Chain:
         """Single-card evaluation jobs {run name: (eval set folder, result name, model, prompt format, options)},
         at most max_eval_jobs at a time; a result folder with done.json is not evaluated again; every job is
         deleted when it ends; incomplete results fail the step.  A sixth element names another job script mode
-        (qa_jobs: "qa", whose arguments are the folder, the result name, the model and the options)."""
+        (qa_jobs: "qa", whose arguments are the folder, the result name, the model and the options); a seventh, the
+        cards of such a job (q38: plan qa_eval "cards"; without it one card)."""
         from . import job_sco
 
         jobs = {n: j for n, j in jobs.items() if not (j[0] / j[1] / "done.json").exists()}
@@ -1511,7 +1540,8 @@ class Chain:
                         args = ([mode[0], str(eval_dir), result, str(model), *options] if mode else
                                 ["eval", str(eval_dir), result, str(model), prompt_format or "-", *options])
                         # q38: 2 for the 27B model; a QA job keeps one (qa_eval uses the first visible card only)
-                        cards = 1 if mode else self.eval_cards()
+                        # unless qa_jobs gave it more (plan qa_eval "cards": a seventh element)
+                        cards = (int(mode[1]) if len(mode) > 1 else 1) if mode else self.eval_cards()
                         job_sco.prepare(run, cards, args, pool=self.job_pool(cards=cards))
                         job_sco.submit(run)
                     running[name] = run
