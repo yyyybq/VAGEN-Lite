@@ -918,6 +918,12 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
                    and _q38_get(cfg, k)[1] in (None, Q38_MISSING, ""))
     if unset:
         raise SystemExit(f"the q38 config leaves {unset} unset")
+    # P1 decision 7: every q38 config logs the host memory (vagen/q38/host_mem_log.py), which the training chain's
+    # host-memory guard (plan rl guards host_mem_max_gb) reads; the recipe file sets it, a config without it is refused
+    interval = ((cfg.get("vagen") or {}).get("host_mem_log") or {}).get("interval_s")
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+        raise SystemExit(f"the q38 config needs vagen.host_mem_log.interval_s > 0 (the training chain's host-memory "
+                         f"guard reads that log), not {interval!r}")
     # the run's keys that differ from the recipe file's values (a run's own overrides), for the report
     overrides = {k: {"recipe": flat_delta[k], "run": flat[k]} for k in sorted(flat_delta)
                  if flat_delta[k] != Q38_MISSING and k in flat and flat[k] != flat_delta[k]}
@@ -927,7 +933,7 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
               "trainer_mode": cfg["trainer"]["v1"]["trainer_mode"], "lr_horizon": horizon,
               "steps_per_epoch": steps_per_epoch, "total_epochs": cfg["trainer"]["total_epochs"],
               "ga_8b": cfg["vagen"]["ga_8b"], "removed": [k for k in Q38_REMOVED],
-              "run_keys_over_recipe": overrides or None}
+              "host_mem_log_interval_s": interval, "run_keys_over_recipe": overrides or None}
     return cfg, report
 
 

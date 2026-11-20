@@ -175,6 +175,8 @@ vagen:                               # the q38 code's own settings (DESIGN_ASYNC
   onpolicy_shortcut: false           # phase 4, after S9 (question 8)
   parity_mode: false                 # true only for the 8B parity run (section 5.3)
   calib_entropy_t1_steps: [1]        # the entropy calibration step(s)
+  host_mem_log:                      # vagen/q38/host_mem_log.py: logs/host_mem_rl-<UTC>.jsonl, read by the training
+    interval_s: 10                   # chain's host-memory guard (P1 decision 7; smoke Z1 had it at 10 s)
   stuck_warn:                        # MF5: warn only
     min_s: 300
     factor: 3

@@ -132,6 +132,8 @@ NEW = [
     ("vagen.failure_policy", "R7", "failed groups raise (question 1)"),
     ("vagen.stuck_warn.*", "R8", "stuck warning (MF5)"),
     ("vagen.calib_entropy_t1_steps", "R5", "entropy calibration (question 2)"),
+    ("vagen.host_mem_log.interval_s", "stack:new",
+     "host-memory log every 10 s (vagen/q38/host_mem_log.py), read by the chain's host-memory guard (P1 decision 7)"),
     ("vagen.onpolicy_shortcut", "R11", "off until S9"),
     ("vagen.parity_mode", "stack:new", "true only for the 8B parity run"),
     ("vagen.trainer_impl", "stack:new", "runner switch"),
@@ -315,7 +317,7 @@ def test_recipe_keys(configs, name):
         "vagen.ga_8b": 12, "vagen.failure_policy": "raise", "vagen.async.strict_version_check": True,
         "vagen.onpolicy_shortcut": False, "vagen.parity_mode": False, "vagen.trainer_impl": "vagen",
         "trainer.ckpt_keep_every": 50, "trainer.ckpt_keep_latest": 2, "trainer.ckpt_prune_to_hf": True,
-        "trainer.save_freq": 50,
+        "trainer.save_freq": 50, "vagen.host_mem_log.interval_s": 10,
     }
     wrong = {k: (q.get(k, "<absent>"), v) for k, v in expected.items() if q.get(k, "<absent>") != v}
     assert not wrong, wrong
@@ -493,6 +495,19 @@ def test_refused_8b_configs(configs, work):
         tp.q38_ppo_config(bad, 10798)
     with pytest.raises(SystemExit):
         tp.q38_ppo_config(copy.deepcopy(y8), 20)  # no step of 24 tasks
+    # P1 decision 7: a recipe without the host-memory log (the chain's host-memory guard reads it) is refused
+    _, report = tp.q38_ppo_config(copy.deepcopy(y8), 10798)
+    assert report["host_mem_log_interval_s"] == 10
+    for interval in (None, 0, -5, True, "10"):
+        delta = yaml.safe_load(tp.Q38_DELTA.read_text())
+        if interval is None:
+            delta["vagen"].pop("host_mem_log")
+        else:
+            delta["vagen"]["host_mem_log"]["interval_s"] = interval
+        path = work / f"delta_host_mem_{interval}.yaml"
+        path.write_text(yaml.safe_dump(delta))
+        with pytest.raises(SystemExit, match="host_mem_log.interval_s"):
+            tp.q38_ppo_config(copy.deepcopy(y8), 10798, delta_path=path)
     # a run's own override of a recipe value is taken and reported
     over = copy.deepcopy(y8)
     over["actor_rollout_ref"]["actor"]["optim"]["lr"] = 1e-6
