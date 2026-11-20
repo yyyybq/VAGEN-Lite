@@ -23,6 +23,23 @@ one model on a P0 question selection, in the same Python:
         [--res 256] [--model-type qwen3_vl] [--limit N]
 
 Results: OUT/NAME/summary.json, summary.md and predictions.jsonl; OUT/NAME/done.json once summary.json is written.
+
+q38 (the Qwen3.8-27B rerun line, base zero-shot, 2026-11-20): --model-type also takes "qwen3_5" (Qwen3.5 / Qwen3.8;
+the training chain passes the plan's model type).  For it:
+- easi: scripts/easi_eval.py runs lmms-eval's qwen3_vl class (as for the 8B) with thinking off (easi_eval.LMMS_MODEL),
+  in Q38_EASI_PYTHON when that environment exists (the q38 env lacks lmms-eval's dependencies: pytz, sacrebleu,
+  evaluate, ...), else in this Python;
+- p0: data_gen.interiorgs_qa.evaluate with --gpu-memory-utilization 0.9 (the 27B model's bf16 weights, about 51 GiB,
+  leave the KV cache little room at the default 0.85); the evaluator itself turns thinking off for the type;
+- probe (new; the matrix's P1 probe of 838 questions, PREREG_D_vs_C 3.3): vagen.q38.qa_probe run (the q38 copy of
+  eval/diagnostics/qa_probe.py: greedy, at most 256 new tokens, no system prompt) of one model,
+
+    python -m data_gen.interiorgs_v10.qa_eval probe --name NAME --model HF_DIR --out OUT/probe --probe P1.jsonl \
+        [--model-type qwen3_5] [--limit N]
+
+  results OUT/NAME/NAME.json(l) (qa_probe's files) and OUT/NAME/done.json once they are written; --limit runs the
+  first N questions of a copy of the probe in OUT/NAME (a smoke; done.json records it).
+The other model types run exactly as before (vagen/q38/tests/test_qa_q38.py).
 """
 
 from __future__ import annotations
@@ -37,10 +54,21 @@ from pathlib import Path
 WORKTREE = Path(__file__).resolve().parents[2]  # scripts/easi_eval.py; third_party/ is read from the registry's paths
 HF_HOME = "/mnt/umm/users/yinbaiqiao/.cache/huggingface"
 STACK_DUMP_S = 900
+MODEL_TYPES = ("qwen2_5_vl", "qwen3_vl", "qwen3_5")  # q38: qwen3_5 added
+# q38: an environment over the q38 env with lmms-eval's missing dependencies (not built yet: needs the user's OK)
+Q38_EASI_PYTHON = "/mnt/umm/users/yinbaiqiao/q38/envs/easi/bin/python"
+Q38_GPU_MEMORY_UTILIZATION = "0.9"  # q38: vLLM's share of the card for the 27B model (Z3: 0.9 ran)
 EASI_8 = ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site", "blink", "3dsrbench", "embspatial")
 # SITE in two jobs (its image and video parts), as the P0 line ran it after whole-SITE runs stalled (2026-10-29/30)
 EASI_8_JOBS = ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site_image", "site_video", "blink",
                "3dsrbench", "embspatial")
+
+
+def easi_python(model_type: str) -> str:
+    """q38: the Python of an EASI run -- Q38_EASI_PYTHON for qwen3_5 when it exists, else this one (as before)."""
+    if model_type == "qwen3_5" and Path(Q38_EASI_PYTHON).is_file():
+        return Q38_EASI_PYTHON
+    return sys.executable
 
 
 def easi(a: argparse.Namespace) -> int:
@@ -54,12 +82,13 @@ def easi(a: argparse.Namespace) -> int:
     # EASI runs "accelerate launch ... -m lmms_eval" by name, and the job script puts the vagen-lite env first on PATH:
     # its accelerate runs lmms-eval in vagen-lite, whose Transformers does not know Qwen3-VL (smoke 2026-11-01). An
     # "accelerate" in this Python (the model type's, e.g. the Qwen3-VL runtime venv over vagen-lite) goes first.
+    py = easi_python(a.model_type)  # q38: Q38_EASI_PYTHON for qwen3_5 when it exists; else this Python, as before
     bin_dir = own / f"_bin_{os.getpid()}"
     bin_dir.mkdir(exist_ok=True)
-    (bin_dir / "accelerate").write_text(f"#!{sys.executable}\nfrom accelerate.commands.accelerate_cli import main\n"
+    (bin_dir / "accelerate").write_text(f"#!{py}\nfrom accelerate.commands.accelerate_cli import main\n"
                                         "raise SystemExit(main())\n")
     (bin_dir / "accelerate").chmod(0o755)
-    env["PATH"] = os.pathsep.join([str(bin_dir), str(Path(sys.executable).parent), env.get("PATH", "")])
+    env["PATH"] = os.pathsep.join([str(bin_dir), str(Path(py).parent), env.get("PATH", "")])
     if a.benchmark.startswith("site"):
         d = own / f"_stack_dump_{os.getpid()}"
         d.mkdir(exist_ok=True)
@@ -68,7 +97,7 @@ def easi(a: argparse.Namespace) -> int:
                                             "file=sys.stderr)\n")
         env["PYTHONPATH"] = str(d) + os.pathsep + env.get("PYTHONPATH", "")
     gpus = [g for g in os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",") if g.strip()]
-    cmd = [sys.executable, str(WORKTREE / "scripts/easi_eval.py"), "--ckpts", "",
+    cmd = [py, str(WORKTREE / "scripts/easi_eval.py"), "--ckpts", "",
            "--add", f"{a.name}:{a.model}:{a.model_type}", "--benchmarks", a.benchmark, "--output_dir", str(out),
            "--gpu", gpus[0], "--nproc", "1", "--no-summary"]
     if a.limit:
@@ -100,6 +129,8 @@ def p0(a: argparse.Namespace) -> int:
            "--res", a.res, "--out", str(own)]
     if a.limit:
         cmd += ["--limit", str(a.limit)]
+    if a.model_type == "qwen3_5":  # q38: the 27B model's weights need the larger share of the card
+        cmd += ["--gpu-memory-utilization", Q38_GPU_MEMORY_UTILIZATION]
     print("$", " ".join(cmd), flush=True)
     rc = subprocess.run(cmd, cwd=WORKTREE, env=env).returncode
     summary = own / "summary.json"
@@ -112,6 +143,35 @@ def p0(a: argparse.Namespace) -> int:
     return 0
 
 
+def probe(a: argparse.Namespace) -> int:
+    """q38: the P1 probe (838 questions) of one model by vagen.q38.qa_probe run; OUT/NAME/done.json once its
+    OUT/NAME/NAME.json is written."""
+    own = Path(a.out) / a.name
+    own.mkdir(parents=True, exist_ok=True)
+    src = Path(a.probe)
+    probe_file = src
+    if a.limit:  # a smoke: the first N questions, in a copy beside the results
+        probe_file = own / f"probe_first{a.limit}.jsonl"
+        lines = [l for l in src.read_text().splitlines() if l.strip()][:a.limit]
+        probe_file.write_text("".join(l + "\n" for l in lines))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(WORKTREE), os.environ.get("PYTHONPATH", "")]),
+               HF_HUB_OFFLINE="1", NO_PROXY="*", no_proxy="*", TOKENIZERS_PARALLELISM="false")
+    cmd = [sys.executable, "-m", "vagen.q38.qa_probe", "run", "--probe", str(probe_file), "--out", str(own),
+           "--model", f"{a.name}={a.model}"]
+    if a.model_type == "qwen3_5":
+        cmd += ["--gpu-memory-utilization", Q38_GPU_MEMORY_UTILIZATION]
+    print("$", " ".join(cmd), flush=True)
+    rc = subprocess.run(cmd, cwd=WORKTREE, env=env).returncode
+    result = own / f"{a.name}.json"
+    if rc != 0 or not result.is_file():
+        return rc or 1
+    res = json.loads(result.read_text())
+    (own / "done.json").write_text(json.dumps({"benchmark": "probe", "model": a.model, "model_type": a.model_type,
+                                               "probe": str(src), "limit": a.limit,
+                                               "accuracy": (res.get("all") or {}).get("accuracy")}) + "\n")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -120,7 +180,7 @@ def main() -> int:
     e.add_argument("--model", required=True, help="HF model folder")
     e.add_argument("--out", required=True, help="the benchmark's output folder (one subfolder a model)")
     e.add_argument("--benchmark", required=True, help="one EASI benchmark key (vsi_bench, site, ...)")
-    e.add_argument("--model-type", default="qwen3_vl", choices=("qwen2_5_vl", "qwen3_vl"))
+    e.add_argument("--model-type", default="qwen3_vl", choices=MODEL_TYPES)
     e.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
     q = sub.add_parser("p0")
     q.add_argument("--name", required=True, help="the model's name in the results")
@@ -128,10 +188,17 @@ def main() -> int:
     q.add_argument("--out", required=True, help="the output folder (one subfolder a model)")
     q.add_argument("--selection", required=True, help="a P0 question selection (selection/test.jsonl)")
     q.add_argument("--res", default="256", help="image resolution, as data_gen.interiorgs_qa.evaluate --res")
-    q.add_argument("--model-type", default="qwen3_vl", choices=("qwen2_5_vl", "qwen3_vl"))
+    q.add_argument("--model-type", default="qwen3_vl", choices=MODEL_TYPES)
     q.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
+    r = sub.add_parser("probe")  # q38
+    r.add_argument("--name", required=True, help="the model's name in the results")
+    r.add_argument("--model", required=True, help="HF model folder")
+    r.add_argument("--out", required=True, help="the output folder (one subfolder a model)")
+    r.add_argument("--probe", required=True, help="the probe questions (p1_probe.jsonl)")
+    r.add_argument("--model-type", default="qwen3_vl", choices=MODEL_TYPES)
+    r.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
     a = ap.parse_args()
-    return easi(a) if a.cmd == "easi" else p0(a)
+    return {"easi": easi, "p0": p0, "probe": probe}[a.cmd](a)
 
 
 if __name__ == "__main__":

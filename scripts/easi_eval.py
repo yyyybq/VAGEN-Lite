@@ -21,6 +21,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 REGISTRY_PATH = SCRIPT_DIR / "easi_registry.yaml"
 OUTPUT_DIR = PROJECT_ROOT / "easi_results"
+# q38 (the Qwen3.8-27B rerun line, base zero-shot, 2026-11-20): a checkpoint of type "qwen3_5" (Qwen3.5 / Qwen3.8)
+# runs lmms-eval's qwen3_vl class -- the class and defaults the 8B Qwen3-VL models ran with (greedy, 128 new tokens);
+# the class loads Qwen3_5ForConditionalGeneration by the config's model_type -- with the chat template's thinking off
+# (the template thinks unless enable_thinking is False; lmms-eval's own qwen3_5 class thinks and samples at 0.7).
+# Every other type: the lmms-eval class of its name and pretrained= alone, as before.
+LMMS_MODEL = {"qwen3_5": ("qwen3_vl", ",enable_thinking=False")}
 EASI_8 = [
     "vsi_bench",
     "mmsi_bench",
@@ -150,7 +156,7 @@ def main() -> int:
         if len(parts) < 2:
             print(f"[error] Invalid --add value: {item}", file=sys.stderr)
             return 2
-        if len(parts) >= 3 and parts[-1] in {"qwen2_5_vl", "qwen3_vl", "cambrians"}:  # qwen3_vl: lmms-eval's class
+        if len(parts) >= 3 and parts[-1] in {"qwen2_5_vl", "qwen3_vl", "cambrians", "qwen3_5"}:  # qwen3_vl: lmms-eval's class
             name, model_type = parts[0], parts[-1]
             raw_path = ":".join(parts[1:-1])
         else:
@@ -201,12 +207,13 @@ def main() -> int:
             failures += 1
             continue
 
+        lmms_model, extra_args = LMMS_MODEL.get(model_type, (model_type, ""))
         cmd = [
             sys.executable,
             str(runner),
             "--backend", "lmms-eval",
-            "--model", model_type,
-            "--model-args", f"pretrained={checkpoint}",
+            "--model", lmms_model,
+            "--model-args", f"pretrained={checkpoint}{extra_args}",
             "--output-dir", str(checkpoint_out),
             "--nproc", str(args.nproc),
             "--no-rich",

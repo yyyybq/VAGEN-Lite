@@ -13,6 +13,15 @@ whose vLLM processor needs a video's metadata, with the metadata LLaMA-Factory g
 default 2.0). The prompt length vLLM reports is stored per request, so the visual-token counts can be checked
 against training.
 
+q38 (the Qwen3.8-27B rerun line, base zero-shot, 2026-11-20): a model whose config.json model_type is "qwen3_5"
+(Qwen3.5 / Qwen3.8; vLLM 0.28 builds its multimodal processor from Qwen3-VL's) gets its videos with the same metadata
+as Qwen3-VL, its chat template called with enable_thinking False (the template thinks unless told not to, and 512
+tokens of thinking would leave no answer) and vLLM's own sampling defaults (generation_config "vllm"), as
+data_gen/interiorgs_v10/evaluation.py does for it (MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS there); its
+summary.json meta records them.  --gpu-memory-utilization (default: 0.85 as before) gives vLLM a larger share of
+the card for the 27B model.  Every other model type runs exactly as before (vagen/q38/tests/test_qa_q38.py compares
+the calls with a264ae46's).
+
 Scoring (scoring.py): every question in the original benchmark format ("orig", evaluation group 1) and in the
 held-out wording ("h1", evaluation group 2). MMSI-Bench and 3DSRBench questions are also asked once per rotation
 of their options (circular evaluation: correct only if every rotation is correct); MMSI reports both the plain
@@ -42,12 +51,20 @@ from .scoring import circular_variants, score
 
 CIRCULAR = ("MMSI-Bench", "3DSRBench")
 CHANCE_OVERRIDE = {"M6": 0.5}
+# q38: the model types whose vLLM video processor needs the metadata (qwen3_5: vLLM 0.28's Qwen3.5 model reuses
+# Qwen3-VL's multimodal processor, vllm/model_executor/models/qwen3_5.py), and the q38 type's chat-template and vLLM
+# arguments (as data_gen/interiorgs_v10/evaluation.py MODEL_TYPE_CHAT_KWARGS / MODEL_TYPE_LLM_KWARGS)
+VIDEO_METADATA_TYPES = ("qwen3_vl", "qwen3_5")
+MODEL_TYPE_CHAT_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"enable_thinking": False}}
+MODEL_TYPE_LLM_KWARGS: Dict[str, Dict[str, Any]] = {"qwen3_5": {"generation_config": "vllm"}}
+DEFAULT_GPU_MEMORY_UTILIZATION = 0.85
 
 
 def video_input(frames, model_type: str, fps: float):
     """A video's vLLM input: its frames, and for Qwen3-VL (vLLM 0.11 fails on a Qwen3-VL video without metadata) the
-    metadata LLaMA-Factory gives a list of frames in training: frames as given, indices 0..n-1, its video_fps."""
-    if model_type != "qwen3_vl":
+    metadata LLaMA-Factory gives a list of frames in training: frames as given, indices 0..n-1, its video_fps.
+    q38: Qwen3.5 / Qwen3.8 ("qwen3_5") the same way."""
+    if model_type not in VIDEO_METADATA_TYPES:
         return frames
     n = len(frames)
     return frames, {"fps": fps, "frames_indices": list(range(n)), "total_num_frames": n, "duration": n / fps,
@@ -106,8 +123,20 @@ def build_requests(items, families: Sequence[str], res: int) -> List[Dict[str, A
     return reqs
 
 
+def q38_record(model_type: str, gpu_memory_utilization: Optional[float]) -> Dict[str, Any]:
+    """What a q38 run adds to summary.json's meta: nothing for the other model types without the option (their
+    summary.json stays as before)."""
+    rec: Dict[str, Any] = {}
+    if model_type in MODEL_TYPE_CHAT_KWARGS or model_type in MODEL_TYPE_LLM_KWARGS:
+        rec.update(model_type=model_type, chat_template_kwargs=dict(MODEL_TYPE_CHAT_KWARGS.get(model_type, {})),
+                   llm_kwargs=dict(MODEL_TYPE_LLM_KWARGS.get(model_type, {})))
+    if gpu_memory_utilization is not None:
+        rec["gpu_memory_utilization"] = gpu_memory_utilization
+    return rec
+
+
 def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tokens: int,
-             video_fps: float = 2.0) -> None:
+             video_fps: float = 2.0, gpu_memory_utilization: Optional[float] = None) -> None:
     import os
 
     os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")   # greedy decoding; avoids a kernel compile
@@ -118,8 +147,11 @@ def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tok
 
     proc = AutoProcessor.from_pretrained(model)
     model_type = json.loads((Path(model) / "config.json").read_text()).get("model_type", "")
-    llm = LLM(model=model, max_model_len=max_model_len, gpu_memory_utilization=0.85, seed=0,
-              limit_mm_per_prompt={"image": 4, "video": 1})
+    chat_kwargs = MODEL_TYPE_CHAT_KWARGS.get(model_type, {})  # q38: {} for every type but qwen3_5
+    llm = LLM(model=model, max_model_len=max_model_len,
+              gpu_memory_utilization=(DEFAULT_GPU_MEMORY_UTILIZATION if gpu_memory_utilization is None
+                                      else gpu_memory_utilization), seed=0,
+              limit_mm_per_prompt={"image": 4, "video": 1}, **MODEL_TYPE_LLM_KWARGS.get(model_type, {}))
     params = SamplingParams(temperature=0.0, max_tokens=max_tokens)
     batch = []
     for r in reqs:
@@ -131,7 +163,7 @@ def run_vllm(model: str, reqs: List[Dict[str, Any]], max_model_len: int, max_tok
             content = [{"type": "image"} for _ in r["files"]] + [{"type": "text", "text": r["text"]}]
             mm = {"image": [Image.open(f).convert("RGB") for f in r["files"]]}
         prompt = proc.apply_chat_template([{"role": "user", "content": content}], tokenize=False,
-                                          add_generation_prompt=True)
+                                          add_generation_prompt=True, **chat_kwargs)
         batch.append({"prompt": prompt, "multi_modal_data": mm})
     outs = llm.generate(batch, params)
     for r, o in zip(reqs, outs):
@@ -353,7 +385,11 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--title", default="同域评测")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--gpu-memory-utilization", type=float, default=None,
+                    help="q38: vLLM's share of the card (default 0.85, as before); 0.9 for the 27B model")
     a = ap.parse_args()
+    if a.gpu_memory_utilization is not None and not 0 < a.gpu_memory_utilization <= 0.95:
+        ap.error("--gpu-memory-utilization must be in (0, 0.95]")
     items = load_selection(a.selection) if a.selection else load_runs(a.run, a.exclude)
     if a.limit:
         items = items[:a.limit]
@@ -363,12 +399,14 @@ def main() -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    run_vllm(a.model, reqs, a.max_model_len, a.max_tokens, a.video_fps)
+    run_vllm(a.model, reqs, a.max_model_len, a.max_tokens, a.video_fps, a.gpu_memory_utilization)
     (out / "predictions.jsonl").write_text("".join(json.dumps({k: v for k, v in r.items() if k != "files"},
                                                               ensure_ascii=False) + "\n" for r in reqs))
     res = summarise(questions, reqs)
+    model_type = json.loads((Path(a.model) / "config.json").read_text()).get("model_type", "")
     res["meta"] = {"model": a.model, "questions": len(items), "requests": len(reqs), "families": fams,
-                   "resolutions": a.res, "video_fps": a.video_fps, "seconds": round(time.time() - t0, 1)}
+                   "resolutions": a.res, "video_fps": a.video_fps, "seconds": round(time.time() - t0, 1),
+                   **q38_record(model_type, a.gpu_memory_utilization)}
     (out / "summary.json").write_text(json.dumps(res, indent=1, ensure_ascii=False))
     (out / "summary.md").write_text(markdown(res, a.title))
     print(json.dumps(res["meta"]))
