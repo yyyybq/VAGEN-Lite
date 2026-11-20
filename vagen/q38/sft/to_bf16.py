@@ -7,11 +7,16 @@ and the RL actor loads it into fp32 (verl's model_dtype fp32), so a bf16 copy ch
 rollout and moves the actor's initial weights by less than half a bf16 ulp (SFT_OPTIONS.md 6; to be confirmed on
 readings before the fp32 files are dropped, P1_REPORT decision 4).
 
-    python -m vagen.q38.sft.to_bf16 convert SRC DST [--max-shard-gb 5]
+    python -m vagen.q38.sft.to_bf16 convert SRC DST [--max-shard-gb 5] [--fp32-modules A_log]
     python -m vagen.q38.sft.to_bf16 convert SRC --in-place      # replaces SRC's fp32 shards (deletes them)
-    python -m vagen.q38.sft.to_bf16 verify SRC DST
+    python -m vagen.q38.sft.to_bf16 verify SRC DST [--fp32-modules A_log]
 
-convert: every float32 tensor -> torch.bfloat16 (round to nearest even, torch's cast, the cast vLLM's loader does
+fp32 modules (user OK 2026-11-20, P2_FIX_REPORT question 4b): float32 tensors whose names contain one of
+--fp32-modules (comma list, default A_log; '' for none) stay float32, bit-identical; the same substring rule and
+default as verl's checkpoint.hf_fp32_modules, so SFT and RL exports keep the 48 Gated DeltaNet A_log in fp32, the
+recipe the bf16 readout check verified (PASS_IDENTICAL, 2026-11-20).
+
+convert: every other float32 tensor -> torch.bfloat16 (round to nearest even, torch's cast, the cast vLLM's loader does
 when it copies an fp32 tensor into a bf16 parameter); other dtypes unchanged; shards of at most --max-shard-gb,
 streamed tensor by tensor (memory: one output shard); model.safetensors.index.json rewritten; every other file of SRC
 copied (config, tokenizer, processor, chat template, trainer_state.json, ...).  The copy is written to DST.partial
@@ -37,6 +42,11 @@ INDEX = "model.safetensors.index.json"
 MANIFEST = "bf16_manifest.json"
 REL_TOL = 2.0 ** -8  # half a bf16 ulp is 2**-9 relative; 2**-8 leaves room for the binade edge
 ABS_TOL = 2.0 ** -133  # bf16's smallest subnormal step
+FP32_MODULES = ("A_log",)  # = verl CheckpointConfig.hf_fp32_modules default
+
+
+def keep_fp32(name: str, fp32_modules) -> bool:
+    return any(m in name for m in fp32_modules)
 
 
 def utc() -> str:
@@ -72,11 +82,11 @@ def tensor_plan(ckpt: Path) -> List[Tuple[str, str, List[int], str]]:
 DTYPE_BYTES = {"F32": 4, "BF16": 2, "F16": 2, "F64": 8, "I64": 8, "I32": 4, "I16": 2, "I8": 1, "U8": 1, "BOOL": 1}
 
 
-def out_bytes(shape: List[int], dtype: str) -> int:
+def out_bytes(shape: List[int], dtype: str, fp32: bool = False) -> int:
     n = 1
     for s in shape:
         n *= s
-    return n * (2 if dtype == "F32" else DTYPE_BYTES[dtype])
+    return n * (2 if dtype == "F32" and not fp32 else DTYPE_BYTES[dtype])
 
 
 def shard_names(groups: int) -> List[str]:
@@ -85,10 +95,10 @@ def shard_names(groups: int) -> List[str]:
     return [f"model-{i + 1:05d}-of-{groups:05d}.safetensors" for i in range(groups)]
 
 
-def plan_shards(plan, max_bytes: int) -> List[List[Tuple[str, str, List[int], str]]]:
+def plan_shards(plan, max_bytes: int, fp32_modules=FP32_MODULES) -> List[List[Tuple[str, str, List[int], str]]]:
     groups, cur, size = [], [], 0
     for item in plan:
-        b = out_bytes(item[2], item[3])
+        b = out_bytes(item[2], item[3], keep_fp32(item[1], fp32_modules))
         if cur and size + b > max_bytes:
             groups.append(cur)
             cur, size = [], 0
@@ -110,19 +120,19 @@ def copy_side_files(src: Path, dst: Path, weights: List[str]) -> List[str]:
     return copied
 
 
-def write_copy(src: Path, dst: Path, max_shard_gb: float) -> Dict:
+def write_copy(src: Path, dst: Path, max_shard_gb: float, fp32_modules=FP32_MODULES) -> Dict:
     import torch
     from safetensors import safe_open
     from safetensors.torch import save_file
 
     plan = tensor_plan(src)
     weights = weight_files(src)
-    groups = plan_shards(plan, int(max_shard_gb * (1 << 30)))
+    groups = plan_shards(plan, int(max_shard_gb * (1 << 30)), fp32_modules)
     names = shard_names(len(groups))
     dst.mkdir(parents=True, exist_ok=False)
     handles: Dict[str, object] = {}
     weight_map, total = {}, 0
-    counts = {"cast_f32_to_bf16": 0, "kept": 0}
+    counts = {"cast_f32_to_bf16": 0, "kept_fp32": 0, "kept": 0}
     kept_dtypes: Dict[str, int] = {}
     try:
         for name, group in zip(names, groups):
@@ -131,7 +141,9 @@ def write_copy(src: Path, dst: Path, max_shard_gb: float) -> Dict:
                 if f not in handles:
                     handles[f] = safe_open(str(src / f), framework="pt")
                 x = handles[f].get_tensor(t)
-                if x.dtype == torch.float32:
+                if x.dtype == torch.float32 and keep_fp32(t, fp32_modules):
+                    counts["kept_fp32"] += 1
+                elif x.dtype == torch.float32:
                     x = x.to(torch.bfloat16)
                     counts["cast_f32_to_bf16"] += 1
                 else:
@@ -148,11 +160,12 @@ def write_copy(src: Path, dst: Path, max_shard_gb: float) -> Dict:
         (dst / INDEX).write_text(json.dumps({"metadata": {"total_size": total}, "weight_map": weight_map}, indent=2) + "\n")
     side = copy_side_files(src, dst, weights)
     return {"tensors": len(plan), "shards": names, "bytes": total, "counts": counts, "kept_dtypes": kept_dtypes,
-            "side_files": side}
+            "fp32_modules": list(fp32_modules), "side_files": side}
 
 
-def verify(src: Path, dst: Path) -> Dict:
-    """Every tensor of DST against SRC: names, shapes, dtype bf16 where SRC is fp32, bit-identical to SRC's cast."""
+def verify(src: Path, dst: Path, fp32_modules=FP32_MODULES) -> Dict:
+    """Every tensor of DST against SRC: names, shapes, dtype bf16 where SRC is fp32 (fp32 and bit-identical for
+    fp32_modules), bit-identical to SRC's cast."""
     import torch
     from safetensors import safe_open
 
@@ -173,7 +186,10 @@ def verify(src: Path, dst: Path) -> Dict:
         if list(x.shape) != list(y.shape):
             problems.append(f"{t}: shape {list(x.shape)} vs {list(y.shape)}")
             continue
-        if x.dtype == torch.float32:
+        if x.dtype == torch.float32 and keep_fp32(t, fp32_modules):
+            if not (y.dtype == torch.float32 and torch.equal(x, y)):
+                problems.append(f"{t}: an fp32 module tensor is not the unchanged float32 one ({y.dtype})")
+        elif x.dtype == torch.float32:
             if y.dtype != torch.bfloat16:
                 problems.append(f"{t}: dtype {y.dtype}, not bfloat16")
                 continue
@@ -197,7 +213,8 @@ def dir_bytes(p: Path) -> int:
     return sum(f.stat().st_size for f in p.iterdir() if f.is_file())
 
 
-def convert(src: Path, dst: Optional[Path], max_shard_gb: float = 5.0, in_place: bool = False) -> Dict:
+def convert(src: Path, dst: Optional[Path], max_shard_gb: float = 5.0, in_place: bool = False,
+            fp32_modules=FP32_MODULES) -> Dict:
     src = src.resolve()
     if in_place:
         if dst is not None:
@@ -213,9 +230,9 @@ def convert(src: Path, dst: Optional[Path], max_shard_gb: float = 5.0, in_place:
         shutil.rmtree(work)  # a partial copy of an earlier, interrupted run of this tool
     t0 = time.time()
     src_bytes = sum((src / f).stat().st_size for f in weight_files(src))
-    info = write_copy(src, work, max_shard_gb)
+    info = write_copy(src, work, max_shard_gb, fp32_modules)
     t_write = time.time() - t0
-    check = verify(src, work)
+    check = verify(src, work, fp32_modules)
     manifest = {"utc": utc(), "tool": "vagen.q38.sft.to_bf16", "source": str(src), "source_weight_bytes": src_bytes,
                 "bf16_weight_bytes": info["bytes"], "write_seconds": round(t_write, 1),
                 "verify_seconds": round(time.time() - t0 - t_write, 1), "in_place": in_place, **info, "verify": check}
@@ -252,13 +269,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     v = sub.add_parser("verify")
     v.add_argument("src", type=Path)
     v.add_argument("dst", type=Path)
+    for p in (c, v):
+        p.add_argument("--fp32-modules", default=",".join(FP32_MODULES),
+                       help="comma list of name substrings kept float32 (default A_log; '' for none)")
     a = ap.parse_args(argv)
+    mods = tuple(m for m in a.fp32_modules.split(",") if m)
     if a.cmd == "convert":
-        m = convert(a.src, a.dst, a.max_shard_gb, a.in_place)
+        m = convert(a.src, a.dst, a.max_shard_gb, a.in_place, mods)
         print(json.dumps({k: m[k] for k in ("output", "source_weight_bytes", "bf16_weight_bytes", "write_seconds",
                                              "verify_seconds", "counts")} | {"ok": m["verify"]["ok"]}, indent=1))
     else:
-        r = verify(a.src, a.dst)
+        r = verify(a.src, a.dst, mods)
         print(json.dumps(r, indent=1))
         sys.exit(0 if r["ok"] else 1)
 
