@@ -65,9 +65,14 @@ TYPES: Dict[str, ModelType] = {
     # q38: Qwen3.5 / Qwen3.8 (config.json model_type "qwen3_5", e.g. /mnt/umm/users/yinbaiqiao/q38/models/Qwen3.8-27B).
     # Its jobs run their trainer and evaluations in the q38 env (the job script's TRAIN_ENV_ROOT; the render service
     # stays in vagen-lite) and the trainer through the V1 entry vagen.q38.ppo_v1.  The CUDA 13 forward-compatibility
-    # libraries need no entry here: the job script adds them on a driver older than 580 (zoetrope's 550.90.07).  No
-    # SFT tool here yet (the SFT is LLaMA-Factory main, outside DESIGN_ASYNC)
-    "qwen3_5": ModelType("qwen3_5", f"{Q38_ENV}/bin/python", None, None, None,
+    # libraries need no entry here: the job script adds them on a driver older than 580 (zoetrope's 550.90.07).  SFT
+    # (2026-11-20): LLaMA-Factory main (b4e4d3fc, installed --no-deps in the q38 env; SFT_OPTIONS.md option A) through
+    # vagen.q38.sft.lf_launcher (LF's run_exp plus the q38 callback: per-step seconds and memory, per-epoch bf16 copy)
+    # with FSDP1 units of Qwen3.5's classes.  No LF template here on purpose: the SFT folders come only from
+    # vagen.q38.sft.lf_data (template qwen3_8, enable_thinking false, every message stripped), named in the chain's
+    # plan "sft_lf_dirs"; scripts/prepare_active_spatial_sft.py would write neither
+    "qwen3_5": ModelType("qwen3_5", f"{Q38_ENV}/bin/python", None, "vagen.q38.sft.lf_launcher",
+                         "vagen/q38/configs/sft/accelerate_fsdp_qwen35.yaml",
                          env=(("TRAIN_ENV_ROOT", Q38_ENV), ("V10_PPO_MODULE", "vagen.q38.ppo_v1"))),
 }
 

@@ -35,8 +35,10 @@ class ModelTypesTest(unittest.TestCase):
                                          "CAMBRIAN_SRC": M.CAMBRIAN_SRC, "TRANSFORMERS_ATTN_IMPLEMENTATION": "sdpa"})
         self.assertTrue(Path(M.CAMBRIAN_SRC).is_dir() or not Path("/mnt/umm").is_dir())
         self.assertEqual((q25.env, q3.env), ((), ()))
-        q35 = M.get("qwen3_5")  # q38: the trainer and evaluations in the q38 env, the V1 entry, no SFT tool yet
-        self.assertEqual((q35.python, q35.lf_launcher), (f"{M.Q38_ENV}/bin/python", None))
+        q35 = M.get("qwen3_5")  # q38: the trainer, the evaluations and the SFT in the q38 env, the V1 entry
+        self.assertEqual((q35.python, q35.lf_template, q35.lf_launcher),
+                         (f"{M.Q38_ENV}/bin/python", None, "vagen.q38.sft.lf_launcher"))
+        self.assertEqual(q35.sft_accelerate_config, "vagen/q38/configs/sft/accelerate_fsdp_qwen35.yaml")
         self.assertEqual(dict(q35.env), {"TRAIN_ENV_ROOT": M.Q38_ENV, "V10_PPO_MODULE": "vagen.q38.ppo_v1"})
         with self.assertRaises(ValueError):
             M.get("llava")

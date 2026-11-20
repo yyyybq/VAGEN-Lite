@@ -235,6 +235,7 @@ case ${MODE} in
     ALSO_OWNED=${LF}  # the model is written to LF/model, outside RUN
     STEPS=${4:-30}
     export CUDA_VISIBLE_DEVICES=0
+    use_train_env  # q38: the SFT in TRAIN_ENV_ROOT's environment (nothing changes without a separate one)
     "${PY}" - "${LF}/train.yaml" "${RUN}/sft_trial.yaml" "${RUN}/model" "${STEPS}" <<'PY'
 import sys, yaml
 src, dst, out, steps = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
@@ -248,6 +249,10 @@ PY
     LF=${3:?LLaMA-Factory directory}
     ALSO_OWNED=${LF}  # the model is written to LF/model, outside RUN
     export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+    # q38 (2026-11-20): Qwen3.8-27B's SFT runs in the q38 env (torch cu130): without use_train_env a zoetrope node
+    # (driver 550) has no CUDA 13 compatibility libraries (torch sees no GPU), and fla's Triton kernels of the gated
+    # delta net layers have no C compiler / libcuda link (the same reasons as the RL modes)
+    use_train_env
     lf_train "${LF}/train.yaml" 8
     ;;
   rl-trial)

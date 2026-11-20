@@ -26,7 +26,10 @@ def _lf_template(model_type: str) -> str:
     """The LLaMA-Factory template of a model type (vagen/models/model_types.py; Qwen2.5-VL: qwen2_vl)."""
     from vagen.models.model_types import get
 
-    return get(model_type).lf_template
+    template = get(model_type).lf_template
+    if template is None:  # q38: qwen3_5's SFT folders come from vagen.q38.sft.lf_data (qwen3_8, enable_thinking false)
+        raise SystemExit(f"no LLaMA-Factory template for model type {model_type}; build its folder with vagen.q38.sft.lf_data")
+    return template
 
 
 def read_rows(path):
