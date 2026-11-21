@@ -42,6 +42,22 @@ What is new:
     episode whose row carried another address counts vagen_stats.render_url_refreshed = 1
     (vagen/env/render_url_refreshed), and each process logs the first such replacement once (WARNING).
 
+Phase 2 (DESIGN_ASYNC 2.3, the row of this file; PEAR_ASSESSMENT B4): the per-turn estimators' records, only when
+``algorithm.adv_estimator`` selects one (so every episode of a run carries the same keys, and a GRPO run's episodes
+are unchanged):
+  - turn_credit (vagen/turn_credit.py): extra_fields.turn_records = episode_record(initial score, one turn_record per
+    env turn, response_length, the start pose's table distance), recorded where the reward line's GymAgentLoop records
+    them (RW 26afbc6f gym_agent_loop.py:299-302, 376-379, 513-517: after the step's success / turn counters, with the
+    span of the turn the env just read; an env.step exception is recorded as that loop does, reward 0, done);
+  - turn_gae (vagen/turn_gae.py): extra_fields.turn_rewards = turn_record(every generated turn's span, its env reward),
+    as the 8B loop (GL:362-365);
+  - with either: extra_fields.turn_meta, per generated turn the weight versions of its generate call ([min, max]),
+    how it stopped (eos / endoftext / length), its generation seconds, and the seconds of the env step that read it
+    (DESIGN_ASYNC 2.3: ver, stop, gen_s, render_s; d2 3.6 EpisodeRecorder).  Report only; no estimator reads it.
+A span covers exactly the turn's generated tokens (mask 1): Continuous Token puts its inserted boundary tokens (the
+"\\n" after <|im_end|>, mask 0) in front of the next observation, not into the assistant merge
+(continuous_token.py:36-53, 380-417).
+
 Every extra field is JSON-style (str keys, lists, Python scalars): a tuple comes back from TransferQueue as a list, and
 every episode carries the same keys (TransferQueue's kv_batch_get refuses samples with different top-level fields).
 
@@ -243,6 +259,13 @@ class _Episode:
         self.faults: dict[str, fi.Target] = {}
         self.fault_where = ""
 
+        # phase 2: the per-turn estimators' records (filled only when one is selected)
+        self.turn_records: list[dict[str, Any]] = []  # turn_credit: one vagen.turn_credit.turn_record per env turn
+        self.turn_d0: Optional[int] = None  # turn_credit: the start pose's table distance
+        self.turn_versions: list[list[Optional[int]]] = []  # per generated turn: [min, max] global steps
+        self.turn_stops: list[str] = []  # per generated turn: eos / endoftext / length
+        self.turn_render_s: list[float] = []  # per env turn: the seconds of the env.step that read the turn
+
     @property
     def want_logprobs(self) -> bool:
         """Whether the episode carries rollout logprobs (rollout.calculate_log_probs)."""
@@ -255,6 +278,7 @@ class _Episode:
         hi = extra.get("max_global_steps")
         lo = _opt_int(global_steps if lo is None else lo)
         hi = _opt_int(global_steps if hi is None else hi)
+        self.turn_versions.append([lo, hi])
         if lo is not None:
             self.min_global_steps = lo if self.min_global_steps is None else min(self.min_global_steps, lo)
         if hi is not None:
@@ -341,6 +365,13 @@ class GymAgentLoopV1(AgentLoopBase):
         registry = dict(DEFAULT_ENV_REGISTRY)
         registry.update({str(k): str(v) for k, v in (_plain(_select(self.config, "env_registry", None)) or {}).items()})
         self.env_registry_paths = registry
+
+        # phase 2: which per-turn records the episodes carry (the estimator of algorithm.adv_estimator)
+        from vagen.turn_credit import selected as _turn_credit_selected
+        from vagen.turn_gae import enabled as _turn_gae_enabled
+
+        self.record_turn_records = bool(_turn_credit_selected(self.config))
+        self.record_turn_rewards = bool(_turn_gae_enabled(_select(self.config, "algorithm", None)))
 
         tok = self.tokenizer
         self._im_end_id = self._token_id("<|im_end|>")
@@ -464,6 +495,10 @@ class GymAgentLoopV1(AgentLoopBase):
             ep.scene_id = info.get("scene_id", "unknown")
             ep.initial_score = float(info.get("initial_potential_score", 0.0))
             ep.task_id = str(info.get("task_id") or "")
+        if getattr(self, "record_turn_records", False):  # turn_credit: the start pose's table distance (RW GL:302)
+            from vagen.turn_credit import reset_distance
+
+            ep.turn_d0 = reset_distance(info)
 
         if sys_obs:
             sys_imgs = _normalize_images(sys_obs.get("multi_modal_input", {}).get("<image>", []) or [])
@@ -524,6 +559,11 @@ class GymAgentLoopV1(AgentLoopBase):
             token_ids, log_probs = token_ids[:max_tokens], log_probs[:max_tokens]
         if token_ids and token_ids[-1] == self._endoftext_id:
             ep.endoftext_stops += 1  # Continuous Token inserts no "\n" after it
+            ep.turn_stops.append("endoftext")
+        elif not token_ids or token_ids[-1] not in self._eos_ids:
+            ep.turn_stops.append("length")
+        else:
+            ep.turn_stops.append("eos")
         if not token_ids or token_ids[-1] not in self._eos_ids:
             ep.length_stops += 1
         target = ep.faults.get("image_pad_extra")
@@ -575,12 +615,18 @@ class GymAgentLoopV1(AgentLoopBase):
             ep.step_exceptions += 1
             error = True
         ep.render_s.append(time.perf_counter() - t0)
+        ep.turn_render_s.append(ep.render_s[-1])
 
         # GL:461-479
         ep.env_rewards.append(float(reward))
         ep.traj_success = extract_success(info)
         ep.env_turns += 1
         ep.invalid_turns += int(turn_invalid(info))
+        if getattr(self, "record_turn_records", False):  # turn_credit (RW GL:513-517): the turn the env just read
+            from vagen.turn_credit import turn_record
+
+            span = ep.turn_spans[-1] if ep.turn_spans else None
+            ep.turn_records.append(turn_record(span, reward, info, ep.traj_success, not turn_invalid(info)))
         if info:
             ep.n_primitive_steps = int(info.get("env_step", ep.env_turns))
             if "final_score" in info:
@@ -638,6 +684,13 @@ class GymAgentLoopV1(AgentLoopBase):
         if ep.response_logprobs is not None and len(ep.response_logprobs) != len(ep.response_mask):
             raise RuntimeError("response logprobs and response mask differ in length")
 
+        extra_fields = {
+            "min_global_steps": ep.min_global_steps,
+            "max_global_steps": ep.max_global_steps,
+            "reward_extra_info": ep.reward_extra_info(),
+            "vagen_stats": ep.vagen_stats(),
+        }
+        extra_fields.update(self._turn_fields(ep))
         return AgentLoopOutput(
             prompt_ids=ep.prompt_ids[:p0],
             response_ids=response_ids,
@@ -651,10 +704,31 @@ class GymAgentLoopV1(AgentLoopBase):
                 "tool_calls": float(sum(ep.render_s)),
                 "num_preempted": -1 if ep.num_preempted is None else int(ep.num_preempted),
             },
-            extra_fields={
-                "min_global_steps": ep.min_global_steps,
-                "max_global_steps": ep.max_global_steps,
-                "reward_extra_info": ep.reward_extra_info(),
-                "vagen_stats": ep.vagen_stats(),
-            },
+            extra_fields=extra_fields,
         )
+
+    def _turn_fields(self, ep: _Episode) -> dict[str, Any]:
+        """The per-turn estimators' extra fields (module docstring, phase 2); {} when neither is selected."""
+        out: dict[str, Any] = {}
+        if getattr(self, "record_turn_records", False):  # turn_credit (RW GL:376-379)
+            from vagen.turn_credit import episode_record
+
+            if len(ep.turn_records) != ep.env_turns:
+                raise RuntimeError(f"turn_credit: {len(ep.turn_records)} turn records for {ep.env_turns} env turns")
+            out["turn_records"] = episode_record(ep.initial_score, ep.turn_records, self.response_length, ep.turn_d0)
+        if getattr(self, "record_turn_rewards", False):  # turn_gae (GL:362-365)
+            from vagen.turn_gae import turn_record as turn_rewards_record
+
+            out["turn_rewards"] = turn_rewards_record(ep.turn_spans, ep.env_rewards)
+        if out:
+            n = len(ep.turn_spans)
+            if not (len(ep.turn_versions) == len(ep.turn_stops) == len(ep.turn_gen_s) == n):
+                raise RuntimeError(f"turn_meta: {n} spans, {len(ep.turn_versions)} versions, {len(ep.turn_stops)} "
+                                   f"stops, {len(ep.turn_gen_s)} generation times")
+            out["turn_meta"] = {
+                "ver": [[_opt_int(lo), _opt_int(hi)] for lo, hi in ep.turn_versions],
+                "stop": [str(s) for s in ep.turn_stops],
+                "gen_s": [float(x) for x in ep.turn_gen_s],
+                "render_s": [float(x) for x in ep.turn_render_s],
+            }
+        return out
