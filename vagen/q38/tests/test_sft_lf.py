@@ -116,6 +116,83 @@ def test_build_refuses_another_recipe_and_a_used_folder(tmp_path):
         lf_data.build(src, tmp_path / "o", "/m")
 
 
+def video_rec():
+    """A P0-style record: one video (a list of frames), two questions on it."""
+    return {"messages": [{"role": "user", "content": "<video>\nHow many sofas?\nAnswer with a single number."},
+                         {"role": "assistant", "content": "2"},
+                         {"role": "user", "content": "Largest dimension of the bed in cm?\n"},
+                         {"role": "assistant", "content": "225"}],
+            "images": [], "videos": [[f"/v/{i}.png" for i in range(32)]]}
+
+
+def make_mix_src(tmp: Path) -> Path:
+    """A matrix-cell-like folder: two train datasets (one with videos), three eval datasets, comma-separated."""
+    src = tmp / "mix"
+    src.mkdir()
+    cfg = dict(lf_data.RECIPE_8B, model_name_or_path="/old/8b", dataset_dir=str(src), dataset="P0_train,P2q_train",
+               eval_dataset="P0_val,P1_val,P2q_val", template="qwen3_vl_nothink", output_dir=str(src / "model"),
+               do_eval=True, eval_strategy="steps", eval_steps=200, image_max_pixels=65536, video_max_pixels=65536,
+               eval_on_each_dataset=True)
+    (src / "train.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
+    names = ("P0_train", "P2q_train", "P0_val", "P1_val", "P2q_val")
+    info = {n: {"file_name": f"{n}.jsonl", "formatting": "sharegpt",
+                "columns": {"messages": "messages", "images": "images", "videos": "videos"}} for n in names}
+    (src / "dataset_info.json").write_text(json.dumps(info))
+    for n in names:
+        recs = [video_rec(), rec()] if n.startswith("P0") else [rec(), rec()]
+        (src / f"{n}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+    return src
+
+
+def test_dataset_names():
+    assert lf_data.dataset_names("P0_train, P2q_train") == ["P0_train", "P2q_train"]
+    assert lf_data.dataset_names(["a", " b "]) == ["a", "b"]
+    assert lf_data.dataset_names(None) == [] and lf_data.dataset_names("") == []
+    assert lf_data.dataset_names("trajectory_train") == ["trajectory_train"]
+
+
+def test_build_mixture_with_videos(tmp_path):
+    src = make_mix_src(tmp_path)
+    sync = {"accelerator_config": {"gradient_accumulation_kwargs": {"sync_each_batch": True}}}
+    m = lf_data.build(src, tmp_path / "out", "/m/27b", sets=sync, bf16_copy="in_place", video_markers="none")
+    assert m["video_markers"] == "none"
+    out = tmp_path / "out"
+    cfg = yaml.safe_load((out / "train.yaml").read_text())
+    assert cfg["dataset"] == "P0_train,P2q_train" and cfg["eval_dataset"] == "P0_val,P1_val,P2q_val"
+    assert cfg["do_eval"] is True and cfg["eval_strategy"] == "steps" and cfg["eval_on_each_dataset"] is True
+    assert cfg["image_max_pixels"] == 65536 and cfg["video_max_pixels"] == 65536
+    assert set(m["recipe_changes"]) == {"model_name_or_path", "template", "enable_thinking", "dataset_dir",
+                                        "output_dir", "ddp_timeout", "accelerator_config"}
+    assert json.loads((out / "q38_sft.json").read_text())["bf16_copy"] == "in_place"
+    assert m["datasets"]["P0_train"]["media"] == {"records_with_images": 1, "records_with_videos": 1, "images": 2,
+                                                  "videos": 1, "max_images": 2, "max_video_frames": 32}
+    assert m["datasets"]["P2q_train"]["media"]["records_with_videos"] == 0
+    v = json.loads((out / "P0_train.jsonl").read_text().splitlines()[0])
+    assert v["videos"] == video_rec()["videos"] and v["messages"][2]["content"] == "Largest dimension of the bed in cm?"
+
+
+def test_build_mixture_refuses_a_missing_dataset(tmp_path):
+    src = make_mix_src(tmp_path)
+    cfg = yaml.safe_load((src / "train.yaml").read_text())
+    cfg["dataset"] = "P0_train,P1_train"
+    (src / "train.yaml").write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match="P1_train, which is not converted"):
+        lf_data.build(src, tmp_path / "o", "/m")
+    cfg["dataset"] = ""
+    (src / "train.yaml").write_text(yaml.safe_dump(cfg))
+    with pytest.raises(ValueError, match="names no dataset"):
+        lf_data.build(src, tmp_path / "o2", "/m")
+
+
+def test_strip_record_counts_video_placeholders():
+    r = video_rec()
+    out, _ = lf_data.strip_record(r, "t", "none")
+    assert out["videos"] == r["videos"]
+    r["videos"].append(["/v/x.png"])
+    with pytest.raises(ValueError, match="2 videos"):
+        lf_data.strip_record(r, "t", "none")
+
+
 # ------------------------------------------------------------------------------------------------------ bf16 copy
 def fake_ckpt(d: Path, shards=2) -> dict:
     from safetensors.torch import save_file

@@ -8,6 +8,12 @@ dataset_info.json and the recipe train.yaml.  The 27B folder gets:
   (chat_template.jinja lines 70, 78, 92, 103), so the RL agent loop and the evaluator see the trimmed text, while
   LLaMA-Factory's qwen3_8 template strips only the system turn (TEMPLATE_CHECK conclusion 2).  Nothing else of a record
   changes (images, videos, roles, order);
+- a record with a video (P0's video conversations in the matrix cells): --video-markers says how its <video>
+  placeholder is written (the user's decision; check_lf_qwen35 tokens / p0_eval show both layouts): "outer" puts
+  the chat template's <|vision_start|> ... <|vision_end|> around it, which is what Qwen3.8's processor (transformers
+  5.10) and vLLM 0.28 write around the per-frame blocks at evaluation, while LLaMA-Factory main's qwen3_vl plugin
+  writes the blocks alone; "none" keeps the placeholder as it is (the blocks alone).  A source with videos and no
+  choice stops the build (records without a video are the same either way);
 - dataset_info.json: the source's entries of the datasets written;
 - train.yaml: the 8B recipe with only what the model needs changed -- model_name_or_path, template qwen3_8,
   enable_thinking false (the empty thinking block <think>\\n\\n</think>\\n\\n goes to the prompt side of every
@@ -22,7 +28,9 @@ dataset_info.json and the recipe train.yaml.  The 27B folder gets:
 
 Records are checked as they are read: roles system? (user assistant)+, one <image> per image, one <video> per video,
 no thinking tags, no message empty after stripping.  A record that fails stops the build (nothing is dropped
-silently).
+silently).  The recipe's "dataset" / "eval_dataset" may name several datasets (LLaMA-Factory's comma-separated list,
+e.g. the matrix cells' "P0_train,P2q_train"); each must be converted.  The manifest counts each dataset's images and
+videos (a video is a list of frame paths, as in P0).
 """
 from __future__ import annotations
 
@@ -41,6 +49,9 @@ import yaml
 TEMPLATE = "qwen3_8"
 ROLES = ("system", "user", "assistant")
 THINK_TAGS = ("<think>", "</think>")
+# how a <video> placeholder is written (module docstring); a record with a video needs one of them
+VIDEO_MARKERS = ("outer", "none")
+VIDEO_OUTER = "<|vision_start|><video><|vision_end|>"
 # the recipe of the 8B SFT that must not change with the model (handoff section 4, PREREG_Q38_DRAFT row "SFT");
 # build() refuses a source train.yaml that differs from it, so a wrong source folder cannot pass for C0's recipe
 RECIPE_8B = {
@@ -74,9 +85,11 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def strip_record(rec: Dict[str, Any], where: str) -> Tuple[Dict[str, Any], Dict[str, int]]:
-    """The record with every message's content stripped, and {role/leading|trailing: 1} for what changed.
-    Raises ValueError on a record LLaMA-Factory or the chat template would read differently from the RL agent loop."""
+def strip_record(rec: Dict[str, Any], where: str,
+                 video_markers: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, int]]:
+    """The record with every message's content stripped (and its <video> placeholders written as video_markers says),
+    and {role/leading|trailing: 1} for what changed.  Raises ValueError on a record LLaMA-Factory or the chat
+    template would read differently from the RL agent loop, and on a record with a video without video_markers."""
     msgs = rec.get("messages")
     if not isinstance(msgs, list) or not msgs:
         raise ValueError(f"{where}: no messages")
@@ -111,7 +124,23 @@ def strip_record(rec: Dict[str, Any], where: str) -> Tuple[Dict[str, Any], Dict[
         raise ValueError(f"{where}: {n_image} <image> placeholders, {len(rec.get('images') or [])} images")
     if n_video != len(rec.get("videos") or []):
         raise ValueError(f"{where}: {n_video} <video> placeholders, {len(rec.get('videos') or [])} videos")
+    if n_video:
+        if video_markers not in VIDEO_MARKERS:
+            raise ValueError(f"{where}: a record with a video needs video_markers, one of {VIDEO_MARKERS}")
+        if video_markers == "outer":
+            out = [{**m, "content": m["content"].replace("<video>", VIDEO_OUTER)} if m["role"] == "user" else m
+                   for m in out]
+            changed["user/video_markers"] = 1
     return {**rec, "messages": out}, changed
+
+
+def dataset_names(value: Any) -> List[str]:
+    """The dataset names of a train.yaml "dataset" / "eval_dataset" value: LLaMA-Factory's comma-separated string
+    (or a list); [] for none."""
+    if value is None or value == "":
+        return []
+    items = value if isinstance(value, (list, tuple)) else str(value).split(",")
+    return [str(x).strip() for x in items if str(x).strip()]
 
 
 def select_lines(n: int, limit: Optional[int], seed: int) -> List[int]:
@@ -121,14 +150,24 @@ def select_lines(n: int, limit: Optional[int], seed: int) -> List[int]:
     return sorted(random.Random(seed).sample(range(n), limit))
 
 
-def convert_file(src: Path, dst: Path, limit: Optional[int], seed: int) -> Dict[str, Any]:
+def convert_file(src: Path, dst: Path, limit: Optional[int], seed: int,
+                 video_markers: Optional[str] = None) -> Dict[str, Any]:
     lines = [l for l in src.read_text().splitlines() if l.strip()]
     keep = select_lines(len(lines), limit, seed)
     counts: Dict[str, int] = {}
     messages_by_role: Dict[str, int] = {}
+    media = {"records_with_images": 0, "records_with_videos": 0, "images": 0, "videos": 0, "max_images": 0,
+             "max_video_frames": 0}
     with open(dst, "w") as f:
         for i in keep:
-            rec, changed = strip_record(json.loads(lines[i]), f"{src.name}:{i + 1}")
+            rec, changed = strip_record(json.loads(lines[i]), f"{src.name}:{i + 1}", video_markers)
+            images, videos = rec.get("images") or [], rec.get("videos") or []
+            media["records_with_images"] += int(bool(images))
+            media["records_with_videos"] += int(bool(videos))
+            media["images"] += len(images)
+            media["videos"] += len(videos)
+            media["max_images"] = max(media["max_images"], len(images))
+            media["max_video_frames"] = max([media["max_video_frames"]] + [len(v) if isinstance(v, list) else 1 for v in videos])
             for k, v in changed.items():
                 counts[k] = counts.get(k, 0) + v
             for m in rec["messages"]:
@@ -136,7 +175,7 @@ def convert_file(src: Path, dst: Path, limit: Optional[int], seed: int) -> Dict[
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return {"source": str(src), "source_sha256": sha256(src), "source_records": len(lines), "records": len(keep),
             "selected_lines": keep if len(keep) < len(lines) else "all", "seed": seed if len(keep) < len(lines) else None,
-            "messages_by_role": messages_by_role, "messages_stripped": counts, "output": str(dst),
+            "messages_by_role": messages_by_role, "messages_stripped": counts, "media": media, "output": str(dst),
             "output_sha256": sha256(dst)}
 
 
@@ -173,22 +212,26 @@ def git_head(path: Path) -> Optional[str]:
 
 def build(src: Path, out: Path, model: str, profile: str = "formal", limits: Optional[Dict[str, int]] = None,
           seed: int = 42, sets: Optional[Dict[str, Any]] = None, datasets: Optional[Iterable[str]] = None,
-          bf16_copy: str = "sibling") -> Dict[str, Any]:
+          bf16_copy: str = "sibling", video_markers: Optional[str] = None) -> Dict[str, Any]:
     limits, sets = dict(limits or {}), dict(sets or {})
     if profile not in PROFILES:
         raise ValueError(f"profile must be one of {sorted(PROFILES)}")
     if bf16_copy not in BF16_COPY:
         raise ValueError(f"bf16_copy must be one of {BF16_COPY}")
+    if video_markers is not None and video_markers not in VIDEO_MARKERS:
+        raise ValueError(f"video_markers must be one of {VIDEO_MARKERS}")
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f"{out} is not empty; give a new folder")
     info = json.loads((src / "dataset_info.json").read_text())
     src_yaml = yaml.safe_load((src / "train.yaml").read_text())
     names = list(datasets) if datasets else [n for n in info if (src / info[n]["file_name"]).is_file()
                                             and (src / info[n]["file_name"]).stat().st_size > 0]
-    train = src_yaml.get("dataset")
-    evald = src_yaml.get("eval_dataset")
-    for need in (train, evald):
-        if need and need not in names:
+    train = dataset_names(src_yaml.get("dataset"))
+    evald = dataset_names(src_yaml.get("eval_dataset"))
+    if not train:
+        raise ValueError("the source train.yaml names no dataset")
+    for need in train + evald:
+        if need not in names:
             raise ValueError(f"the recipe trains / evaluates on {need}, which is not converted (datasets {names})")
     unknown = set(limits) - set(names)
     if unknown:
@@ -197,16 +240,18 @@ def build(src: Path, out: Path, model: str, profile: str = "formal", limits: Opt
     files = {}
     for name in names:
         entry = info[name]
-        files[name] = convert_file(src / entry["file_name"], out / entry["file_name"], limits.get(name), seed)
+        files[name] = convert_file(src / entry["file_name"], out / entry["file_name"], limits.get(name), seed,
+                                   video_markers)
     (out / "dataset_info.json").write_text(json.dumps({n: info[n] for n in names}, indent=2) + "\n")
-    cfg, changes = recipe(src_yaml, model, out, profile, sets, evald)
+    cfg, changes = recipe(src_yaml, model, out, profile, sets, ",".join(evald) or None)
     (out / "train.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     settings = {"bf16_copy": bf16_copy, "host_mem_s": 10}
     (out / "q38_sft.json").write_text(json.dumps(settings, indent=1) + "\n")  # read by vagen.q38.sft.lf_launcher
     manifest = {"utc": utc(), "tool": "vagen.q38.sft.lf_data", "worktree_head": git_head(Path(__file__).resolve().parents[3]),
                 "source_dir": str(src), "source_train_yaml_sha256": sha256(src / "train.yaml"), "model": model,
                 "profile": profile, "recipe_changes": changes, "launcher_settings": settings, "datasets": files,
-                "strip_rule": "every message content -> str.strip() (= jinja |trim, chat_template.jinja 70/78/92/103)"}
+                "strip_rule": "every message content -> str.strip() (= jinja |trim, chat_template.jinja 70/78/92/103)",
+                "video_markers": video_markers}
     (out / "build_manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + "\n")
     return manifest
 
@@ -224,11 +269,13 @@ def main(argv: Optional[List[str]] = None) -> None:
     b.add_argument("--set", action="append", default=[], help="KEY=VALUE (yaml value) for train.yaml")
     b.add_argument("--datasets", default=None, help="comma-separated dataset names (default: every non-empty file)")
     b.add_argument("--bf16-copy", default="sibling", choices=BF16_COPY, help="q38_sft.json for the launcher")
+    b.add_argument("--video-markers", default=None, choices=VIDEO_MARKERS,
+                   help="how a <video> placeholder is written (required when a source record has a video)")
     a = ap.parse_args(argv)
     limits = {k: int(v) for k, v in (s.split("=", 1) for s in a.limit)}
     sets = {k: parse_value(v) for k, v in (s.split("=", 1) for s in a.set)}
     m = build(a.src, a.out, a.model, a.profile, limits, a.seed, sets, a.datasets.split(",") if a.datasets else None,
-              a.bf16_copy)
+              a.bf16_copy, a.video_markers)
     summary = {n: {k: d[k] for k in ("records", "source_records", "messages_stripped")} for n, d in m["datasets"].items()}
     print(json.dumps({"out": str(a.out), "profile": m["profile"], "datasets": summary,
                       "recipe_changes": m["recipe_changes"]}, indent=1, ensure_ascii=False))
