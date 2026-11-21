@@ -105,6 +105,9 @@ class ActiveSpatialEnvConfig(BaseEnvConfig):
     # <task_id>.npz, d = the pose's remaining minimum number of actions; a pose missing from the table counts 0).
     distance_tables_dir: Optional[str] = None
     optimal_progress_slack: int = 4
+    # Reward line (phase 2, direction 1), default off: a pose missing from the table takes the smallest reachable
+    # distance among its 26 neighbour cells (data_gen.interiorgs_v10.distance_table_near).
+    optimal_progress_near: bool = False
     # The privileged critic (the user's supplement of 2026-11-13, gate 1 of docs/PREREG_PPO2.md;
     # vagen/feature_critic.py), default off: critic_features adds info["critic_features"] at reset and after every
     # step (critic_features.py: the pose's remaining minimum number of actions from the task's distance table in
