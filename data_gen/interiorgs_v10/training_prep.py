@@ -802,8 +802,8 @@ Q38_PT_FILTER, Q38_PT_TARGET_GROUPS = "nominal", 24  # Q5 PT: every one of the 2
 # keys of verl's default the q38 config must not have: actor.grad_clip is deprecated and unread in V1 (the clip is
 # actor.optim.clip_grad, transformer_impl.py:859-876); a config showing it would suggest it acts
 Q38_REMOVED = ("actor_rollout_ref.actor.grad_clip",)
-# phase 2 adds turn_gae (package p1tgae; its value loss is phase 3 and the contract refuses the runs until then) and,
-# over p1, the --turn-credit estimator of Q5 PT
+# phase 2 adds turn_gae (package p1tgae; its value loss, vagen/q38/losses.py vagen_value_loss, is phase 3) and, over p1,
+# the --turn-credit estimator of Q5 PT
 Q38_PACKAGE_ESTIMATORS = ("grpo", "turn_gae")
 # phase 1 runs package p1 only: the runtime contract (vagen/q38/contract.py EXPECTED) fixes its shape, 24 candidates a
 # step (data.train_batch_size, Y8:291), 8 episodes a task and 12 kept groups; p2 (48 candidates) would be refused at
@@ -844,6 +844,36 @@ Q38_LAYOUT_KEYS = (
     "actor_rollout_ref.rollout.agent.num_workers",
     "actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes",
 )
+# Phase 3 (DESIGN_ASYNC 6 W12): the value network's card layout of a start-model type (configs/
+# ppo_q38_critic_layout_<type>.yaml), merged after Q38_LAYOUTS only when the run trains a critic (turn_gae, package
+# p1tgae), so every GRPO config stays byte-identical.  The 27B critic is the actor's model (8B: critic = RL start model,
+# qw3tgd ppo.yaml:360) on the actor's engine layout: FSDP2 with the optimizer state on the card only for the step (smoke
+# Z1's actor, Z1 README 3); its memory on the 27B is not measured yet (DESIGN 7.1 question 9: smoke S8 on the 4B first)
+Q38_CRITIC_LAYOUTS = {"qwen3_5": Path(__file__).with_name("configs") / "ppo_q38_critic_layout_qwen3_5.yaml"}
+Q38_CRITIC_LAYOUT_KEYS = ("critic.strategy", "critic.fsdp.strategy", "critic.fsdp.optimizer_offload_step")
+# the 8B config's critic keys the q38 config must hold with the same value (the recipe file and verl's default give
+# them; a run that changed one on the 8B path would otherwise lose it silently): 8B key -> q38 key (V1 schema)
+Q38_CRITIC_FROM_8B = {
+    "critic.optim.optimizer": "critic.optim.optimizer",
+    "critic.optim.lr": "critic.optim.lr",
+    "critic.optim.lr_warmup_steps_ratio": "critic.optim.lr_warmup_steps_ratio",
+    "critic.optim.lr_warmup_steps": "critic.optim.lr_warmup_steps",
+    "critic.optim.weight_decay": "critic.optim.weight_decay",
+    "critic.optim.betas": "critic.optim.betas",
+    "critic.optim.min_lr_ratio": "critic.optim.min_lr_ratio",
+    "critic.optim.lr_scheduler_type": "critic.optim.lr_scheduler_type",
+    "critic.grad_clip": "critic.optim.clip_grad",  # the clip 0.6.1 read (dp_critic.py:135-142); V1 reads optim.clip_grad
+    "critic.optim.clip_grad": "critic.optim.clip_grad",
+    "critic.model.fsdp_config.param_offload": "critic.fsdp.param_offload",
+    "critic.model.fsdp_config.optimizer_offload": "critic.fsdp.optimizer_offload",
+    "critic.model.fsdp_config.model_dtype": "critic.fsdp.model_dtype",
+    "critic.model.enable_gradient_checkpointing": "critic.model.enable_gradient_checkpointing",
+    "critic.model.use_remove_padding": "critic.model.use_remove_padding",
+    "critic.model.lora_rank": "critic.model.lora_rank",
+    "critic.ppo_micro_batch_size_per_gpu": "critic.ppo_micro_batch_size_per_gpu",
+    "critic.cliprange_value": "critic.cliprange_value",
+    "critic.ulysses_sequence_parallel_size": "critic.ulysses_sequence_parallel_size",
+}
 
 
 def _q38_flat(node: Any, prefix: str = "") -> Dict[str, Any]:
@@ -928,7 +958,8 @@ def q38_check_options(args: argparse.Namespace) -> None:
 def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[Dict[str, Any]] = None,
                    default_path: Optional[Path] = None,
                    delta_path: Optional[Path] = None,
-                   layouts: Optional[Dict[str, Path]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                   layouts: Optional[Dict[str, Path]] = None,
+                   critic_layouts: Optional[Dict[str, Path]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """(the complete q38 V1 config, its report) for the run whose 8B config is ``ppo8`` (``n_train`` train rows).
     Refuses an 8B config the V1 trainer would not run as the 8B one ran."""
     import copy
@@ -991,6 +1022,22 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
             _q38_get(cfg, parent)[1].pop(last)
     hf_export = q38_hf_export(cfg)
     layout = q38_layout(cfg, Q38_LAYOUTS if layouts is None else layouts)
+    critic_layout = None
+    if estimator == "turn_gae":  # phase 3: the value network (DESIGN_ASYNC 6 W12)
+        critic_layout = q38_layout(cfg, Q38_CRITIC_LAYOUTS if critic_layouts is None else critic_layouts,
+                                   Q38_CRITIC_LAYOUT_KEYS)
+        differ = {}
+        for key8, key in Q38_CRITIC_FROM_8B.items():
+            found8, value8 = _q38_get(ppo8, key8)
+            found, value = _q38_get(cfg, key)
+            if not found8 or not found:
+                raise SystemExit(f"--stack q38 turn_gae: {key8} (8B) / {key} (q38) missing")
+            if value8 != value:
+                differ[key8] = {"8b": value8, "q38": {key: value}}
+        if differ:
+            raise SystemExit(f"--stack q38 turn_gae keeps the 8B p1tgae critic (qw3tgd); the 8B config differs: {differ}")
+        if cfg["critic"].get("enable") is not True:
+            raise SystemExit("--stack q38 turn_gae writes critic.enable true (the 8B config has it)")
     # the learning-rate horizon is the recipe's (V1 fixes it at start-up, TB:792-813); the 8B template must agree
     horizon = int(cfg["trainer"]["total_training_steps"])
     if trainer8.get("total_training_steps") != horizon:
@@ -1037,7 +1084,7 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
     # the run's keys that differ from the recipe file's values (a run's own overrides), for the report
     overrides = {k: {"recipe": flat_delta[k], "run": flat[k]} for k in sorted(flat_delta)
                  if flat_delta[k] != Q38_MISSING and k in flat and flat[k] != flat_delta[k]
-                 and k not in (layout.get("keys") or {})}
+                 and k not in (layout.get("keys") or {}) and k not in ((critic_layout or {}).get("keys") or {})}
     report = {"verl_default": str(default_path),
               "verl_default_sha256": hashlib.sha256(default_path.read_bytes()).hexdigest(),
               "delta": str(delta_path), "delta_sha256": hashlib.sha256(delta_path.read_bytes()).hexdigest(),
@@ -1048,6 +1095,8 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
               "run_keys_over_recipe": overrides or None}
     if profile is not None:  # phase 2: only when set, so every GRPO report stays as it was
         report["profile"] = profile
+    if critic_layout is not None:  # phase 3: turn_gae only
+        report["critic_layout"] = critic_layout
     return cfg, report
 
 
@@ -1074,10 +1123,12 @@ def q38_hf_export(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {"model_type": model_type, "hf_dtype": dtype, "hf_fp32_modules": list(fp32_modules)}
 
 
-def q38_layout(cfg: Dict[str, Any], layouts: Dict[str, Path]) -> Dict[str, Any]:
-    """The card layout of the start model's type (``layouts``: {model_type: yaml file}, Q38_LAYOUTS) merged into
-    ``cfg`` in place; a file key outside Q38_LAYOUT_KEYS is refused.  Returns what the report records: the type, the
-    file and its sha256, and {key: {"recipe": the value before, "layout": the value set}} (file None: no layout)."""
+def q38_layout(cfg: Dict[str, Any], layouts: Dict[str, Path],
+               layout_keys: Sequence[str] = Q38_LAYOUT_KEYS) -> Dict[str, Any]:
+    """The card layout of the start model's type (``layouts``: {model_type: yaml file}, Q38_LAYOUTS, or phase 3's
+    Q38_CRITIC_LAYOUTS with Q38_CRITIC_LAYOUT_KEYS) merged into ``cfg`` in place; a file key outside ``layout_keys`` is
+    refused.  Returns what the report records: the type, the file and its sha256, and {key: {"recipe": the value
+    before, "layout": the value set}} (file None: no layout)."""
     import hashlib
 
     import yaml
@@ -1090,10 +1141,10 @@ def q38_layout(cfg: Dict[str, Any], layouts: Dict[str, Path]) -> Dict[str, Any]:
         return {"model_type": model_type, "file": None}
     path = Path(path)
     flat = _q38_flat(yaml.safe_load(path.read_text()) or {})
-    outside = sorted(k for k in flat if k not in Q38_LAYOUT_KEYS)
+    outside = sorted(k for k in flat if k not in layout_keys)
     if outside:
         raise SystemExit(f"the {model_type} layout {path} sets {outside}, which are not layout keys "
-                         f"(training_prep.Q38_LAYOUT_KEYS)")
+                         f"(training_prep.{'Q38_LAYOUT_KEYS' if tuple(layout_keys) == Q38_LAYOUT_KEYS else 'Q38_CRITIC_LAYOUT_KEYS'})")
     keys = {}
     for key in sorted(flat):
         found, before = _q38_get(cfg, key)

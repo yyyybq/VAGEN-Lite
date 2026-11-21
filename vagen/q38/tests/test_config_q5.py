@@ -9,8 +9,8 @@
 - the existing p1 configs: the four 27B main-line RL configs the live chains wrote with c2c6ed47
   (runs/q38-main-rl/s2026101{9,21}/rl_q38{s0,v4}s{1,2}), regenerated from their logged command lines, are byte-identical
   (the run and code-tree folders mapped to tokens);
-- the main line's per-turn PPO (8B qw3tgd: v10_p1tgae_Dcond + V4 keys) on the q38 stack: profile turn_ppo, the contract
-  refuses it only for the phase-3 value loss.
+- the main line's per-turn PPO (8B qw3tgd: v10_p1tgae_Dcond + V4 keys) on the q38 stack: profile turn_ppo, with phase
+  3's value network (the 27B critic layout, qw3tgd's critic values); the contract passes it at 310 (qw3tgd's endpoint).
 
 Reads the run folders read-only; writes to a temporary folder (Q38_TEST_TMP, or /mnt/umm/users/yinbaiqiao/q38/tmp_tests).
 """
@@ -201,7 +201,8 @@ def test_existing_main_line_configs_unchanged(work, seed_dir, run):
 
 def test_turn_ppo_on_the_q38_stack(work):
     """qw3tgd's options (v10_p1tgae_Dcond + the V4 keys) with the 27B start: profile turn_ppo, the package's per-turn
-    gamma / lam, the value network on, warm-up 11; the contract refuses it only for the phase-3 value loss."""
+    gamma / lam, the value network on (explicitly), warm-up 11; phase 3: the 27B critic layout (FSDP2, optimizer state
+    on the card for the step), the 8B critic values, and the contract passes at qw3tgd's endpoint 310."""
     from omegaconf import OmegaConf
 
     from vagen.q38 import contract
@@ -216,5 +217,32 @@ def test_turn_ppo_on_the_q38_stack(work):
     assert cfg["vagen"]["profile"] == "turn_ppo" and cfg["vagen"]["ga_8b"] == 12
     assert cfg["filter"]["name"] == "keep_by_return_std"
     assert "turn_credit" not in cfg["vagen"] and "turn_credit" not in cfg["algorithm"]
-    report = contract.evaluate(OmegaConf.create(cfg), 310)
-    assert report["violations"] == ["turn_gae_value_loss_phase3"], contract.summary(report)
+    c = cfg["critic"]
+    assert (c["strategy"], c["fsdp"]["strategy"], c["fsdp"]["optimizer_offload_step"]) == ("fsdp2", "fsdp2", True)
+    assert cfg["actor_rollout_ref"]["actor"]["strategy"] == "fsdp2"
+    assert (c["optim"]["lr"], c["optim"]["lr_scheduler_type"], c["optim"]["clip_grad"], c["cliprange_value"]) == \
+        (2e-5, "constant", 1.0, 0.5)
+    assert (c["ppo_micro_batch_size_per_gpu"], c["fsdp"]["param_offload"], c["fsdp"]["optimizer_offload"]) == (1, True, True)
+    assert c["model"]["path"] == MODEL27 and c["model"]["tokenizer_path"] == MODEL27
+    report = json.loads((out / "rl_config_report.json").read_text())
+    assert sorted(report["q38"]["critic_layout"]["keys"]) == sorted(tp.Q38_CRITIC_LAYOUT_KEYS)
+    for endpoint in (310, 160):
+        report = contract.evaluate(OmegaConf.create(cfg), endpoint)
+        assert report["passed"], contract.summary(report)
+
+
+def test_turn_ppo_refuses_a_changed_8b_critic(work, monkeypatch):
+    """A run whose 8B config changed a critic key the q38 config takes from the recipe is refused, not dropped."""
+    real = tp.q38_ppo_config
+
+    def changed(ppo8, *a, **k):
+        ppo8 = json.loads(json.dumps(ppo8))
+        ppo8["critic"]["optim"]["lr"] = 5e-5
+        return real(ppo8, *a, **k)
+
+    monkeypatch.setattr(tp, "q38_ppo_config", changed)
+    argv = _argv(MAIN / "s20261019" / "logs" / "rl_config_q38v4s1.log")
+    argv = _set_opt(argv, "--standard", "v10_p1tgae_Dcond")
+    out, run = work / "rl_tgv4_bad", work / "run_tgv4_bad"
+    with pytest.raises(SystemExit, match="critic.optim.lr"):
+        tp.main(_set_opt(_set_opt(argv, "--out", str(out)), "--run-root", str(run)))

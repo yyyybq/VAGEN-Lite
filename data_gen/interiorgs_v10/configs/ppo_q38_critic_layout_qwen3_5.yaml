@@ -1,0 +1,17 @@
+# The q38 stack's value-network layout for a qwen3_5 start model (training_prep.Q38_CRITIC_LAYOUTS; DESIGN_ASYNC 6 W12,
+# phase 3).  rl-config merges it after ppo_q38_layout_qwen3_5.yaml only when the run trains a critic (turn_gae, package
+# p1tgae: V4+PPO = the 8B qw3tgd, Q5 S-PPO1 / S-PPO3), and refuses any key outside training_prep.Q38_CRITIC_LAYOUT_KEYS.
+#
+# The critic is the actor's model (the 8B started it from the RL start model, qw3tgd ppo.yaml:360): Qwen3_5-
+# ForTokenClassification built from the CausalLM checkpoint (verl utils/model.py load_valuehead_model).  It runs on the
+# actor's engine layout of smoke Z1 (ppo_q38_layout_qwen3_5.yaml): FSDP2, and the Adam state on the card only for the
+# optimizer step (optimizer_offload_step needs FSDP2, Z1 README 3; workers/config/engine.py:316-319).  FSDPCriticConfig
+# copies critic.strategy into the engine config (workers/config/critic.py:212-219), so both strategy keys are set.
+# The offloads stay the recipe's (ppo_q38_delta.yaml critic.fsdp: param_offload / optimizer_offload true, qw3tgd
+# :345-346).  Not measured on the 27B yet: DESIGN 7.1 question 9 (4B critic smoke S8 first, then the 27B resource
+# test Z4).
+critic:
+  strategy: fsdp2
+  fsdp:
+    strategy: fsdp2
+    optimizer_offload_step: true
