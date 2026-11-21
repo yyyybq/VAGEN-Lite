@@ -777,17 +777,40 @@ Q38_RUN_KEYS = (
     "trainer.save_freq", "trainer.ckpt_keep_every", "trainer.ckpt_prune_to_hf",
     # the group filter (S0 mixed_outcome, V4 keep_by_return_std with its rows), read by the sampler (${filter})
     "filter",
+    # phase 2: the passes over each batch come from the PPO template, as on the 8B path (Q5 PT: the reward line's
+    # ppo_template_e3 copy, actor ppo_epochs 3; every other template 1 = verl's default, so their configs are unchanged)
+    "actor_rollout_ref.actor.ppo_epochs",
 )
 # 8B keys whose value the V1 config keeps under another name: the 8B trainer's rollout dump is the sampler's
 Q38_RUN_RENAMED = {"trainer.rollout_data_dir": "trainer.v1.sampler.sampler_kwargs.rollout_data_dir"}
+# phase 2 (DESIGN_ASYNC 2.3, 6 W10 / W11): the per-turn estimators.  turn_credit (Q5 PT, the reward line's 辛 =
+# rw_tcswf3, --turn-credit over package p1 with --group-filter nominal --target-groups 24 and the e3 template) keeps its
+# settings under vagen.turn_credit: the V1 AlgoConfig dataclass refuses an unknown algorithm key (algorithm.py:697-750,
+# hydra instantiate); turn_gae (package p1tgae, the 8B main line's per-turn PPO qw3tgd) takes its per-turn gamma / lam
+# and the value network's switch from the 8B config.  vagen.profile names the update shape the contract checks
+# (vagen/q38/contract.py PROFILES / SHAPES; Q38_PROFILE_SHAPES must equal its SHAPES, tests/test_turn_arms.py)
+Q38_TURN_CREDIT_RENAMED = {"algorithm.turn_credit": "vagen.turn_credit"}
+Q38_TURN_GAE_KEYS = ("algorithm.gamma", "algorithm.lam", "critic.enable")
+Q38_ESTIMATOR_PROFILES = {"grpo": None, "turn_credit": "q5_pt", "turn_gae": "turn_ppo"}
+Q38_PROFILE_SHAPES = {
+    "main": {"ppo_mini_batch_size": 12, "ppo_epochs": 1, "ga_8b": 12},
+    "q5_pt": {"ppo_mini_batch_size": 24, "ppo_epochs": 3, "ga_8b": 24},
+    "turn_ppo": {"ppo_mini_batch_size": 12, "ppo_epochs": 1, "ga_8b": 12},
+}
+Q38_TURN_PPO_EPOCHS = (1, 3)  # S-PPO1 / S-PPO3 (DESIGN_ASYNC 3.1 Q5 rows); qw3tgd 1
+Q38_PT_FILTER, Q38_PT_TARGET_GROUPS = "nominal", 24  # Q5 PT: every one of the 24 candidates (YQ5:586-589)
 # keys of verl's default the q38 config must not have: actor.grad_clip is deprecated and unread in V1 (the clip is
 # actor.optim.clip_grad, transformer_impl.py:859-876); a config showing it would suggest it acts
 Q38_REMOVED = ("actor_rollout_ref.actor.grad_clip",)
-Q38_PACKAGE_ESTIMATORS = ("grpo",)  # phase 1 (turn_credit, turn_gae and the critic come in phases 2-3)
+# phase 2 adds turn_gae (package p1tgae; its value loss is phase 3 and the contract refuses the runs until then) and,
+# over p1, the --turn-credit estimator of Q5 PT
+Q38_PACKAGE_ESTIMATORS = ("grpo", "turn_gae")
 # phase 1 runs package p1 only: the runtime contract (vagen/q38/contract.py EXPECTED) fixes its shape, 24 candidates a
-# step (data.train_batch_size, Y8:291), 8 episodes a task and 12 kept groups; p2 (48 candidates) is phase 2 and would
-# be refused at start-up, so rl-config refuses it (and --candidates / --target-groups / --rollouts off p1) up front
-Q38_PACKAGES = ("p1",)
+# step (data.train_batch_size, Y8:291), 8 episodes a task and 12 kept groups; p2 (48 candidates) would be refused at
+# start-up, so rl-config refuses it (and --candidates / --target-groups / --rollouts off p1) up front.  Phase 2: p1tgae
+# (the same shape; the critic pilots p1tgae_c* / _fc are not q38 recipes), and p1 with --target-groups 24 only for
+# --turn-credit with --group-filter nominal (the Q5 PT shape)
+Q38_PACKAGES = ("p1", "p1tgae")
 Q38_PACKAGE_SHAPE = ("candidates", "target_groups", "rollouts")
 # P1 decision 4 (docs/q38/VERL_PATCHES.md P1): the recipe's HF export in bf16 with A_log in fp32
 # (actor.checkpoint.hf_dtype / hf_fp32_modules) was checked on readings for Qwen3.5 only (runs/q38-bf16check,
@@ -875,14 +898,27 @@ def q38_check_options(args: argparse.Namespace) -> None:
         raise SystemExit("--stack q38 needs an optimisation package (--opt-package or a --standard naming one)")
     estimator = OPT_PACKAGES.get(package, {}).get("adv_estimator", "grpo")
     if estimator not in Q38_PACKAGE_ESTIMATORS:
-        raise SystemExit(f"--stack q38 has no {estimator!r} yet (phase 1: {Q38_PACKAGE_ESTIMATORS}): package {package}")
+        raise SystemExit(f"--stack q38 has no {estimator!r} yet ({Q38_PACKAGE_ESTIMATORS}): package {package}")
     if package not in Q38_PACKAGES:
-        raise SystemExit(f"--stack q38 runs the packages {Q38_PACKAGES} in phase 1, not {package!r} (its shape is not "
+        raise SystemExit(f"--stack q38 runs the packages {Q38_PACKAGES}, not {package!r} (its shape is not "
                          f"the contract's: vagen/q38/contract.py)")
+    turn_credit = bool(getattr(args, "turn_credit", None))
+    group_filter = getattr(args, "group_filter", None)
+    if turn_credit:  # phase 2: Q5 PT (the reward line's 辛), over package p1 with every candidate in the update
+        if package != "p1":
+            raise SystemExit(f"--stack q38 --turn-credit is the Q5 PT arm over package p1, not {package!r}")
+        if group_filter != Q38_PT_FILTER or int(getattr(args, "target_groups", None) or 0) != Q38_PT_TARGET_GROUPS:
+            raise SystemExit(f"--stack q38 --turn-credit trains on every candidate (Q5 PT, YQ5:586-589): "
+                             f"--group-filter {Q38_PT_FILTER} --target-groups {Q38_PT_TARGET_GROUPS}")
+    elif group_filter == Q38_PT_FILTER:
+        raise SystemExit(f"--stack q38 --group-filter {Q38_PT_FILTER} is the Q5 PT arm's: it goes with --turn-credit")
     for key in Q38_PACKAGE_SHAPE:
         value = getattr(args, key, None)
-        if value and int(value) != OPT_PACKAGES[package][key]:
-            raise SystemExit(f"--stack q38 phase 1 keeps package {package}'s {key} {OPT_PACKAGES[package][key]} (the "
+        allowed = OPT_PACKAGES[package][key]
+        if turn_credit and key == "target_groups":
+            allowed = Q38_PT_TARGET_GROUPS
+        if value and int(value) != allowed:
+            raise SystemExit(f"--stack q38 keeps package {package}'s {key} {allowed} (the "
                              f"contract fixes it): leave out --{key.replace('_', '-')} {value}")
     if getattr(args, "test_freq", None) or not getattr(args, "no_internal_val", False):
         raise SystemExit("--stack q38 trains without validation inside training: --no-internal-val (the standards set "
@@ -927,6 +963,27 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
         if not found or value in (None, ""):
             raise SystemExit(f"the 8B config has no {key8}, which the q38 config keeps as {key}")
         _set(cfg, key, copy.deepcopy(value))
+    # phase 2: the per-turn estimators' own keys and the update shape the contract checks (vagen.profile)
+    estimator = str((ppo8.get("algorithm") or {}).get("adv_estimator"))
+    if estimator not in Q38_ESTIMATOR_PROFILES:
+        raise SystemExit(f"--stack q38 has no estimator {estimator!r} ({sorted(Q38_ESTIMATOR_PROFILES)})")
+    if estimator == "turn_credit":
+        for key8, key in Q38_TURN_CREDIT_RENAMED.items():
+            found, value = _q38_get(ppo8, key8)
+            if not found or not isinstance(value, dict):
+                raise SystemExit(f"the 8B config has no {key8}, which the q38 config keeps as {key}")
+            _set(cfg, key, copy.deepcopy(value))
+    elif _q38_get(ppo8, "algorithm.turn_credit")[0]:
+        raise SystemExit(f"the 8B config has algorithm.turn_credit with adv_estimator {estimator!r}")
+    if estimator == "turn_gae":
+        for key in Q38_TURN_GAE_KEYS:
+            found, value = _q38_get(ppo8, key)
+            if not found:
+                raise SystemExit(f"the 8B config has no {key}, which the q38 config takes from the run (turn_gae)")
+            _set(cfg, key, copy.deepcopy(value))
+    profile = Q38_ESTIMATOR_PROFILES[estimator]
+    if profile is not None:
+        _set(cfg, "vagen.profile", profile)
     for key in Q38_REMOVED:
         found, _ = _q38_get(cfg, key)
         if found:
@@ -955,6 +1012,16 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
     if rows8 % (ranks8 * micro8):
         raise SystemExit(f"the 8B mini-batch of {rows8} rows does not split into {ranks8} ranks x micro {micro8}")
     cfg["vagen"]["ga_8b"] = rows8 // (ranks8 * micro8)
+    # the update shape of the profile (vagen/q38/contract.py SHAPES; turn_ppo: one or three passes)
+    shape = Q38_PROFILE_SHAPES[profile or "main"]
+    have = {"ppo_mini_batch_size": cfg["actor_rollout_ref"]["actor"]["ppo_mini_batch_size"],
+            "ppo_epochs": cfg["actor_rollout_ref"]["actor"]["ppo_epochs"], "ga_8b": cfg["vagen"]["ga_8b"]}
+    want = dict(shape)
+    if profile == "turn_ppo" and have["ppo_epochs"] in Q38_TURN_PPO_EPOCHS:
+        want["ppo_epochs"] = have["ppo_epochs"]
+    if have != want:
+        raise SystemExit(f"--stack q38 {estimator}: the update shape {have} is not the contract's "
+                         f"{profile or 'main'} shape {want} (vagen/q38/contract.py SHAPES; Q5 PT takes the e3 template)")
     flat_delta = _q38_flat(delta)
     flat = _q38_flat(cfg)
     unset = sorted(k for k, v in flat_delta.items() if v == Q38_MISSING
@@ -979,6 +1046,8 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
               "ga_8b": cfg["vagen"]["ga_8b"], "removed": [k for k in Q38_REMOVED],
               "host_mem_log_interval_s": interval, "hf_export": hf_export, "layout": layout,
               "run_keys_over_recipe": overrides or None}
+    if profile is not None:  # phase 2: only when set, so every GRPO report stays as it was
+        report["profile"] = profile
     return cfg, report
 
 

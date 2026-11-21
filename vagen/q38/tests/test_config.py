@@ -470,9 +470,10 @@ def _options(**over):
 @pytest.mark.parametrize("over", [
     {"trial": True}, {"curriculum_easy_updates": 50}, {"invalid_turn_nonpositive": True},
     {"progress_adv_weight": 0.5}, {"logprob_tokens": True}, {"greedy_val": True}, {"history_mode": "none"},
-    {"history_mode": None}, {"opt_package": None}, {"opt_package": "p1gae"}, {"opt_package": "p1tgae"},
+    {"history_mode": None}, {"opt_package": None}, {"opt_package": "p1gae"}, {"opt_package": "p1tgae_c"},
     {"test_freq": 25}, {"no_internal_val": False},
-    # phase 1 is p1's shape (the contract's data.train_batch_size 24): p2's 48 candidates are phase 2
+    # p1's shape (the contract's data.train_batch_size 24): p2's 48 candidates are refused; phase 2 accepts p1tgae
+    # and the Q5 PT shape (tests/test_turn_arms.py test_accepted_arm_options / test_refused_arm_options)
     {"opt_package": "p2"}, {"candidates": 48}, {"target_groups": 6}, {"rollouts": 4},
 ])
 def test_refused_options(over):
