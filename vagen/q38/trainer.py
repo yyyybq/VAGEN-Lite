@@ -30,6 +30,23 @@ five methods of verl/verl/trainer/ppo/v1/trainer_base.py (TB) and changes nothin
   are unchanged).  Pass 1 runs at the old weights: its KL is the one the driver can recompute from old_log_probs and
   ref_log_prob, and its ppo_kl is 0.
 
+Phase 2 (DESIGN_ASYNC 2.3 rows of vagen/q38/trainer.py, 6 W11; PEAR_ASSESSMENT B4): with ``algorithm.adv_estimator``
+``turn_credit`` (Q5 PT, vagen/turn_credit.py, ported from the reward line 26afbc6f) or ``turn_gae`` (the main line's
+per-turn PPO, vagen/turn_gae.py) ``_compute_advantage`` does not call the parent's estimator (V1 passes a custom
+estimator neither the batch nor the values, ray_trainer.py:248-281) but ``_compute_turn_advantage``: the parent's
+reads and rollout correction (TB:1819-1846) and write-back (TB:1860-1874) line for line, and in between the estimator
+on the real (non-padding) rows only, with the agent loop's per-episode records from TransferQueue (extra_fields
+turn_records / turn_rewards; a padding row carries a deep copy of the first row's extra_fields, padding_utils.py:85-90,
+so it must not enter the batch statistics).  turn_credit: vagen.turn_credit.token_advantages with the settings of
+``vagen.turn_credit`` (the V1 AlgoConfig dataclass refuses an unknown algorithm key, so the reward line's
+algorithm.turn_credit moves there), returns = advantages as the reward line's estimator returns them; turn_gae:
+vagen.turn_gae.compute on the critic's values (TransferQueue "values", written by the parent's _compute_values) and
+its whitening over the real rows' response tokens (the 8B whitens after the group filter over the kept episodes,
+RT:3106-3134: the sampler has already selected them here).  Padding rows get advantages 0, and returns 0 (turn_credit)
+or the sentinel -100 (turn_gae: the value loss skips them).  The factor step afterwards is unchanged; under turn_gae a
+factor other than 1 (or the all-zero fallback) raises: the keep_by_return_std std-floor scale is a GRPO correction
+that the 8B skips under turn_gae (FI:269-272, the sampler passes the estimator to the filter).
+
 Two more overrides change only the type of logged values, not the step: ``_compute_metrics`` (TB:1946-2074, the last
 step before ``self.logger.log``, TB:528-544) and ``_validate`` (TB:1092; its metrics are logged directly before
 training, TB:470) turn numpy integer / floating scalars into Python floats (``plain_metric_scalars``), so the console
@@ -42,7 +59,8 @@ vagen/guard/entropy_t08_calib, vagen/guard/entropy_tokens, vagen/guard/calib_tok
 vagen/adv/scaled_groups, vagen/adv/zero_groups, vagen/async/rows_s0, vagen/async/rows_s1, vagen/async/rows_s_other,
 vagen/async/tis_w_mean_s{0,1}, vagen/async/tis_clip_frac_s{0,1}, vagen/async/logp_diff_abs_mean_s{0,1},
 vagen/actor/rows, vagen/actor/real_rows, and with ppo_epochs > 1 vagen/epoch/{kl_loss,kl_loss_v1,ppo_kl,pg_clipfrac,
-pg_clipfrac_lower,pg_loss,grad_norm}_e{1..epochs} (kl_loss in the 8B unit).
+pg_clipfrac_lower,pg_loss,grad_norm}_e{1..epochs} (kl_loss in the 8B unit); phase 2: turn_credit/* (the reward line's
+estimator metrics, vagen/turn_credit.py) or critic/turn_gae/* (vagen/turn_gae.py), and vagen/adv/turn_rows.
 """
 
 from __future__ import annotations
@@ -57,13 +75,17 @@ from typing import Any, Iterator, Mapping, Sequence
 import numpy as np
 import torch
 import transfer_queue as tq
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from tensordict import TensorDict
 from transfer_queue import KVBatchMeta
 
+from verl.protocol import DataProto
+from verl.trainer.ppo.rollout_corr_helper import compute_rollout_correction_and_add_to_batch
 from verl.trainer.ppo.v1.trainer_colocate_async import PPOTrainerColocateAsync
 from verl.trainer.ppo.v1.trainer_sync import PPOTrainerSync
 from verl.workers.utils.padding import response_from_nested, response_to_nested
+
+from vagen.q38.sampler import _object_rows  # the rows of a TransferQueue non-tensor column, unwrapped (RB:292,301)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))
@@ -76,6 +98,12 @@ STALENESS_BUCKETS = (0, 1)
 # one float per mini-batch after Metric.aggregate_dp; grad_norm one per optimizer step, engine_workers.py:202-215)
 EPOCH_METRICS = ("actor/kl_loss", "actor/ppo_kl", "actor/pg_clipfrac", "actor/pg_clipfrac_lower", "actor/pg_loss",
                  "actor/grad_norm")
+# phase 2: the per-turn estimators the mixin computes itself (_compute_turn_advantage), and their records' extra field
+TURN_ESTIMATORS = ("turn_credit", "turn_gae")
+TURN_RECORD_KEYS = {"turn_credit": "turn_records", "turn_gae": "turn_rewards"}
+# where a q38 config keeps the turn_credit settings (the reward line's algorithm.turn_credit; V1's AlgoConfig refuses
+# an unknown key, algorithm.py:697-750)
+TURN_CREDIT_SETTINGS_KEY = "vagen.turn_credit"
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -218,6 +246,68 @@ def plain_metric_scalars(metrics: dict) -> int:
     return count
 
 
+def turn_credit_settings(config: Any) -> dict:
+    """The turn_credit estimator's checked settings (vagen.turn_credit.settings, defaults filled in) from a q38 config:
+    ``vagen.turn_credit`` (TURN_CREDIT_SETTINGS_KEY).  An ``algorithm.turn_credit`` (the reward line's place) is refused:
+    the V1 AlgoConfig dataclass does not have it, and two places for one setting would leave one unread."""
+    from vagen.turn_credit import settings
+
+    if OmegaConf.select(config, "algorithm.turn_credit", default=None) is not None:
+        raise ValueError(f"q38 trainer: the turn_credit settings belong under {TURN_CREDIT_SETTINGS_KEY}, not "
+                         "algorithm.turn_credit (V1's AlgoConfig has no such key)")
+    raw = OmegaConf.select(config, TURN_CREDIT_SETTINGS_KEY, default=None)
+    if isinstance(raw, (DictConfig, ListConfig)):
+        raw = OmegaConf.to_container(raw, resolve=True)
+    return settings({"turn_credit": raw or {}})
+
+
+def turn_advantage_rows(
+    estimator: str,
+    records: Sequence[Any],
+    uids: Sequence[Any],
+    response_mask: torch.Tensor,
+    token_level_rewards: torch.Tensor,
+    values: torch.Tensor | None = None,
+    *,
+    algorithm: Any = None,
+    turn_credit: Mapping[str, Any] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, dict]:
+    """(advantages, returns, metrics) of the real rows of one batch, every row a whole episode (padded response
+    tensors (rows, length), the response positions of the agent loop's spans).
+
+    - turn_credit: the reward line's estimator as vagen/custom_advantage/turn_credit.py calls it (RW 26afbc6f :39-53):
+      the episode returns are the summed token-level rewards, ``token_advantages`` gives the advantages and the returns
+      are the same tensor;
+    - turn_gae: the 8B's registered estimator (vagen/custom_advantage/turn_gae.py: check_config, compute under no_grad)
+      and its whitening over these rows' response tokens (vagen/ray_trainer.py RT:3106-3134 whitens the kept episodes
+      after the group filter, before any padding); ``values`` (the critic's, rows x length) is required.
+    """
+    if len(records) != response_mask.shape[0] or len(uids) != response_mask.shape[0]:
+        raise ValueError(f"q38 trainer: {len(records)} records and {len(uids)} uids for {response_mask.shape[0]} rows")
+    if estimator == "turn_credit":
+        from vagen.turn_credit import token_advantages
+
+        cfg = dict(turn_credit) if turn_credit is not None else turn_credit_settings(OmegaConf.create({}))
+        returns = token_level_rewards.sum(dim=-1).detach().float().cpu().tolist()
+        adv, metrics = token_advantages(list(records), list(uids), response_mask, returns, cfg)
+        return adv, adv.clone(), metrics
+    if estimator == "turn_gae":
+        from vagen import turn_gae as TG
+
+        TG.check_config(algorithm)
+        if values is None:
+            raise RuntimeError("q38 trainer: turn_gae needs the critic's values (critic.enable true; TransferQueue "
+                               "'values' from _compute_values)")
+        gamma = algorithm.get("gamma") if hasattr(algorithm, "get") else getattr(algorithm, "gamma")
+        lam = algorithm.get("lam") if hasattr(algorithm, "get") else getattr(algorithm, "lam")
+        with torch.no_grad():
+            raw, returns, metrics = TG.compute(token_level_rewards, values, response_mask, list(records), float(gamma),
+                                               float(lam), ignore_value=TG.IGNORE_VALUE)
+            adv = TG.whiten(raw, response_mask)
+        return adv, returns.to(device=adv.device), metrics
+    raise ValueError(f"q38 trainer: no per-turn estimator {estimator!r} (known: {TURN_ESTIMATORS})")
+
+
 def _upper_threshold(spec: Any) -> float:
     """The upper TIS threshold of algorithm.rollout_correction.rollout_is_threshold (rollout_corr_helper.py:93-118)."""
     try:
@@ -339,11 +429,117 @@ class VagenTrainerMixin:
 
     # ---- 4. advantages x factor, entropy guard, asynchronous diagnostics ---------------------------------------------
 
+    def _adv_estimator(self) -> str:
+        est = self.config.algorithm.adv_estimator
+        return str(getattr(est, "value", est))
+
+    def _compute_turn_advantage(self, batch: KVBatchMeta, metrics: dict, estimator: str) -> KVBatchMeta:
+        """The parent's _compute_advantage (TB:1817-1876) with a per-turn estimator on the real rows (module
+        docstring, phase 2): reads, rollout correction and write-back as the parent, line for line."""
+        algorithm = self.config.algorithm
+        if algorithm.get("use_kl_in_reward", False):  # contract FORBIDDEN use_kl_in_reward; turn_gae refuses it too
+            raise ValueError(f"q38 trainer: {estimator} puts the env's turn rewards on turns; use_kl_in_reward is off")
+        record_key = TURN_RECORD_KEYS[estimator]
+        tc_cfg = turn_credit_settings(self.config) if estimator == "turn_credit" else None
+
+        # 1. as TB:1819-1834 (use_kl_in_reward false)
+        fields = ["uid", "response_mask", "rm_scores", "rollout_log_probs", "old_log_probs", "ref_log_prob", "values"]
+        data = tq.kv_batch_get(keys=batch.keys, partition_id=batch.partition_id, select_fields=fields)
+        response_mask = data["response_mask"]
+        data = DataProto(batch=data.to_padded_tensor())
+        data.batch["token_level_scores"] = data.batch["rm_scores"]
+        data.non_tensor_batch["uid"] = np.array(data.batch.pop("uid").tolist(), dtype=object)
+        data.batch["token_level_rewards"] = data.batch["token_level_scores"]
+
+        # 2. rollout correction, as TB:1836-1846
+        rollout_corr_config = algorithm.get("rollout_correction", None)
+        bypass_recomputing_logprobs = rollout_corr_config and rollout_corr_config.get("bypass_mode", False)
+        rollout_correction = (
+            rollout_corr_config is not None and "rollout_log_probs" in data.batch and not bypass_recomputing_logprobs
+        )
+        if rollout_correction:
+            data, is_metrics = compute_rollout_correction_and_add_to_batch(data, rollout_corr_config)
+            metrics.update(is_metrics)
+
+        # 3. the estimator on the real rows only (a padding row holds a copy of the first row's extra_fields)
+        real = self._real_rows(batch)
+        idx = [i for i, r in enumerate(real) if r]
+        if not idx:
+            raise RuntimeError("q38 trainer: the batch has no real (non-padding) row")
+        real_keys = [batch.keys[i] for i in idx]
+        extra = _object_rows(tq.kv_batch_get(keys=real_keys, partition_id=batch.partition_id,
+                                             select_fields=["extra_fields"])["extra_fields"])
+        if len(extra) != len(idx):
+            raise RuntimeError(f"q38 trainer: TransferQueue returned {len(extra)} extra_fields for {len(idx)} rows")
+        records = []
+        for k, ef in zip(real_keys, extra, strict=True):
+            rec = ef.get(record_key) if isinstance(ef, Mapping) else None
+            if rec is None:
+                raise KeyError(f"q38 trainer: {estimator} needs the agent loop's extra_fields.{record_key}; trajectory {k} "
+                               f"has none (gym_agent_loop_v1 records it only when algorithm.adv_estimator is {estimator})")
+            records.append(rec)
+        uids = [str(u) for u in data.non_tensor_batch["uid"][idx]]
+        for k, u in zip(real_keys, uids, strict=True):
+            if row_uid(k) != u:
+                raise RuntimeError(f"q38 trainer: trajectory {k} carries uid {u}")
+        select = torch.tensor(idx, dtype=torch.long)
+        mask_real = data.batch["response_mask"][select]
+        values = None
+        if estimator == "turn_gae":
+            if not getattr(self, "use_critic", False) or "values" not in data.batch.keys():
+                raise RuntimeError("q38 trainer: turn_gae needs the critic's values (critic.enable true; the value loss "
+                                   "on the turns' first tokens is phase 3, DESIGN_ASYNC 2.3)")
+            values = data.batch["values"][select]
+        adv_real, ret_real, est_metrics = turn_advantage_rows(
+            estimator, records, uids, mask_real, data.batch["token_level_rewards"][select], values,
+            algorithm=algorithm, turn_credit=tc_cfg)
+        if estimator == "turn_credit" and tc_cfg["dump_dir"]:
+            self._turn_credit_dump(batch, real_keys, records, uids, mask_real, data.batch["token_level_rewards"][select],
+                                   adv_real, tc_cfg)
+        rows, length = data.batch["response_mask"].shape
+        advantages = torch.zeros((rows, length), dtype=torch.float32)
+        returns = torch.full((rows, length), -100.0 if estimator == "turn_gae" else 0.0, dtype=torch.float32)
+        advantages[select] = adv_real.detach().to(torch.float32).cpu()
+        returns[select] = ret_real.detach().to(torch.float32).cpu()
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
+        metrics.update(est_metrics)
+        metrics["vagen/adv/turn_rows"] = int(len(idx))
+
+        # 4. write-back, as TB:1860-1874
+        out_fields = ["advantages", "returns"]
+        if rollout_correction:
+            out_fields.append("response_mask")
+            if "rollout_is_weights" in data.batch:
+                out_fields.append("rollout_is_weights")
+        output = {f: response_to_nested(data.batch[f], response_mask) for f in out_fields}
+        output = TensorDict(output, batch_size=len(batch))
+        return tq.kv_batch_put(keys=batch.keys, partition_id=batch.partition_id, fields=output)
+
+    def _turn_credit_dump(self, batch, keys, records, uids, mask, rewards, adv, cfg) -> None:
+        """The reward line's smoke dump (vagen/custom_advantage/turn_credit.py _dump: DUMP_DIR/update_<k>.jsonl, the
+        first dump_updates calls), on the real rows; its call counter is that module's."""
+        from types import SimpleNamespace
+
+        from vagen.custom_advantage import turn_credit as tc_estimator
+
+        if tc_estimator._CALLS[0] < cfg["dump_updates"]:
+            responses = tq.kv_batch_get(keys=keys, partition_id=batch.partition_id, select_fields=["responses"])
+            ids = responses.to_padded_tensor()["responses"]
+            view = SimpleNamespace(batch={"response_mask": mask, "responses": ids[:, : mask.shape[1]]})
+            returns = rewards.sum(dim=-1).detach().float().cpu().tolist()
+            tc_estimator._dump(view, records, uids, returns, adv, cfg)
+        tc_estimator._CALLS[0] += 1
+
     def _compute_advantage(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
         keys = list(batch.keys)
         real = self._real_rows(batch)
         tags = [dict(t) for t in batch.tags]
-        batch = super()._compute_advantage(batch, metrics)
+        estimator = self._adv_estimator()
+        if estimator in TURN_ESTIMATORS:
+            batch = self._compute_turn_advantage(batch, metrics, estimator)
+        else:
+            batch = super()._compute_advantage(batch, metrics)
         partition_id = batch.partition_id
 
         # MF2: strict lookup of every real row's factor
@@ -351,6 +547,10 @@ class VagenTrainerMixin:
         if not real_uids:
             raise RuntimeError("q38 trainer: the batch has no real (non-padding) row")
         factors = self.replay_buffer.lookup_adv_scale(real_uids)
+        if estimator == "turn_gae" and not (all(f == 1.0 for f in factors) or all(f == 0.0 for f in factors)):
+            # the 8B skips the keep_by_return_std scale under turn_gae (FI:269-272); only the all-zero fallback remains
+            raise RuntimeError(f"q38 trainer: turn_gae with advantage factors {sorted(set(factors))}: the group filter "
+                               "must skip its std-floor scale (sampler_kwargs.adv_estimator turn_gae)")
         scale = any(f != 1.0 for f in factors)
         group_factor = dict(zip(real_uids, factors, strict=True))
 
