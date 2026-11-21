@@ -572,7 +572,7 @@ def test_hf_export_qwen3_5(configs, work):
     c8 = configs["v4"]
     y8 = c8["y8"]
     model35 = _model_dir(work, "qwen3_5")
-    cfg, report = tp.q38_ppo_config(_with_model(y8, model35), 10798)
+    cfg, report = tp.q38_ppo_config(_with_model(y8, model35), 10798, layouts={})  # the layout: test_layout_qwen3_5
     ckpt = cfg["actor_rollout_ref"]["actor"]["checkpoint"]
     assert ckpt["hf_dtype"] == "bfloat16" and ckpt["hf_fp32_modules"] == ["A_log"]
     assert report["hf_export"] == {"model_type": "qwen3_5", "hf_dtype": "bfloat16", "hf_fp32_modules": ["A_log"]}
@@ -636,3 +636,90 @@ def test_hf_export_other_types_byte_identical(configs, work, name, model_type):
     assert rep_old["hf_export"] == {"model_type": model_type, "hf_dtype": None, "dropped": []}
     same = ("delta", "delta_sha256", "hf_export")
     assert {k: v for k, v in rep_new.items() if k not in same} == {k: v for k, v in rep_old.items() if k not in same}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# The 27B main-line RL (q38/tmp_tests/k_mainrl): a qwen3_5 start model gets the q38 stack by default and the card
+# layout of smoke Z1 (training_prep.Q38_STACK_TYPES, Q38_LAYOUTS, Q38_LAYOUT_KEYS)
+Z1_CONFIG = Path("/mnt/umm/users/yinbaiqiao/q38/runs/q38-smoke-27b-z1/rl/ppo.yaml")
+
+
+def _layout_file() -> dict:
+    return _flat(yaml.safe_load(tp.Q38_LAYOUTS["qwen3_5"].read_text()))
+
+
+def test_layout_qwen3_5(configs, work):
+    """A qwen3_5 start model: the config differs from the one without the layout in the layout file's keys only, which
+    hold the file's values; the report lists them (and keeps them out of run_keys_over_recipe); the contract passes.
+    Any other type: no layout, the config byte-identical to the one without it."""
+    from omegaconf import OmegaConf
+
+    from vagen.q38 import contract
+
+    y8 = configs["v4"]["y8"]
+    model35 = _model_dir(work, "qwen3_5")
+    cfg, report = tp.q38_ppo_config(_with_model(y8, model35), 10798)
+    bare, rep_bare = tp.q38_ppo_config(_with_model(y8, model35), 10798, layouts={})
+    want = _layout_file()
+    assert want and set(want) <= set(tp.Q38_LAYOUT_KEYS)
+    f, fb = _flat(cfg), _flat(bare)
+    differ = {k for k in set(f) | set(fb) if f.get(k, "<absent>") != fb.get(k, "<absent>")}
+    # an empty section of the recipe the layout fills (model.override_config {} -> attn_implementation) is one leaf
+    differ -= {k for k in differ if fb.get(k) == {} and any(w.startswith(k + ".") for w in want)}
+    assert differ <= set(want), sorted(differ - set(want))
+    assert all(f[k] == v for k, v in want.items())
+    assert report["layout"]["model_type"] == "qwen3_5" and report["layout"]["file"] == str(tp.Q38_LAYOUTS["qwen3_5"])
+    assert set(report["layout"]["keys"]) == set(want)
+    assert all(report["layout"]["keys"][k]["layout"] == v for k, v in want.items())
+    assert rep_bare["layout"] == {"model_type": "qwen3_5", "file": None}
+    assert report["run_keys_over_recipe"] == rep_bare["run_keys_over_recipe"]
+    assert contract.evaluate(OmegaConf.create(cfg), ENDPOINT)["passed"]
+    for model_type in ("qwen3_vl", "qwen2_5_vl", None):
+        y = copy.deepcopy(y8) if model_type == "qwen3_vl" else _with_model(
+            y8, _model_dir(work, model_type) if model_type else str(work / "no_config_json"))
+        new, rep_new = tp.q38_ppo_config(copy.deepcopy(y), 10798)
+        old, _ = tp.q38_ppo_config(copy.deepcopy(y), 10798, layouts={})
+        assert yaml.safe_dump(new, sort_keys=False) == yaml.safe_dump(old, sort_keys=False)
+        assert rep_new["layout"] == {"model_type": model_type, "file": None}
+
+
+def test_layout_is_smoke_z1():
+    """Every layout value is the one smoke Z1 / Z2 trained the 27B with (runs/q38-smoke-27b-z1/rl/ppo.yaml)."""
+    if not Z1_CONFIG.is_file():
+        pytest.skip(f"needs {Z1_CONFIG}")
+    z1 = _flat(yaml.safe_load(Z1_CONFIG.read_text()))
+    assert {k: z1.get(k, "<absent>") for k in _layout_file()} == _layout_file()
+
+
+def test_layout_refuses_other_keys(configs, work):
+    """A layout file may set only Q38_LAYOUT_KEYS: a recipe key (here the learning rate) is refused."""
+    bad = work / "layout_bad.yaml"
+    bad.write_text(yaml.safe_dump({"actor_rollout_ref": {"actor": {"optim": {"lr": 1.0e-5}}}}))
+    y8 = configs["v4"]["y8"]
+    with pytest.raises(SystemExit, match="not layout keys"):
+        tp.q38_ppo_config(_with_model(y8, _model_dir(work, "qwen3_5")), 10798, layouts={"qwen3_5": bad})
+
+
+def test_stack_default_qwen3_5(work):
+    """rl-config --model-type qwen3_5 without --stack writes the q38 stack with the layout (its jobs run the V1 entry,
+    vagen/models/model_types.py); --stack 8b is refused for it.  qwen3_vl without --stack: test_8b_path_unchanged."""
+    model35 = _model_dir(work, "qwen3_5")
+    common = list(COMMON)
+    common[common.index(MODEL8)] = model35
+    common[common.index("--model-type") + 1] = "qwen3_5"
+    spec = RUNS["v4"]
+
+    def argv(tag, *extra):
+        return ["rl-config", "--rows", str(ROWS8), "--name", spec["name"], "--run-root", str(work / f"run_{tag}"),
+                "--out", str(work / f"rl_{tag}"), *common, *spec["args"], *extra]
+
+    assert tp.main(argv("auto35")) == 0
+    report = yaml.safe_load((work / "rl_auto35" / "rl_config_report.json").read_text())
+    assert report["stack"] == "q38" and report["q38"]["layout"]["model_type"] == "qwen3_5"
+    cfg = yaml.safe_load((work / "rl_auto35" / "ppo.yaml").read_text())
+    assert cfg["trainer"]["use_v1"] is True and cfg["trainer"]["v1"]["trainer_mode"] == "colocate_async"
+    assert tp.main(argv("given35", "--stack", "q38")) == 0
+    assert (work / "rl_auto35" / "ppo.yaml").read_text().replace("rl_auto35", "X").replace("run_auto35", "Y") == \
+        (work / "rl_given35" / "ppo.yaml").read_text().replace("rl_given35", "X").replace("run_given35", "Y")
+    with pytest.raises(SystemExit, match="--stack q38"):
+        tp.main(argv("eight35", "--stack", "8b"))

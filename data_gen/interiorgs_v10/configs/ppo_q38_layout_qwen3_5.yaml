@@ -1,0 +1,31 @@
+# The q38 stack's card layout for a qwen3_5 start model (training_prep.Q38_LAYOUTS; the main-line RL of the 27B,
+# q38/tmp_tests/k_mainrl, 2026-11-20).  rl-config merges it over ppo_q38_delta.yaml after the run's keys, only for a
+# start model whose config.json says qwen3_5, and refuses any key outside training_prep.Q38_LAYOUT_KEYS: no recipe
+# key is here (learning rate, KL, entropy, clip, sampling, sizes, filter, checkpoints all stay the delta's).
+#
+# Every value is the one smoke Z1 / Z2 trained the Qwen3.8-27B with on 8 + 1 H800 cards (runs/q38-smoke-27b-z1/rl/
+# ppo.yaml header lines 4-17, reasons in its README section 3; P1_REPORT sections 1.2 and 3.1: 10 updates, exit 0,
+# max_memory_allocated 63.76 GiB, nvidia-smi peak 78,043 / 81,559 MiB, 0 vLLM preemptions, host memory peak 950 GB).
+# Z1 is the reference the delta's "the smoke decides" keys waited for (ppo_q38_delta.yaml header).
+actor_rollout_ref:
+  nccl_timeout: 1800                 # default 600: rank 0 alone writes the HF export at a save (Z1 save 265-287 s)
+  model:
+    override_config:
+      attn_implementation: eager     # the user 11-17 "eager first" (PREREG_Q38 3.4); this verl's default is FA2
+  actor:
+    strategy: fsdp2                  # optimizer_offload_step needs FSDP2 (Z1 README 3)
+    fsdp_config:
+      strategy: fsdp2
+      optimizer_offload_step: true   # Adam on the card only for optimizer.step (Z1 README 3)
+  ref:
+    fsdp_config:
+      strategy: fsdp2
+  rollout:
+    tensor_model_parallel_size: 4    # 4 KV heads, one a card (Z1 README 3); the delta's value, kept explicit
+    gpu_memory_utilization: 0.7      # the delta's 0.3 (8B) leaves the 27B about 10 GB of KV / GDN pool a card
+    max_num_seqs: 384                # two batches in flight, 2 x 192 episodes (Z1 README 3)
+    max_model_len: 8192              # prompt 4096 + response 4096; null would be 262,144 (Z1 README 3)
+    agent:
+      num_workers: 32                # Z1's value (the delta's 48 is the 8B's); host memory measured with 32
+    checkpoint_engine:
+      update_weights_bucket_megabytes: 2048  # Z1's value (update_weights 2.6 s a step); the delta's 512 is the 8B's

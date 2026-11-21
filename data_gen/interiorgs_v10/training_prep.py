@@ -788,6 +788,31 @@ Q38_PACKAGE_SHAPE = ("candidates", "target_groups", "rollouts")
 Q38_HF_EXPORT_TYPES = ("qwen3_5",)
 Q38_HF_EXPORT_KEYS = ("hf_dtype", "hf_fp32_modules")  # under actor_rollout_ref.actor.checkpoint
 Q38_HF_EXPORT = {"hf_dtype": "bfloat16", "hf_fp32_module": "A_log"}  # what a qwen3_5 config must hold
+# The 27B main-line RL (q38/tmp_tests/k_mainrl, 2026-11-20).  A qwen3_5 start model's jobs run the V1 entry
+# vagen.q38.ppo_v1 (vagen/models/model_types.py: the type's V10_PPO_MODULE), which reads only a V1 config, so rl-config
+# writes the q38 stack for these types when --stack is not given, and refuses --stack 8b for them; every other type
+# keeps the 8B default
+Q38_STACK_TYPES = ("qwen3_5",)
+# The card layout of a start-model type (configs/ppo_q38_layout_<type>.yaml), merged over the recipe after the run's
+# keys, for these types only (start model's config.json, like q38_hf_export); any other type, or an unreadable
+# config.json, gets the recipe's values as before.  A layout file may set only Q38_LAYOUT_KEYS: memory, parallelism,
+# the attention implementation and timeouts, which smoke Z1 / Z2 settled on the 27B (runs/q38-smoke-27b-z1/rl/
+# ppo.yaml, README section 3; P1_REPORT 1.2 and 3.1) and the delta leaves at the 8B values ("the smoke decides")
+Q38_LAYOUTS = {"qwen3_5": Path(__file__).with_name("configs") / "ppo_q38_layout_qwen3_5.yaml"}
+Q38_LAYOUT_KEYS = (
+    "actor_rollout_ref.model.override_config.attn_implementation",
+    "actor_rollout_ref.nccl_timeout",
+    "actor_rollout_ref.actor.strategy",
+    "actor_rollout_ref.actor.fsdp_config.strategy",
+    "actor_rollout_ref.actor.fsdp_config.optimizer_offload_step",
+    "actor_rollout_ref.ref.fsdp_config.strategy",
+    "actor_rollout_ref.rollout.tensor_model_parallel_size",
+    "actor_rollout_ref.rollout.gpu_memory_utilization",
+    "actor_rollout_ref.rollout.max_num_seqs",
+    "actor_rollout_ref.rollout.max_model_len",
+    "actor_rollout_ref.rollout.agent.num_workers",
+    "actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes",
+)
 
 
 def _q38_flat(node: Any, prefix: str = "") -> Dict[str, Any]:
@@ -858,7 +883,8 @@ def q38_check_options(args: argparse.Namespace) -> None:
 
 def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[Dict[str, Any]] = None,
                    default_path: Optional[Path] = None,
-                   delta_path: Optional[Path] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                   delta_path: Optional[Path] = None,
+                   layouts: Optional[Dict[str, Path]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """(the complete q38 V1 config, its report) for the run whose 8B config is ``ppo8`` (``n_train`` train rows).
     Refuses an 8B config the V1 trainer would not run as the 8B one ran."""
     import copy
@@ -899,6 +925,7 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
             parent, last = key.rsplit(".", 1)
             _q38_get(cfg, parent)[1].pop(last)
     hf_export = q38_hf_export(cfg)
+    layout = q38_layout(cfg, Q38_LAYOUTS if layouts is None else layouts)
     # the learning-rate horizon is the recipe's (V1 fixes it at start-up, TB:792-813); the 8B template must agree
     horizon = int(cfg["trainer"]["total_training_steps"])
     if trainer8.get("total_training_steps") != horizon:
@@ -934,14 +961,16 @@ def q38_ppo_config(ppo8: Dict[str, Any], n_train: int, type_overrides: Optional[
                          f"guard reads that log), not {interval!r}")
     # the run's keys that differ from the recipe file's values (a run's own overrides), for the report
     overrides = {k: {"recipe": flat_delta[k], "run": flat[k]} for k in sorted(flat_delta)
-                 if flat_delta[k] != Q38_MISSING and k in flat and flat[k] != flat_delta[k]}
+                 if flat_delta[k] != Q38_MISSING and k in flat and flat[k] != flat_delta[k]
+                 and k not in (layout.get("keys") or {})}
     report = {"verl_default": str(default_path),
               "verl_default_sha256": hashlib.sha256(default_path.read_bytes()).hexdigest(),
               "delta": str(delta_path), "delta_sha256": hashlib.sha256(delta_path.read_bytes()).hexdigest(),
               "trainer_mode": cfg["trainer"]["v1"]["trainer_mode"], "lr_horizon": horizon,
               "steps_per_epoch": steps_per_epoch, "total_epochs": cfg["trainer"]["total_epochs"],
               "ga_8b": cfg["vagen"]["ga_8b"], "removed": [k for k in Q38_REMOVED],
-              "host_mem_log_interval_s": interval, "hf_export": hf_export, "run_keys_over_recipe": overrides or None}
+              "host_mem_log_interval_s": interval, "hf_export": hf_export, "layout": layout,
+              "run_keys_over_recipe": overrides or None}
     return cfg, report
 
 
@@ -968,6 +997,35 @@ def q38_hf_export(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {"model_type": model_type, "hf_dtype": dtype, "hf_fp32_modules": list(fp32_modules)}
 
 
+def q38_layout(cfg: Dict[str, Any], layouts: Dict[str, Path]) -> Dict[str, Any]:
+    """The card layout of the start model's type (``layouts``: {model_type: yaml file}, Q38_LAYOUTS) merged into
+    ``cfg`` in place; a file key outside Q38_LAYOUT_KEYS is refused.  Returns what the report records: the type, the
+    file and its sha256, and {key: {"recipe": the value before, "layout": the value set}} (file None: no layout)."""
+    import hashlib
+
+    import yaml
+
+    from vagen.models.model_types import of_checkpoint
+
+    model_type = of_checkpoint(str(cfg["actor_rollout_ref"]["model"]["path"]))
+    path = layouts.get(model_type) if model_type else None
+    if path is None:
+        return {"model_type": model_type, "file": None}
+    path = Path(path)
+    flat = _q38_flat(yaml.safe_load(path.read_text()) or {})
+    outside = sorted(k for k in flat if k not in Q38_LAYOUT_KEYS)
+    if outside:
+        raise SystemExit(f"the {model_type} layout {path} sets {outside}, which are not layout keys "
+                         f"(training_prep.Q38_LAYOUT_KEYS)")
+    keys = {}
+    for key in sorted(flat):
+        found, before = _q38_get(cfg, key)
+        keys[key] = {"recipe": before if found else "<absent>", "layout": flat[key]}
+        _set(cfg, key, flat[key])
+    return {"model_type": model_type, "file": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "keys": keys}
+
+
 def cmd_rl_config(args: argparse.Namespace) -> None:
     import copy
 
@@ -985,9 +1043,13 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         apply_standard(args, standard)
     if not getattr(args, "ppo_template", None):
         raise SystemExit("rl-config needs --ppo-template (or a --standard that names one)")
-    stack = getattr(args, "stack", None) or "8b"
+    model_type = getattr(args, "model_type", None)
+    stack = getattr(args, "stack", None) or ("q38" if model_type in Q38_STACK_TYPES else "8b")
     if stack not in STACKS:
         raise SystemExit(f"--stack must be one of {STACKS}, not {stack!r}")
+    if model_type in Q38_STACK_TYPES and stack != "q38":  # its jobs run vagen.q38.ppo_v1, which reads a V1 config
+        raise SystemExit(f"a {model_type} start model trains with the V1 entry (vagen/models/model_types.py): "
+                         f"--stack q38, not {stack!r}")
     if stack == "q38":  # the Qwen3.8-27B rerun: refused options before anything is written
         q38_check_options(args)
     out = Path(args.out)
@@ -1676,7 +1738,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--stack", choices=STACKS, default=None,
                    help="the Qwen3.8-27B rerun (docs/q38/DESIGN_ASYNC.md): q38 writes the complete config of verl's V1 "
                         "trainer (verl's default + configs/ppo_q38_delta.yaml + the run's keys) in place of the 8B "
-                        "one; default 8b")
+                        "one; default q38 for a --model-type in Q38_STACK_TYPES (qwen3_5), else 8b")
     c.add_argument("--out", required=True)
     u = sub.add_parser("subsets", help="round 12: nested train-scene subsets for the data-scale curve")
     u.add_argument("--trajectories", required=True, help="the SFT conversations (sft_trajectories.jsonl, with split)")
