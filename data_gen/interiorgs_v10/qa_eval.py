@@ -10,7 +10,7 @@ qwen3_vl) hands the benchmark to EASI v0.2.2 (third_party/EASI), which runs the 
 weights -- for Qwen3-VL lmms-eval's qwen3_vl class with its defaults, EASI's official configuration.  The jobs have no
 internet: the benchmark data come from the shared offline cache (HF_HOME, HF_DATASETS_CACHE=datasets_easi_shared,
 HF_*_OFFLINE=1).  SITE runs with the stack-dump thread on, as easi_job.py (the P0 line's one-card SITE video runs
-stalled without it, 5 of 5, and finished with it, 5 of 5; the cause is not known).  One folder a benchmark (OUT is
+stalled without it, 5 of 5, and finished with it, 5 of 5; the cause is not known); for qwen3_5 every benchmark does (q38, 2026-11-21).  One folder a benchmark (OUT is
 OUT/BENCH), so two benchmarks of one model never share lmms-eval's result files.  Results: OUT/NAME/easi_results.json
 and EASI's logs; OUT/NAME/done.json once the benchmark has its score (the chain's mark that the job is done; a smoke
 run's records its --limit, so a smoke's output folder is never a full run's).
@@ -101,7 +101,10 @@ def easi(a: argparse.Namespace) -> int:
                                         "raise SystemExit(main())\n")
     (bin_dir / "accelerate").chmod(0o755)
     env["PATH"] = os.pathsep.join([str(bin_dir), str(Path(py).parent), env.get("PATH", "")])
-    if a.benchmark.startswith("site"):
+    # q38 (2026-11-21, user OK): every qwen3_5 benchmark too.  The 27B base's one-card mmsi_bench, mindcube_tiny and
+    # 3dsrbench jobs printed nothing for 11.5 h after loading the weights, while blink, embspatial, viewspatial and
+    # vsi_bench had finished in 15-20 min without the thread.
+    if a.benchmark.startswith("site") or a.model_type == "qwen3_5":
         d = own / f"_stack_dump_{os.getpid()}"
         d.mkdir(exist_ok=True)
         (d / "sitecustomize.py").write_text("import faulthandler, sys\n"
