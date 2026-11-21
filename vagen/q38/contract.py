@@ -77,7 +77,7 @@ FAILURE_POLICIES = ("raise", "skip")
 FI_ENABLE_KEY = "vagen.fault_injection.enable"
 STUCK_WARN_FLOOR = {"min_s": 60.0, "factor": 1.0, "repeat_s": 60.0}
 # FORBIDDEN rules that vagen.contract.allow_override may not name
-NOT_OVERRIDABLE = ("fault_injection_config", "turn_gae_value_loss_phase3")
+NOT_OVERRIDABLE = ("fault_injection_config", "critic_value_loss_stock")
 
 # vagen.profile: the update shape a run is checked against.  main = the 8B main line (12 kept groups padded to 96
 # rows, one pass); q5_pt = the Q5 PT arm (YQ5: 24 groups = 192 rows a mini-batch, 3 passes, ga_8b 24).  q5_pt with
@@ -104,6 +104,51 @@ PT_PHI_TABLE_SHA256 = "3d77129b58779144d104f2abc83d407d1e2dc65a19b123fbe3cfbf3ab
 PT_TURN_CREDIT_OPTIONAL = ("dump_dir", "dump_updates")  # the smoke's span check (S7), off by default
 # the main line's per-turn PPO (package p1tgae, training_prep OPT_PACKAGES; 8B qw3tgd)
 TURN_PPO_GAMMA, TURN_PPO_LAM, TURN_PPO_CRITIC_WARMUP = 1.0, 0.95, 11
+# phase 3: the value network of turn_gae, as the 8B qw3tgd ran it (TGD = VAGEN-Lite/exps/vagen_active_spatial/
+# interiorgs_v10_train_q3tgae_20261109/rl_qw3tgd/ppo.yaml, q3dev 0b0c762c; line numbers of that file).  Literal values
+# (TURN_PPO_CRITIC; tests and rl-config use the same table) and the keys that must equal another key (TURN_PPO_CRITIC_SAME)
+TGD = "8B qw3tgd"
+TURN_PPO_CRITIC = {
+    "critic.optim.optimizer": ("AdamW", TGD + ":324"),
+    "critic.optim.lr": (2e-5, TGD + ":326"),
+    "critic.optim.lr_warmup_steps_ratio": (0.0, TGD + ":327"),
+    "critic.optim.weight_decay": (0.01, TGD + ":329"),
+    "critic.optim.betas": ([0.9, 0.999], TGD + ":331-333"),
+    "critic.optim.clip_grad": (1.0, TGD + ":334 / :423 critic.grad_clip (0.6.1 read grad_clip; V1 reads optim.clip_grad, "
+                                      "transformer_impl.py:859)"),
+    "critic.optim.min_lr_ratio": (0.0, TGD + ":335"),
+    "critic.optim.lr_scheduler_type": ("constant", TGD + ":337"),
+    "critic.fsdp.param_offload": (True, TGD + ":345"),
+    "critic.fsdp.optimizer_offload": (True, TGD + ":346"),
+    "critic.fsdp.model_dtype": ("fp32", TGD + ":351"),
+    "critic.fsdp.ulysses_sequence_parallel_size": (1, TGD + ":353"),
+    "critic.model.enable_gradient_checkpointing": (True, TGD + ":367"),
+    "critic.model.use_remove_padding": (True, TGD + ":369"),
+    "critic.model.lora_rank": (0, TGD + ":370"),
+    "critic.enable": (True, TGD + ":376 (verl starts the critic only when asked, utils.py:96-107)"),
+    "critic.ppo_micro_batch_size_per_gpu": (1, TGD + ":379; one episode a micro-batch (vagen/q38/losses.py: the qwen3_5 "
+                                               "value model gets no cu_seqlens)"),
+    "critic.forward_micro_batch_size_per_gpu": (1, TGD + ":421 (interpolates ppo_micro_batch_size_per_gpu)"),
+    "critic.use_dynamic_bsz": (False, TGD + ":380"),
+    "critic.shuffle": (False, TGD + ":384"),
+    "critic.cliprange_value": (0.5, TGD + ":385"),
+    # TGD:386 token-mean with one episode a micro-batch and 1 / gradient_accumulation = seq-mean-token-mean over mini x n
+    # (vagen/q38/losses.py); vagen_value_loss aggregates that way whatever this says, so it must say it
+    "critic.loss_agg_mode": ("seq-mean-token-mean", TGD + ":386 (token-mean, micro 1: the 8B objective in V1's terms)"),
+    "critic.ulysses_sequence_parallel_size": (1, TGD + ":422"),
+}
+TURN_PPO_CRITIC_SAME = {
+    "critic.model.path": ("actor_rollout_ref.model.path", TGD + ":360 (the critic starts from the RL start model)"),
+    "critic.model.tokenizer_path": ("actor_rollout_ref.model.path", TGD + ":361"),
+    "critic.ppo_mini_batch_size": ("actor_rollout_ref.actor.ppo_mini_batch_size", TGD + ":377 (interpolation)"),
+    "critic.ppo_epochs": ("actor_rollout_ref.actor.ppo_epochs", TGD + ":383 (interpolation; S-PPO3 three passes)"),
+    "critic.rollout_n": ("actor_rollout_ref.rollout.n", TGD + ":374"),
+    # the engine layout: the actor's (qwen3_5: fsdp2, Z1); FSDPCriticConfig copies critic.strategy into the engine
+    # config (critic.py:212-219), so the two critic keys must agree
+    "critic.strategy": ("actor_rollout_ref.actor.strategy", "the actor's engine layout (qwen3_5: fsdp2, smoke Z1)"),
+    "critic.fsdp.strategy": ("critic.strategy", "FSDPCriticConfig writes critic.strategy into the engine (critic.py:219)"),
+}
+TURN_PPO_CRITIC_SAVE = ["model", "optimizer", "extra"]  # TGD:389-392
 
 A = "actor_rollout_ref.actor"
 R = "actor_rollout_ref.rollout"
@@ -654,7 +699,7 @@ EXPECTED: List[Expect] = [
     Expect("algorithm.norm_adv_by_std_in_grpo", True, Y8 + ":481"),
     Expect("critic.enable", OneOf(None, False, allow_absent=True),
            "GRPO and turn_credit train no critic (utils.py:96-107; YQ5 critic.enable null)", _no_critic_estimator),
-    # phase 2: the per-turn PPO's settings (package p1tgae, 8B qw3tgd); the critic's loss and config are phase 3
+    # phase 2: the per-turn PPO's settings (package p1tgae, 8B qw3tgd); the critic's config (phase 3) follows EXPECTED
     Expect("critic.enable", True, "turn_gae needs a value network; verl starts it only when asked (utils.py:96-107)",
            _turn_gae),
     Expect("algorithm.gamma", TURN_PPO_GAMMA, "package p1tgae: gamma per turn (qw3tgd ppo.yaml)", _turn_gae),
@@ -786,6 +831,17 @@ EXPECTED: List[Expect] = [
     # vagen.contract.allow_override; FORBIDDEN fault_injection_config (not overridable) also needs a smoke run name
     Expect(FI_ENABLE_KEY, AbsentOr(False), "DESIGN 5.2 S5: fault injection only in a smoke run (allow_override)"),
 ]
+# phase 3 (DESIGN_ASYNC 6 W12): the value network of turn_gae as the 8B qw3tgd ran it (TURN_PPO_CRITIC*)
+EXPECTED += [Expect(k, v, src, _turn_gae) for k, (v, src) in TURN_PPO_CRITIC.items() if k != "critic.enable"]
+EXPECTED += [Expect(k, SameAs(other), src, _turn_gae) for k, (other, src) in TURN_PPO_CRITIC_SAME.items()]
+EXPECTED += [
+    Expect("critic.optim.lr_warmup_steps", OneOf(-1, 0, None), TGD + ":330 (no warm-up)", _turn_gae),
+    Expect("critic.grad_clip", AbsentOr(1.0),
+           TGD + ":423; V1 reads critic.optim.clip_grad only, the deprecated key must not disagree", _turn_gae),
+    Expect("critic.loss_scale_factor", AbsentOr(None),
+           "vagen_value_loss refuses it (seq-mean-token-mean over mini x n, vagen/q38/losses.py)", _turn_gae),
+    Expect("critic.checkpoint.save_contents", SameSet(TURN_PPO_CRITIC_SAVE), TGD + ":389-392", _turn_gae),
+]
 
 # recorded in contract_check.json, not asserted (DESIGN 3.1 rows without a tick, and the run's own choices)
 INFO_KEYS = [
@@ -801,6 +857,7 @@ INFO_KEYS = [
     "actor_rollout_ref.ref.fsdp_config.model_dtype", R + ".max_model_len", R + ".enable_prefix_caching",
     R + ".enable_chunked_prefill", "vagen.host_mem_log",
     "vagen.profile", "vagen.turn_credit", "algorithm.gamma", "algorithm.lam",  # phase 2
+    "critic.enable", "critic.strategy", "critic.fsdp.optimizer_offload_step", "critic.model.override_config",  # phase 3
 ]
 
 # the inputs a run reads; checked to exist when check_paths is on
@@ -901,12 +958,15 @@ def _f_turn_gae_critic(cfg, ctx):
     return None
 
 
-def _f_turn_gae_value_loss(cfg, ctx):
-    """Phase 3 (DESIGN_ASYNC 2.3 rows 235-236, W12; PEAR_ASSESSMENT B5): verl's value_loss reads response_mask only
+def _f_critic_value_loss_stock(cfg, ctx):
+    """Phase 3 (DESIGN_ASYNC 2.3 rows 235-236, W12; PEAR_ASSESSMENT B5): verl's own value_loss reads response_mask only
     (VS/workers/utils/losses.py:158-216), so with turn_gae's returns (-100 off each turn's first token) the critic would
-    regress to the sentinel; the valid-mask value loss is not written yet.  Phase 3 replaces this rule."""
-    if _turn_gae(cfg):
-        return "turn_gae needs the phase-3 value loss (vagen_value_loss on the turns' first tokens), not written yet"
+    regress to the sentinel.  Only the vagen trainers put vagen_value_loss in its place (vagen/q38/trainer.py _setup),
+    and pass the critic its one-episode micro-batches (_critic_engine_keys); with vagen.trainer_impl stock (verl's own
+    V1 classes, smoke S0) a value network keeps the stock loss and the engine's dynamic batching."""
+    if get(cfg, "critic.enable") is True and not _vagen(cfg):
+        return (f"critic.enable true with vagen.trainer_impl {trainer_impl(cfg)!r}: verl's value_loss would regress the "
+                f"-100 sentinel (vagen_value_loss comes with the vagen trainers only)")
     return None
 
 
@@ -1062,8 +1122,9 @@ FORBIDDEN: List[Forbid] = [
            "the q38 turn_credit settings live in vagen.turn_credit (V1's AlgoConfig refuses algorithm.turn_credit)"),
     Forbid("turn_credit_settings", _f_turn_credit_settings, "the estimator refuses its settings (vagen/turn_credit.py)"),
     Forbid("turn_gae_without_critic", _f_turn_gae_critic, "turn_gae reads the value network's values"),
-    Forbid("turn_gae_value_loss_phase3", _f_turn_gae_value_loss,
-           "verl's value loss would regress the -100 sentinel (PEAR B5); the valid-mask loss is phase 3 (not overridable)"),
+    Forbid("critic_value_loss_stock", _f_critic_value_loss_stock,
+           "verl's value loss would regress the -100 sentinel (PEAR B5); vagen_value_loss needs the vagen trainers "
+           "(not overridable)"),
     Forbid("parameter_sync_step_not_1", _f_parameter_sync_step,
            "metrics would merge across local steps and the LR horizon would be multiplied"),
     Forbid("epochs_short_of_endpoint", _f_epochs_short, "fit would stop before the endpoint and save no checkpoint"),

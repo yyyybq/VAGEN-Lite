@@ -583,6 +583,19 @@ def _pt(cfg, table):
     return cfg
 
 
+def turn_ppo_critic(cfg):
+    """The value network's keys of the per-turn PPO as rl-config writes them (phase 3: contract.TURN_PPO_CRITIC's
+    values, TURN_PPO_CRITIC_SAME as interpolations, the critic's checkpoint contents), into ``cfg`` in place."""
+    from vagen.q38 import contract as C
+
+    for key, (value, _) in C.TURN_PPO_CRITIC.items():
+        OmegaConf.update(cfg, key, value, force_add=True)
+    for key, (other, _) in C.TURN_PPO_CRITIC_SAME.items():
+        OmegaConf.update(cfg, key, "${" + other + "}", force_add=True)
+    OmegaConf.update(cfg, "critic.checkpoint.save_contents", list(C.TURN_PPO_CRITIC_SAVE), force_add=True)
+    return cfg
+
+
 def _turn_ppo(cfg, epochs=1):
     from vagen.q38.tests.test_contract import A, put
 
@@ -590,7 +603,7 @@ def _turn_ppo(cfg, epochs=1):
                        ("algorithm.gamma", 1.0), ("algorithm.lam", 0.95), ("trainer.critic_warmup", 11),
                        (A + ".ppo_epochs", epochs)):
         put(cfg, key, value)
-    return cfg
+    return turn_ppo_critic(cfg)
 
 
 @pytest.mark.skipif(not PHI_TABLE_8B.is_file(), reason=f"needs {PHI_TABLE_8B}")
@@ -643,19 +656,22 @@ def test_contract_q5_pt_arm(tmp_path):
 
 @pytest.mark.parametrize("epochs", [1, 3])
 def test_contract_turn_ppo_arm(epochs):
-    """The per-turn PPO's config passes every rule but the phase-3 value-loss rule, which cannot be overridden."""
+    """Phase 3: the per-turn PPO's config with the 8B qw3tgd value network passes; the stock value loss (verl's own
+    trainer classes) is refused and cannot be overridden; every critic key of qw3tgd is held."""
     from vagen.q38 import contract as C
     from vagen.q38.tests.test_contract import A, put
 
     b = _contract_base()
     try:
         report = b.evaluate(_turn_ppo(b.base(), epochs))
-        assert report["violations"] == ["turn_gae_value_loss_phase3"], C.summary(report)
+        assert report["passed"], C.summary(report)
         assert report["profile"]["shape"] == "turn_ppo"
         cfg = _turn_ppo(b.base(), epochs)
-        put(cfg, "vagen.contract.allow_override", ["turn_gae_value_loss_phase3"])
+        put(cfg, "vagen.trainer_impl", "stock")
+        put(cfg, "vagen.contract.allow_override", ["critic_value_loss_stock"])
         report = b.evaluate(cfg)
-        assert not report["passed"] and any("cannot be overridden" in p for p in report["problems"])
+        assert not report["passed"] and "critic_value_loss_stock" in report["violations"]
+        assert any("cannot be overridden" in p for p in report["problems"])
         for changes, rules in (
                 ([("critic.enable", None)], ["critic.enable", "turn_gae_without_critic"]),
                 ([("trainer.critic_warmup", 0)], ["trainer.critic_warmup"]),
@@ -664,6 +680,27 @@ def test_contract_turn_ppo_arm(epochs):
                 ([(A + ".ppo_mini_batch_size", 24)], [A + ".ppo_mini_batch_size"]),
                 ([("algorithm.rollout_correction.rollout_rs", "token_k1")], ["turn_gae_with_rollout_rs"]),
                 ([("filter.name", "nominal")], ["filter.name"]),
+                # phase 3: the value network as qw3tgd ran it
+                ([("vagen.trainer_impl", "stock")], ["critic_value_loss_stock"]),
+                ([("critic.optim.lr", 5e-5)], ["critic.optim.lr"]),  # p1tgae_c's critic lr
+                ([("critic.cliprange_value", 1e6)], ["critic.cliprange_value"]),  # p1tgae_c's "no clip"
+                ([("critic.optim.lr_scheduler_type", "cosine")], ["critic.optim.lr_scheduler_type"]),
+                ([("critic.optim.clip_grad", 0.3)], ["critic.optim.clip_grad"]),
+                ([("critic.grad_clip", 0.3)], ["critic.grad_clip"]),
+                ([("critic.ppo_micro_batch_size_per_gpu", 2)], ["critic.ppo_micro_batch_size_per_gpu"]),
+                ([("critic.use_dynamic_bsz", True)], ["critic.use_dynamic_bsz"]),
+                ([("critic.loss_agg_mode", "token-mean")], ["critic.loss_agg_mode"]),
+                ([("critic.ppo_epochs", 2)], ["critic.ppo_epochs"]),
+                ([("critic.ppo_mini_batch_size", 24)], ["critic.ppo_mini_batch_size"]),
+                ([("critic.model.path", "/elsewhere")], ["critic.model.path"]),
+                ([("critic.strategy", "fsdp2" if b.base().actor_rollout_ref.actor.strategy != "fsdp2" else "fsdp")],
+                 ["critic.strategy"]),
+                ([("critic.fsdp.strategy", "megatron")], ["critic.fsdp.strategy"]),
+                ([("critic.fsdp.param_offload", False)], ["critic.fsdp.param_offload"]),
+                ([("critic.fsdp.model_dtype", "bf16")], ["critic.fsdp.model_dtype"]),
+                ([("critic.model.use_remove_padding", False)], ["critic.model.use_remove_padding"]),
+                ([("critic.checkpoint.save_contents", ["model"])], ["critic.checkpoint.save_contents"]),
+                ([("critic.loss_scale_factor", 4096)], ["critic.loss_scale_factor"]),
         ):
             cfg = _turn_ppo(b.base(), epochs)
             for k, v in changes:

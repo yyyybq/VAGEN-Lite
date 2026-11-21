@@ -118,7 +118,9 @@ FORBIDDEN_CASES = {
     "turn_credit_settings_place": [("algorithm.turn_credit", {"baseline": "none"})],
     "turn_credit_settings": [("algorithm.adv_estimator", "turn_credit"), ("vagen.turn_credit", {"baseline": "phi_bin"})],
     "turn_gae_without_critic": [("algorithm.adv_estimator", "turn_gae")],
-    "turn_gae_value_loss_phase3": [("algorithm.adv_estimator", "turn_gae"), ("critic.enable", True)],
+    # phase 3: a value network keeps verl's own value loss under the stock trainer classes
+    "critic_value_loss_stock": [("algorithm.adv_estimator", "turn_gae"), ("critic.enable", True),
+                                ("vagen.trainer_impl", "stock")],
 }
 
 # the Q5 PT update shape (DESIGN 3.1 last rows; smoke S4 keeps every group with filter.enable false before phase 2)
