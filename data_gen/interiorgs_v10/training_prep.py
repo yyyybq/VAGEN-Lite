@@ -494,7 +494,7 @@ STANDARD_KEYS = ("history_mode", "task_pool", "save_freq", "no_internal_val", "o
 # fail; keep_by_return_std (vagen/custom_filter/filter.py) fills the places still free with all-fail tasks whose
 # episode returns spread at least keep_std_threshold (standard deviation, n - 1), their group comparison dividing
 # by at least keep_std_floor.
-GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std")
+GROUP_FILTERS = ("mixed_outcome", "keep_by_return_std", "nominal")  # nominal: reward line 2026-11-01, every outcome
 
 
 def load_standards(path: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
@@ -667,8 +667,16 @@ def design_variant_overrides(args: argparse.Namespace, env: Dict[str, Any]) -> D
         if not Path(args.distance_tables).is_dir():
             raise SystemExit(f"--distance-tables {args.distance_tables} is not a directory")
         out["distance_tables_dir"] = str(Path(args.distance_tables).resolve())
+    if getattr(args, "table_near", False):  # reward line (phase 2): the table's neighbour-cell fallback
+        if version != "optimal":
+            raise SystemExit("--table-near needs --progress-version optimal --distance-tables")
+        out["optimal_progress_near"] = True
     if out and not env.get("enable_potential_shaping_reward"):
-        raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
+        # reward line (2026-11-01): the per-turn credit reads the table's progress score with the S0 reward (the env's
+        # progress reward off); only the score's version, tables and lookup, nothing that shapes a reward
+        if not (getattr(args, "turn_credit", None)
+                and set(out) <= {"progress_version", "distance_tables_dir", "optimal_progress_near"}):
+            raise SystemExit("the progress options change the dense reward: give a dense --reward-preset (dense, D_cond)")
     if ("progress_weights" in out or "milestone_rewards" in out) and version == "product":
         raise SystemExit("--progress-weights / --milestone-rewards need a grouped progress version (D_cond, or "
                          "--progress-version grouped_gated / grouped_soft)")
@@ -1252,6 +1260,56 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         if not history["env"].get("enable_potential_shaping_reward"):
             raise SystemExit("--progress-adv-weight splits the dense reward's progress part: give a dense --reward-preset")
         _set(ppo, "algorithm.progress_adv_weight", float(args.progress_adv_weight))
+    turn_credit = None
+    if getattr(args, "turn_credit", None):  # reward line (2026-11-01): the per-turn credit (vagen/turn_credit.py)
+        from vagen.turn_credit import ESTIMATOR, settings as turn_credit_settings
+
+        turn_credit = json.loads(args.turn_credit) if isinstance(args.turn_credit, str) else dict(args.turn_credit)
+        try:
+            tc_checked = turn_credit_settings({"turn_credit": turn_credit})
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"--turn-credit: {exc}")
+        if history["env"].get("enable_potential_shaping_reward"):
+            raise SystemExit("--turn-credit adds the progress term itself: give the S0 reward (no dense --reward-preset)")
+        if tc_checked["phi_version"] == "grouped_gated":  # phase 3, experiment J (丙): V4's progress score as phi
+            if history["env"].get("progress_version") != "grouped_gated" or history["env"].get("distance_tables_dir"):
+                raise SystemExit("--turn-credit phi_version grouped_gated reads V4's progress score: "
+                                 "--progress-version grouped_gated, no --distance-tables")
+            if history["env"].get("progress_weights") or history["env"].get("milestone_rewards"):
+                raise SystemExit("--turn-credit phi_version grouped_gated is V4's score: no progress weights or milestones")
+            if tc_checked["stall_penalty"]:  # the stall test needs the table distance, unknown without tables
+                raise SystemExit("--turn-credit phi_version grouped_gated has no table distance: no stall_penalty")
+        elif history["env"].get("progress_version") != "optimal" or not history["env"].get("distance_tables_dir"):
+            raise SystemExit("--turn-credit reads the table's progress score: --progress-version optimal --distance-tables DIR")
+        if tc_checked["phi_version"] == "success_table":  # phase 3, experiment K (戊): phi = Phi(d, b) from the table
+            from vagen.turn_credit import load_success_table
+
+            try:
+                tab = load_success_table(tc_checked["phi_table"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise SystemExit(f"--turn-credit phi_table: {exc}")
+            merged_env = {**tcfg, **history["env"]}
+            if merged_env.get("max_episode_steps") is None:  # the env's own default is not 12 (code review)
+                raise SystemExit("--turn-credit phi_table needs the env template's max_episode_steps")
+            budget = int(merged_env["max_episode_steps"])
+            if tab["budget"] != budget:
+                raise SystemExit(f"--turn-credit phi_table is for a budget of {tab['budget']} actions, the env has {budget}")
+            src = tab["source"]  # the table's d must be this env's d: the same tables and neighbour lookup
+            if src.get("distance_tables_dir") and \
+                    Path(src["distance_tables_dir"]).resolve() != Path(history["env"]["distance_tables_dir"]).resolve():
+                raise SystemExit(f"--turn-credit phi_table was fitted on {src['distance_tables_dir']}, the env reads "
+                                 f"{history['env']['distance_tables_dir']}")
+            if "optimal_progress_near" in src and bool(src["optimal_progress_near"]) != \
+                    bool(history["env"].get("optimal_progress_near", False)):
+                raise SystemExit("--turn-credit phi_table's neighbour lookup (--table-near) differs from the env's")
+            if int(merged_env.get("max_consecutive_collisions") or 0) > 0:  # that turn would keep a stale d
+                raise SystemExit("--turn-credit phi_table: a collision-terminated turn keeps the previous metric; "
+                                 "needs max_consecutive_collisions 0")
+            turn_credit["phi_table"] = str(Path(tc_checked["phi_table"]).resolve())
+        if not ppo["trainer"].get("concat_multi_turn"):
+            raise SystemExit("--turn-credit needs the concat history mode (one sequence an episode, the turns' spans)")
+        _set(ppo, "algorithm.adv_estimator", ESTIMATOR)
+        _set(ppo, "algorithm.turn_credit", turn_credit)
     if getattr(args, "entropy_coeff", None) is not None:  # round 12 batch: the entropy bonus instead of the package's
         _set(ppo, "actor_rollout_ref.actor.entropy_coeff", float(args.entropy_coeff))
     # round 12 freeze, the weak-start stability runs (the user's 11th supplement, W3 / W4 and the checkpoint interval):
@@ -1276,6 +1334,12 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
         filter_kwargs = dict(package["filter.filter_kwargs"], std_threshold=float(args.keep_std_threshold),
                              std_floor=float(getattr(args, "keep_std_floor", None) or 0.0),
                              rows=str((out / "train.jsonl").resolve()))  # the filled tasks' d* in the metrics
+        _set(ppo, "filter.name", group_filter)
+        _set(ppo, "filter.filter_kwargs", filter_kwargs)
+    if group_filter == "nominal":  # reward line (2026-11-01): the nominal batch, every outcome kept
+        if not package:
+            raise SystemExit("--group-filter nominal keeps the package's nominal batch: it needs --opt-package")
+        filter_kwargs = dict(package["filter.filter_kwargs"])
         _set(ppo, "filter.name", group_filter)
         _set(ppo, "filter.filter_kwargs", filter_kwargs)
     curriculum = None
@@ -1352,6 +1416,9 @@ def cmd_rl_config(args: argparse.Namespace) -> None:
               "by_family_train": dict(Counter(r["task_type"] for r in parts["train"]))}
     if footprint is not None:  # experiment 3A: only when set, so every other report stays as it was
         report["turn_footprint_radius"] = float(footprint)
+    if turn_credit is not None:  # reward line (2026-11-01); only when set (RW writes both keys always), so every
+        report["turn_credit"] = turn_credit  # other report stays as it was
+        report["adv_estimator"] = (ppo.get("algorithm") or {}).get("adv_estimator")
     if q38_report is not None:  # the q38 stack: only when set, so every 8B report stays as it was
         report["stack"] = "q38"
         report["q38"] = q38_report
@@ -1688,6 +1755,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     c.add_argument("--distance-tables", default=None,
                    help="round 13 (B): the directory of per-task distance tables (distance_table.py build) the "
                         "optimal progress reads")
+    c.add_argument("--table-near", action="store_true",
+                   help="reward line (phase 2): a pose missing from its table takes the smallest reachable distance "
+                        "of its 26 neighbour cells (env optimal_progress_near, distance_table_near.py); needs "
+                        "--progress-version optimal")
     c.add_argument("--critic-feature-tables", default=None,
                    help="the privileged critic (package p1tgae_fc, 2026-11-13): the directory of the train tasks' "
                         "distance tables the env's critic_features read (every train task needs one; usually from "
@@ -1713,6 +1784,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                    help="round 12 freeze, variant V8: the group comparison normalises the success part (return - "
                         "progress) and the progress part apart and adds them, the progress part weighted (e.g. 0.5); "
                         "PPO config algorithm.progress_adv_weight, vagen/split_reward_adv.py")
+    c.add_argument("--turn-credit", default=None,
+                   help="reward line (2026-11-01): the per-turn credit estimator with these settings, a JSON object "
+                        "(scale, gamma, turn_reward, baseline batch_mean / turn_index / none, turn_weight, "
+                        "episode_weight, episode_norm batch / none, neg_clip, min_positive_mass, stall_penalty; "
+                        "dump_dir, dump_updates: the smoke's span check); "
+                        "PPO config algorithm.adv_estimator turn_credit and algorithm.turn_credit (the q38 stack: "
+                        "vagen.turn_credit), vagen/turn_credit.py; "
+                        "needs the S0 reward with --progress-version optimal --distance-tables")
     c.add_argument("--sft-trajectories", nargs="*", default=None,
                    help="SFT conversation files (sft_trajectories.jsonl): no RL train task may be among their tasks")
     c.add_argument("--exclude", default=None,
