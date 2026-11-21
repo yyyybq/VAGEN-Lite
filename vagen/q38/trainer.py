@@ -61,11 +61,33 @@ vagen/async/tis_w_mean_s{0,1}, vagen/async/tis_clip_frac_s{0,1}, vagen/async/log
 vagen/actor/rows, vagen/actor/real_rows, and with ppo_epochs > 1 vagen/epoch/{kl_loss,kl_loss_v1,ppo_kl,pg_clipfrac,
 pg_clipfrac_lower,pg_loss,grad_norm}_e{1..epochs} (kl_loss in the 8B unit); phase 2: turn_credit/* (the reward line's
 estimator metrics, vagen/turn_credit.py) or critic/turn_gae/* (vagen/turn_gae.py), and vagen/adv/turn_rows.
+
+Phase 3 (DESIGN_ASYNC 2.3 rows 235-236, 6 W12; PEAR_ASSESSMENT B5): the value network of turn_gae (package p1tgae).
+- ``_setup``: the parent builds the critic and gives it verl's value_loss (TB:344-350), then the mixin replaces it with
+  vagen/q38/losses.py ``vagen_value_loss`` (the loss on each turn's first answer token only, F061 dp_critic.py:227-246
+  semantics) bound to critic.ppo_mini_batch_size x rollout.n and one sequence a micro-batch;
+- ``_compute_values`` / ``_update_critic``: the parent's calls with ``use_dynamic_bsz`` false and
+  ``micro_batch_size_per_gpu`` from critic.forward_micro_batch_size_per_gpu / ppo_micro_batch_size_per_gpu (1) in the
+  batch's extra_info, which the worker takes over its engine defaults (engine_workers.py:353-363, 407-417).  V1 hands
+  the actor's batch settings to the actor's engine (engine_workers.py:621-637) but none to the critic's (TB:289-312),
+  whose engine config then batches dynamically by 32,768 tokens; several packed episodes in one forward of the
+  qwen3_5 value model would share the gated-delta state (no cu_seqlens: transformer_impl.py:610, losses.py docstring).
+  After the update: critic/vf_loss (V1's: the mean over the mini-batch's rows of each row's 0.5 x anchor mean squared
+  error, the true loss), critic/vf_loss_8b (the 8B's logged unit, F061 scaled each micro-batch's loss by 1 /
+  gradient_accumulation: V1 x rows / (ga_8b x n_real), as kl_to_8b_unit), and the pooled in-update readings
+  critic/update/* (losses.py critic_update_readings: explained_var_valid, mae_valid, rmse_valid, valid_count, ...);
+- the turn_gae branch of ``_compute_advantage`` also reports the critic's fit on the batch (losses.py
+  critic_batch_readings): the 8B's compute_valid_return_metrics names (critic/returns/valid_*, critic/values/*_valid,
+  critic/advantages/valid_*) and, by trajectory staleness 0 / 1 (DESIGN 7.1 question 9), vagen/critic/{ev, vf_loss,
+  anchors, rows}_s{0,1}; a real row without a turn anchor raises (F061 raised on it, dp_critic.py:237-238);
+- ``_compute_metrics`` drops compute_data_metrics' sentinel-dominated critic readings under turn_gae, as the 8B does
+  (RT:3384-3403; losses.SENTINEL_DOMINATED).
 """
 
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 import math
 import numbers
@@ -104,6 +126,9 @@ TURN_RECORD_KEYS = {"turn_credit": "turn_records", "turn_gae": "turn_rewards"}
 # where a q38 config keeps the turn_credit settings (the reward line's algorithm.turn_credit; V1's AlgoConfig refuses
 # an unknown key, algorithm.py:697-750)
 TURN_CREDIT_SETTINGS_KEY = "vagen.turn_credit"
+# phase 3: the critic engine's batch settings the mixin passes with each critic call (they override the engine's
+# defaults, engine_workers.py:353-363 / 407-417); popped again afterwards so the actor's calls do not see them
+CRITIC_ENGINE_KEYS = ("use_dynamic_bsz", "micro_batch_size_per_gpu")
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -487,12 +512,24 @@ class VagenTrainerMixin:
         values = None
         if estimator == "turn_gae":
             if not getattr(self, "use_critic", False) or "values" not in data.batch.keys():
-                raise RuntimeError("q38 trainer: turn_gae needs the critic's values (critic.enable true; the value loss "
-                                   "on the turns' first tokens is phase 3, DESIGN_ASYNC 2.3)")
+                raise RuntimeError("q38 trainer: turn_gae needs the critic's values (critic.enable true; TransferQueue "
+                                   "'values' from _compute_values)")
             values = data.batch["values"][select]
         adv_real, ret_real, est_metrics = turn_advantage_rows(
             estimator, records, uids, mask_real, data.batch["token_level_rewards"][select], values,
             algorithm=algorithm, turn_credit=tc_cfg)
+        if estimator == "turn_gae":  # phase 3: the value network's targets and its fit on this batch
+            from vagen.q38.losses import critic_batch_readings, value_valid_mask
+
+            no_anchor = [k for k, has in zip(real_keys, value_valid_mask(ret_real, mask_real).any(dim=-1).tolist(),
+                                             strict=True) if not has]
+            if no_anchor:  # F061 raised on such a row too (dp_critic.py:237-238, one episode a micro-batch)
+                raise RuntimeError(f"q38 trainer: turn_gae gave {len(no_anchor)} real rows no value target (no turn "
+                                   f"anchor), e.g. {no_anchor[:3]}")
+            lags = [trajectory_staleness(batch.tags[i], self.global_steps) for i in idx]
+            est_metrics = dict(est_metrics)
+            est_metrics.update(critic_batch_readings(values, ret_real, mask_real, adv_real, lags,
+                                                     buckets=STALENESS_BUCKETS))
         if estimator == "turn_credit" and tc_cfg["dump_dir"]:
             self._turn_credit_dump(batch, real_keys, records, uids, mask_real, data.batch["token_level_rewards"][select],
                                    adv_real, tc_cfg)
@@ -628,6 +665,94 @@ class VagenTrainerMixin:
                     metrics[f"vagen/async/tis_clip_frac_s{b}"] = float(clipped.sum()) / n_tok
         return batch
 
+    # ---- 4b. the value network (phase 3) -------------------------------------------------------------------------------
+
+    def _setup(self):
+        """The parent's set-up (TB:251-...; it gives the critic verl's value_loss, TB:344-350), then the critic's loss
+        replaced by vagen_value_loss (module docstring, phase 3)."""
+        super()._setup()
+        if getattr(self, "use_critic", False):
+            self._set_value_loss()
+
+    def _value_loss_fn(self):
+        """vagen_value_loss bound to this run's critic config (losses.ValueLossConfig: cliprange_value, loss_agg_mode,
+        loss_scale_factor), the global batch of one critic mini-batch (critic.ppo_mini_batch_size x rollout.n, what
+        TB:1880-1883 passes) and one sequence a micro-batch."""
+        from vagen.q38.losses import IGNORE_VALUE, ValueLossConfig, vagen_value_loss
+
+        estimator = self._adv_estimator()
+        if estimator != "turn_gae":
+            raise ValueError(f"q38 trainer: a value network with adv_estimator {estimator!r}; the q38 critic recipe is "
+                             "turn_gae's (package p1tgae)")
+        critic = self.config.critic
+        if bool(critic.get("use_dynamic_bsz", False)):
+            raise ValueError("q38 trainer: critic.use_dynamic_bsz must be false (one episode a micro-batch)")
+        micro = int(critic.ppo_micro_batch_size_per_gpu)
+        if micro != 1:
+            raise ValueError(f"q38 trainer: critic.ppo_micro_batch_size_per_gpu {micro}; the qwen3_5 value model needs one "
+                             "sequence a micro-batch (vagen/q38/losses.py)")
+        scale = critic.get("loss_scale_factor", None)
+        loss_cfg = ValueLossConfig(cliprange_value=float(critic.cliprange_value), loss_agg_mode=str(critic.loss_agg_mode),
+                                   loss_scale_factor=None if scale is None else float(scale))
+        if loss_cfg.loss_agg_mode != "seq-mean-token-mean" or loss_cfg.loss_scale_factor is not None:
+            raise ValueError(f"q38 trainer: critic loss_agg_mode {loss_cfg.loss_agg_mode!r} / loss_scale_factor "
+                             f"{loss_cfg.loss_scale_factor!r}; vagen_value_loss is seq-mean-token-mean over mini x n")
+        mini_n = int(critic.ppo_mini_batch_size) * int(self.config.actor_rollout_ref.rollout.n)
+        return functools.partial(vagen_value_loss, config=loss_cfg, global_batch_size=mini_n,
+                                 max_rows_per_micro=micro, ignore_value=IGNORE_VALUE)
+
+    def _set_value_loss(self):
+        self.critic_wg.set_loss_fn(self._value_loss_fn())
+        logger.info("q38 trainer: critic loss = vagen.q38.losses.vagen_value_loss (the turns' first tokens only)")
+
+    def _critic_engine_keys(self, infer: bool) -> dict:
+        """The critic engine's batch settings of a call (CRITIC_ENGINE_KEYS): no dynamic batching, the critic config's
+        micro-batch (forward_micro_batch_size_per_gpu for compute_values, ppo_micro_batch_size_per_gpu for the
+        update)."""
+        critic = self.config.critic
+        if bool(critic.get("use_dynamic_bsz", False)):
+            raise ValueError("q38 trainer: critic.use_dynamic_bsz must be false (one episode a micro-batch)")
+        key = "forward_micro_batch_size_per_gpu" if infer else "ppo_micro_batch_size_per_gpu"
+        micro = critic.get(key, None)
+        if micro is None:
+            micro = critic.ppo_micro_batch_size_per_gpu
+        return {"use_dynamic_bsz": False, "micro_batch_size_per_gpu": int(micro)}
+
+    @contextlib.contextmanager
+    def _with_extra_info(self, batch: KVBatchMeta, keys: dict) -> Iterator[None]:
+        clash = {k: batch.extra_info[k] for k in keys if k in batch.extra_info and batch.extra_info[k] != keys[k]}
+        if clash:
+            raise RuntimeError(f"q38 trainer: the batch already carries other critic engine keys {clash}")
+        batch.extra_info.update(keys)
+        try:
+            yield
+        finally:
+            for k in keys:
+                batch.extra_info.pop(k, None)
+
+    def _compute_values(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
+        with self._with_extra_info(batch, self._critic_engine_keys(infer=True)):
+            return super()._compute_values(batch, metrics)
+
+    def _update_critic(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
+        """The parent (TB:1878-1899) with the critic engine keys, then the readings of the update (module docstring)."""
+        from vagen.q38.losses import critic_update_readings
+
+        own: dict = {}
+        with self._with_extra_info(batch, self._critic_engine_keys(infer=False)):
+            batch = super()._update_critic(batch, own)
+        readings = critic_update_readings(own)
+        own.update(readings)
+        rows = len(batch)
+        n_real = sum(1 for r in self._real_rows(batch) if r)
+        if "critic/vf_loss" not in own:
+            raise KeyError("q38 trainer: the critic update returned no critic/vf_loss")
+        own["critic/vf_loss_8b"] = kl_to_8b_unit(float(own["critic/vf_loss"]), rows, self._ga_8b(), n_real)
+        own["vagen/critic/update_rows"] = int(rows)
+        own["vagen/critic/update_real_rows"] = int(n_real)
+        metrics.update(own)
+        return batch
+
     # ---- 5. actor update, KL in the 8B unit ---------------------------------------------------------------------------
 
     def _update_actor(self, batch: KVBatchMeta, metrics: dict) -> KVBatchMeta:
@@ -666,6 +791,11 @@ class VagenTrainerMixin:
         """The parent (TB:1946-2074, the last metrics of the step: fit calls it at TB:528 and logs the dict at TB:544
         with nothing in between that adds a metric), then numpy scalars as Python floats (plain_metric_scalars)."""
         out = super()._compute_metrics(batch, metrics, timing_raw, global_steps, epoch)
+        if self._adv_estimator() == "turn_gae":  # phase 3: as RT:3384-3403
+            from vagen.q38.losses import SENTINEL_DOMINATED
+
+            for key in SENTINEL_DOMINATED:
+                metrics.pop(key, None)
         plain_metric_scalars(metrics)
         return out
 
