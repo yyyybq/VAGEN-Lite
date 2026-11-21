@@ -114,6 +114,11 @@ FORBIDDEN_CASES = {
     # smoke S5 (vagen/q38/fault_injection.py; more cases in tests/test_fault_injection.py)
     "fault_injection_config": [("vagen.fault_injection", {"enable": False, "env_step_exception": {"turn": 2}})],
     "stuck_warn_below_floor": [("vagen.stuck_warn", {"min_s": 1, "factor": 0, "repeat_s": 30})],
+    # phase 2 (more cases in tests/test_turn_arms.py)
+    "turn_credit_settings_place": [("algorithm.turn_credit", {"baseline": "none"})],
+    "turn_credit_settings": [("algorithm.adv_estimator", "turn_credit"), ("vagen.turn_credit", {"baseline": "phi_bin"})],
+    "turn_gae_without_critic": [("algorithm.adv_estimator", "turn_gae")],
+    "turn_gae_value_loss_phase3": [("algorithm.adv_estimator", "turn_gae"), ("critic.enable", True)],
 }
 
 # the Q5 PT update shape (DESIGN 3.1 last rows; smoke S4 keeps every group with filter.enable false before phase 2)

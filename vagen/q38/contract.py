@@ -5,8 +5,10 @@
 - EXPECTED: config key -> expected value, each with its source (the 8B run, the asynchronous recipe, or a decision of
   the user).  Rules can depend on the run's profile: ``vagen.trainer_impl`` (``vagen``, or ``stock`` for smoke S0),
   ``vagen.parity_mode`` (the 8B parity run, DESIGN 5.3), ``vagen.profile`` (``main``, the default: the main line
-  and the matrix; ``q5_pt``: the update shape of the Q5 PT arm, DESIGN 3.1 last rows and smoke S4), whether a
-  group filter is on, and (the HF export dtype, P1 decision 4) the start model's config.json model_type;
+  and the matrix; ``q5_pt``: the update shape of the Q5 PT arm, DESIGN 3.1 last rows and smoke S4, with turn_credit
+  and the nominal filter in phase 2; ``turn_ppo``: the per-turn PPO with a value network, 8B qw3tgd and the Q5 S-PPO
+  controls, phase 2-3), the advantage estimator, whether a group filter is on, and (the HF export dtype, P1 decision 4)
+  the start model's config.json model_type;
 - FORBIDDEN: combinations that silently change the recipe (the table at the end of DESIGN 3.1);
 - PATHS: the inputs a run reads (env yamls, the model, the filter's task rows) must exist;
 - endpoint rules: the endpoint must lie within the learning-rate horizon and within total_epochs x steps_per_epoch
@@ -75,16 +77,33 @@ FAILURE_POLICIES = ("raise", "skip")
 FI_ENABLE_KEY = "vagen.fault_injection.enable"
 STUCK_WARN_FLOOR = {"min_s": 60.0, "factor": 1.0, "repeat_s": 60.0}
 # FORBIDDEN rules that vagen.contract.allow_override may not name
-NOT_OVERRIDABLE = ("fault_injection_config",)
+NOT_OVERRIDABLE = ("fault_injection_config", "turn_gae_value_loss_phase3")
 
 # vagen.profile: the update shape a run is checked against.  main = the 8B main line (12 kept groups padded to 96
-# rows, one pass); q5_pt = the Q5 PT arm (YQ5: 24 groups = 192 rows a mini-batch, 3 passes, ga_8b 24).  Before phase 2
-# brings the nominal filter, q5_pt keeps every group with factor 1 (filter.enable false, DESIGN 5.2 S4).
-PROFILES = ("main", "q5_pt")
+# rows, one pass); q5_pt = the Q5 PT arm (YQ5: 24 groups = 192 rows a mini-batch, 3 passes, ga_8b 24).  q5_pt with
+# GRPO keeps every group with factor 1 (filter.enable false: smoke S4, DESIGN 5.2); q5_pt with turn_credit is the PT
+# arm itself (phase 2: the nominal filter of 24, YQ5:586-589).  turn_ppo (phase 2) = the main line's per-turn PPO with
+# a value network (8B qw3tgd, package p1tgae: turn_gae, 12 kept groups, gamma 1.0 / lam 0.95, critic_warmup 11) and the
+# Q5 S-PPO1 / S-PPO3 controls (DESIGN 3.1 Q5 rows: one or three passes).
+PROFILES = ("main", "q5_pt", "turn_ppo")
 SHAPES = {
     "main": {"ppo_mini_batch_size": 12, "ppo_epochs": 1, "ga_8b": 12},
     "q5_pt": {"ppo_mini_batch_size": 24, "ppo_epochs": 3, "ga_8b": 24},
+    "turn_ppo": {"ppo_mini_batch_size": 12, "ppo_epochs": 1, "ga_8b": 12},
 }
+TURN_PPO_EPOCHS = (1, 3)  # S-PPO1 / S-PPO3 (DESIGN 3.1 Q5 rows); qw3tgd 1
+PT_FILTER = "nominal"  # Q5 PT's group filter (YQ5:586-589), phase 2 (vagen/custom_filter/filter.py nominal_filter)
+PT_TARGET_GROUPS = 24
+# Q5 PT's turn_credit settings (YQ5 algorithm.turn_credit; reward_runs/runs/rw_p3n_s2tcswf3c/plan.json rl_runs): in a
+# q38 config under vagen.turn_credit (V1's AlgoConfig refuses algorithm.turn_credit, vagen/q38/trainer.py)
+PT_TURN_CREDIT = {"episode_weight": 0, "baseline": "none", "phi_version": "success_table",
+                  "unreadable_as_wrong": True, "unreadable_floor": -0.3}
+# the phi table: the 8B's success_table_tcn3_v1.json, reused (PREREG_Q38 3.4), checked by content
+PT_PHI_TABLE_NAME = "success_table_tcn3_v1.json"
+PT_PHI_TABLE_SHA256 = "3d77129b58779144d104f2abc83d407d1e2dc65a19b123fbe3cfbf3abd7a44bf"
+PT_TURN_CREDIT_OPTIONAL = ("dump_dir", "dump_updates")  # the smoke's span check (S7), off by default
+# the main line's per-turn PPO (package p1tgae, training_prep OPT_PACKAGES; 8B qw3tgd)
+TURN_PPO_GAMMA, TURN_PPO_LAM, TURN_PPO_CRITIC_WARMUP = 1.0, 0.95, 11
 
 A = "actor_rollout_ref.actor"
 R = "actor_rollout_ref.rollout"
@@ -176,8 +195,34 @@ def _q5_pt(cfg) -> bool:
     return profile(cfg) == "q5_pt"
 
 
+def _turn_ppo(cfg) -> bool:
+    return profile(cfg) == "turn_ppo"
+
+
 def _main_shape(cfg) -> bool:
+    return not _q5_pt(cfg) and not _turn_ppo(cfg)
+
+
+def _main_or_turn_ppo_shape(cfg) -> bool:
+    """mini 12, ga_8b 12: the main line and its per-turn PPO."""
     return not _q5_pt(cfg)
+
+
+def _estimator(cfg) -> Optional[str]:
+    value = OmegaConf.select(cfg, "algorithm.adv_estimator", default=None)
+    return None if value is None else str(value)
+
+
+def _turn_credit(cfg) -> bool:
+    return _estimator(cfg) == "turn_credit"
+
+
+def _turn_gae(cfg) -> bool:
+    return _estimator(cfg) == "turn_gae"
+
+
+def _no_critic_estimator(cfg) -> bool:
+    return _estimator(cfg) in ("grpo", "turn_credit")
 
 
 def filter_on(cfg: DictConfig) -> bool:
@@ -202,6 +247,20 @@ def _keep_by_std(cfg) -> bool:
 
 def _vagen_q5_pt(cfg) -> bool:
     return _vagen(cfg) and _q5_pt(cfg)
+
+
+def _vagen_q5_pt_grpo(cfg) -> bool:
+    """smoke S4: the Q5 PT shape with GRPO, every group kept with factor 1."""
+    return _vagen_q5_pt(cfg) and not _turn_credit(cfg)
+
+
+def _vagen_q5_pt_tc(cfg) -> bool:
+    """the Q5 PT arm itself (phase 2): turn_credit with the nominal filter."""
+    return _vagen_q5_pt(cfg) and _turn_credit(cfg)
+
+
+def _vagen_filter_not_pt(cfg) -> bool:
+    return _vagen_filter(cfg) and not _q5_pt(cfg)
 
 
 def _not_parity(cfg) -> bool:
@@ -411,6 +470,46 @@ class Computed(Matcher):
         return {"computed": self.text, "value": jsonable(self.fn(cfg, ctx))}
 
 
+class PtTurnCredit(Matcher):
+    """vagen.turn_credit of the Q5 PT arm: PT_TURN_CREDIT's values, a phi_table whose content is the 8B's table
+    (sha256 PT_PHI_TABLE_SHA256), no other key but the smoke dump's (PT_TURN_CREDIT_OPTIONAL), and settings that
+    vagen.turn_credit.settings accepts."""
+
+    def problems(self, actual) -> List[str]:
+        import hashlib
+
+        if not isinstance(actual, dict):
+            return [f"not a mapping: {jsonable(actual)!r}"]
+        out = [f"{k}={jsonable(actual.get(k, ABSENT))!r}, expected {v!r}" for k, v in PT_TURN_CREDIT.items()
+               if not values_equal(actual.get(k, ABSENT), v)]
+        extra = sorted(set(actual) - set(PT_TURN_CREDIT) - {"phi_table"} - set(PT_TURN_CREDIT_OPTIONAL))
+        if extra:
+            out.append(f"keys outside the PT settings: {extra}")
+        table = actual.get("phi_table")
+        try:
+            with open(os.path.expanduser(str(table)), "rb") as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+            if digest != PT_PHI_TABLE_SHA256:
+                out.append(f"phi_table {table} has sha256 {digest}, not the 8B {PT_PHI_TABLE_NAME}'s")
+        except (OSError, TypeError) as e:
+            out.append(f"phi_table {table!r} cannot be read: {type(e).__name__}")
+        try:
+            from vagen.turn_credit import settings
+
+            settings({"turn_credit": actual})
+        except (ValueError, TypeError) as e:
+            out.append(f"vagen.turn_credit.settings refuses it: {e}")
+        return out
+
+    def matches(self, actual, cfg, ctx):
+        return not self.problems(actual)
+
+    def describe(self, cfg, ctx):
+        return {"values": jsonable(PT_TURN_CREDIT), "phi_table_sha256": PT_PHI_TABLE_SHA256,
+                "optional": list(PT_TURN_CREDIT_OPTIONAL),
+                "problems": self.problems(get(cfg, "vagen.turn_credit"))}
+
+
 def _total_epochs_expected(cfg, ctx):
     if not ctx.steps_per_epoch:
         return None
@@ -481,18 +580,26 @@ EXPECTED: List[Expect] = [
     Expect("filter.enable", AbsentOr(False), "trainer_impl stock: plain GRPO, nothing applies filter.* (smoke S0)",
            _stock),
     Expect("filter.enable", AbsentOr(False),
-           "profile q5_pt before phase 2: every group kept with factor 1 stands in for nominal 24 (YQ5:586-589; "
-           "DESIGN 5.2 S4); the nominal filter is phase 2", _vagen_q5_pt),
+           "profile q5_pt with GRPO (smoke S4): every group kept with factor 1 stands in for nominal 24 (YQ5:586-589; "
+           "DESIGN 5.2 S4)", _vagen_q5_pt_grpo),
     Expect("filter.name", OneOf(*PHASE1_FILTERS),
-           "8B group filters of phase 1 (Y8:579-592; S0 mixed_outcome, V4 keep_by_return_std); nominal is phase 2",
-           _vagen_filter),
+           "8B group filters (Y8:579-592; S0 mixed_outcome, V4 keep_by_return_std); nominal only for Q5 PT",
+           _vagen_filter_not_pt),
+    # phase 2: the Q5 PT arm (turn_credit, nominal 24: every candidate group in the update, YQ5:586-589)
+    Expect("filter.enable", True, YQ5 + ":586 (the nominal filter)", _vagen_q5_pt_tc),
+    Expect("filter.name", PT_FILTER, YQ5 + ":587", _vagen_q5_pt_tc),
+    Expect("filter.filter_kwargs", {"target_groups": PT_TARGET_GROUPS}, YQ5 + ":588-589 (24 of 24 candidates)",
+           _vagen_q5_pt_tc),
+    Expect("vagen.turn_credit", PtTurnCredit(),
+           YQ5 + " algorithm.turn_credit (辛 = rw_tcswf3; under vagen.: V1's AlgoConfig refuses the key); the phi "
+                 "table is the 8B's success_table_tcn3_v1.json (PREREG_Q38 3.4)", _vagen_q5_pt_tc),
     Expect("filter.enable", True, "8B parity run: V4 keep_by_return_std like rl_qw3v4s3/s4/s5 (Y8:579-592; DESIGN 5.3)",
            _vagen_parity),
     Expect("filter.name", PARITY_FILTER, "8B parity run: V4 keep_by_return_std (Y8:580; DESIGN 5.3)", _vagen_parity),
     Expect("vagen.endpoint", PARITY_ENDPOINT,
            "8B parity run P8-2: 20 updates, compared with the first 20 of rl_qw3v4s3/s4/s5 (DESIGN 5.3)",
            parity_mode, getter=_endpoint_actual),
-    Expect("filter.filter_kwargs.target_groups", 12, Y8 + ":582", _vagen_filter),
+    Expect("filter.filter_kwargs.target_groups", 12, Y8 + ":582", _vagen_filter_not_pt),
     Expect("filter.filter_kwargs.std_threshold", 0.3318, Y8 + ":583", _keep_by_std),
     Expect("filter.filter_kwargs.std_floor", 1.0, Y8 + ":584", _keep_by_std),
     Expect("filter.filter_kwargs.rows", NonEmptyStr(), Y8 + ":585 (the run's own task rows)", _keep_by_std),
@@ -502,11 +609,14 @@ EXPECTED: List[Expect] = [
     Expect(R + ".n", 8, Y8 + ":196"),
     # --- loss and optimizer
     Expect(A + ".ppo_mini_batch_size", SHAPES["main"]["ppo_mini_batch_size"],
-           Y8 + ":42 (padded to 96 rows, one optimizer step)", _main_shape),
+           Y8 + ":42 (padded to 96 rows, one optimizer step)", _main_or_turn_ppo_shape),
     Expect(A + ".ppo_mini_batch_size", SHAPES["q5_pt"]["ppo_mini_batch_size"],
            YQ5 + ":42 (24 groups = 192 rows, one optimizer step a pass)", _q5_pt),
     Expect(A + ".ppo_epochs", SHAPES["main"]["ppo_epochs"], Y8 + ":68", _main_shape),
     Expect(A + ".ppo_epochs", SHAPES["q5_pt"]["ppo_epochs"], YQ5 + ":68 (3 passes over the batch)", _q5_pt),
+    Expect(A + ".ppo_epochs", OneOf(*TURN_PPO_EPOCHS),
+           "turn_ppo: qw3tgd one pass (8B template :74); Q5 S-PPO1 / S-PPO3 one or three (DESIGN 3.1 Q5 rows)",
+           _turn_ppo),
     Expect(A + ".shuffle", False, Y8 + ":69"),
     Expect(A + ".loss_agg_mode", "seq-mean-token-mean",
            "the 8B's actual objective: sum of per-episode token means / nominal episodes (DESIGN 3.1)"),
@@ -537,9 +647,18 @@ EXPECTED: List[Expect] = [
     Expect(A + ".kl_loss_coef", 0.05, Y8 + ":66"),
     Expect(A + ".entropy_coeff", 0.01, Y8 + ":61 (acts on the T 0.8 entropy, registered R3)"),
     Expect(A + ".policy_loss.loss_mode", "vanilla", Y8 + ":53 (decoupled PPO through the native path)"),
-    Expect("algorithm.adv_estimator", "grpo", Y8 + ":480 (phase 1)"),
+    Expect("algorithm.adv_estimator", "grpo", Y8 + ":480 (the main line and the matrix)", _main_shape),
+    Expect("algorithm.adv_estimator", OneOf("grpo", "turn_credit"),
+           "q5_pt: turn_credit (YQ5 algorithm.adv_estimator, phase 2) or GRPO for smoke S4", _q5_pt),
+    Expect("algorithm.adv_estimator", "turn_gae", "turn_ppo: package p1tgae (8B qw3tgd ppo.yaml)", _turn_ppo),
     Expect("algorithm.norm_adv_by_std_in_grpo", True, Y8 + ":481"),
-    Expect("critic.enable", OneOf(None, False, allow_absent=True), "GRPO trains no critic (utils.py:96-107)", _grpo),
+    Expect("critic.enable", OneOf(None, False, allow_absent=True),
+           "GRPO and turn_credit train no critic (utils.py:96-107; YQ5 critic.enable null)", _no_critic_estimator),
+    # phase 2: the per-turn PPO's settings (package p1tgae, 8B qw3tgd); the critic's loss and config are phase 3
+    Expect("critic.enable", True, "turn_gae needs a value network; verl starts it only when asked (utils.py:96-107)",
+           _turn_gae),
+    Expect("algorithm.gamma", TURN_PPO_GAMMA, "package p1tgae: gamma per turn (qw3tgd ppo.yaml)", _turn_gae),
+    Expect("algorithm.lam", TURN_PPO_LAM, "package p1tgae: lam per turn (qw3tgd ppo.yaml)", _turn_gae),
     Expect("algorithm.rollout_correction.rollout_is", "token",
            "user PEAR 2.6: decoupled PPO + token-level TIS; the dataclass default is sequence (algorithm.py:193)",
            _not_parity),
@@ -550,10 +669,10 @@ EXPECTED: List[Expect] = [
     Expect("algorithm.rollout_correction.rollout_is_batch_normalize", False, ASYNC),
     Expect("algorithm.rollout_correction.score_centering", AbsentOr(False), ASYNC + " (no score centering, 4.4 #3)"),
     Expect("vagen.ga_8b", SHAPES["main"]["ga_8b"], "8B gradient accumulation of the main line (12 kept groups) (MF1)",
-           _main_shape),
+           _main_or_turn_ppo_shape),
     Expect("vagen.ga_8b", SHAPES["q5_pt"]["ga_8b"], "8B gradient accumulation of Q5 PT (24 groups) (MF1)", _q5_pt),
     Expect("vagen.profile", OneOf(*PROFILES, allow_absent=True),
-           "update shape: main (absent) or q5_pt (DESIGN 3.1 Q5 rows)"),
+           "update shape: main (absent), q5_pt or turn_ppo (DESIGN 3.1 Q5 rows)"),
     Expect("vagen.onpolicy_shortcut", AbsentOr(False), "on until S9 passes (question 8)"),
     # --- reward and verl's rollout skip
     # A reward model without its own resource pool has no reward-loop handles (reward_loop.py:320-322), so V1 scores
@@ -623,7 +742,9 @@ EXPECTED: List[Expect] = [
            "the rows' agent_name is gym_agent (gym_agent_dataset.py:219), not set per spec",
            getter=_env_values("train", "agent_name")),
     # --- checkpoints, validation, logging
-    Expect("trainer.critic_warmup", 0, Y8 + ":518"),
+    Expect("trainer.critic_warmup", 0, Y8 + ":518", lambda cfg: not _turn_ppo(cfg)),
+    Expect("trainer.critic_warmup", TURN_PPO_CRITIC_WARMUP,
+           "package p1tgae: the value network alone for the first 10 updates (qw3tgd ppo.yaml; DESIGN 3.1)", _turn_ppo),
     Expect("trainer.total_epochs", Computed(_total_epochs_expected, "ceil(horizon / steps_per_epoch) + 1"),
            "DESIGN 3.1 (enough epochs for the horizon)"),
     Expect("trainer.save_freq", 50, Y8 + ":511"),
@@ -679,6 +800,7 @@ INFO_KEYS = [
     "async_training", "filter", "trainer.v1.sampler.sampler_kwargs", "vagen.fault_injection",
     "actor_rollout_ref.ref.fsdp_config.model_dtype", R + ".max_model_len", R + ".enable_prefix_caching",
     R + ".enable_chunked_prefill", "vagen.host_mem_log",
+    "vagen.profile", "vagen.turn_credit", "algorithm.gamma", "algorithm.lam",  # phase 2
 ]
 
 # the inputs a run reads; checked to exist when check_paths is on
@@ -748,6 +870,43 @@ def _f_turn_gae_rs(cfg, ctx):
     if get(cfg, "algorithm.adv_estimator") == "turn_gae" and \
             get(cfg, "algorithm.rollout_correction.rollout_rs") not in (None, ABSENT):
         return f"turn_gae with rollout_rs={get(cfg, 'algorithm.rollout_correction.rollout_rs')!r}"
+    return None
+
+
+def _f_turn_credit_place(cfg, ctx):
+    """The reward line's algorithm.turn_credit: V1's AlgoConfig has no such field (an omega_conf_to_dataclass of the
+    algorithm section fails on it), and the q38 trainer reads vagen.turn_credit only (vagen/q38/trainer.py)."""
+    if get(cfg, "algorithm.turn_credit") is not ABSENT:
+        return "algorithm.turn_credit is set (the q38 trainer reads vagen.turn_credit)"
+    if get(cfg, "vagen.turn_credit") not in (None, ABSENT) and not _turn_credit(cfg):
+        return f"vagen.turn_credit is set with adv_estimator {_estimator(cfg)!r}"
+    return None
+
+
+def _f_turn_credit_settings(cfg, ctx):
+    if not _turn_credit(cfg):
+        return None
+    try:
+        from vagen.turn_credit import settings
+
+        settings({"turn_credit": get(cfg, "vagen.turn_credit") if get(cfg, "vagen.turn_credit") is not ABSENT else {}})
+    except (ValueError, TypeError) as e:
+        return f"vagen.turn_credit: {e}"
+    return None
+
+
+def _f_turn_gae_critic(cfg, ctx):
+    if _turn_gae(cfg) and get(cfg, "critic.enable") is not True:
+        return f"turn_gae with critic.enable={jsonable(get(cfg, 'critic.enable'))!r}"
+    return None
+
+
+def _f_turn_gae_value_loss(cfg, ctx):
+    """Phase 3 (DESIGN_ASYNC 2.3 rows 235-236, W12; PEAR_ASSESSMENT B5): verl's value_loss reads response_mask only
+    (VS/workers/utils/losses.py:158-216), so with turn_gae's returns (-100 off each turn's first token) the critic would
+    regress to the sentinel; the valid-mask value loss is not written yet.  Phase 3 replaces this rule."""
+    if _turn_gae(cfg):
+        return "turn_gae needs the phase-3 value loss (vagen_value_loss on the turns' first tokens), not written yet"
     return None
 
 
@@ -899,6 +1058,12 @@ FORBIDDEN: List[Forbid] = [
     Forbid("filter_groups_enable", _f_dapo, "group selection belongs to the sampler"),
     Forbid("onpolicy_shortcut_shape", _f_shortcut, "the shortcut equals decoupled PPO only for one epoch, one mini-batch"),
     Forbid("turn_gae_with_rollout_rs", _f_turn_gae_rs, "rollout_rs changes response_mask"),
+    Forbid("turn_credit_settings_place", _f_turn_credit_place,
+           "the q38 turn_credit settings live in vagen.turn_credit (V1's AlgoConfig refuses algorithm.turn_credit)"),
+    Forbid("turn_credit_settings", _f_turn_credit_settings, "the estimator refuses its settings (vagen/turn_credit.py)"),
+    Forbid("turn_gae_without_critic", _f_turn_gae_critic, "turn_gae reads the value network's values"),
+    Forbid("turn_gae_value_loss_phase3", _f_turn_gae_value_loss,
+           "verl's value loss would regress the -100 sentinel (PEAR B5); the valid-mask loss is phase 3 (not overridable)"),
     Forbid("parameter_sync_step_not_1", _f_parameter_sync_step,
            "metrics would merge across local steps and the LR horizon would be multiplied"),
     Forbid("epochs_short_of_endpoint", _f_epochs_short, "fit would stop before the endpoint and save no checkpoint"),
