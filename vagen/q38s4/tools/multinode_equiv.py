@@ -29,6 +29,25 @@ KEYS = ("loss", "grad_norm", "learning_rate", "text_loss", "nfp_mse", "nfp_cos",
 Q = "<image>\nThese are frames of a video.\nHow many {x}?\nOptions:\nA. 1\nB. 2\nC. 3\nAnswer with the letter."
 
 
+def build_model(out: Path) -> None:
+    """The tiny random Qwen3.5 with untied embeddings, as Qwen3.8-27B (tie_word_embeddings false; a tied lm_head
+    would read the Embedding's FSDP unit after it has been resharded), and the 27B's processor files."""
+    import torch
+    from transformers import Qwen3_5ForConditionalGeneration
+
+    from vagen.q38s4.tests import tiny
+
+    if out.exists():
+        raise SystemExit(f"{out} exists")
+    cfg = tiny.tiny_config()
+    cfg.tie_word_embeddings = cfg.text_config.tie_word_embeddings = False
+    torch.manual_seed(0)
+    model = Qwen3_5ForConditionalGeneration._from_config(cfg, dtype=torch.float32)
+    assert model.lm_head.weight.data_ptr() != model.get_input_embeddings().weight.data_ptr()
+    model.save_pretrained(out)
+    tiny.processor().save_pretrained(out)
+
+
 def build(root: Path) -> None:
     import llamafactory.data.mm_plugin  # noqa: F401  before PyAV (see lf_plugin)
     import av
@@ -42,9 +61,7 @@ def build(root: Path) -> None:
         raise SystemExit(f"{root} exists")
     (root / "media" / "syn").mkdir(parents=True)
     rng = np.random.default_rng(0)
-    model = tiny.build(seed=0)
-    model.save_pretrained(root / "model")
-    tiny.processor().save_pretrained(root / "model")
+    build_model(root / "model")
     rows: List[Dict[str, Any]] = []
     for i in range(16):
         n = 40 + 4 * i  # 4.0 .. 10.0 s at 10 fps
@@ -117,6 +134,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
     b.add_argument("--root", required=True)
+    mo = sub.add_parser("model", help="only the tiny model (a data build needs only the tokenizer)")
+    mo.add_argument("--out", required=True)
     c = sub.add_parser("compare")
     c.add_argument("--a", required=True)
     c.add_argument("--b", required=True)
@@ -124,6 +143,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     a = ap.parse_args(argv)
     if a.cmd == "build":
         build(Path(a.root).resolve())
+        return
+    if a.cmd == "model":
+        build_model(Path(a.out).resolve())
         return
     res = compare(history(Path(a.a)), history(Path(a.b)), a.rtol)
     res.update(a=str(Path(a.a).resolve()), b=str(Path(a.b).resolve()), rtol=a.rtol, ok=not res["failures"])
