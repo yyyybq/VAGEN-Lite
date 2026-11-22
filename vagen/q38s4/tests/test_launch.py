@@ -99,6 +99,9 @@ def test_prepare_train(tmp_path, repo, data):
     prep(tmp_path, data, "--arm", "nonfp", "--nodes", "2", run="run2")
     assert not S4Settings.from_file(tmp_path / "run2" / "q38s4.json").head_on
     assert yaml.safe_load((tmp_path / "run2" / "train.yaml").read_text())["gradient_accumulation_steps"] == 16
+    small = prep(tmp_path, data, "--arm", "nfp", "--nodes", "2", "--gpus-per-node", "2", "--global-batch", "8",
+                 run="run3")
+    assert (small["world"], small["grad_accum"], small["global_batch"]) == (4, 2, 8)
 
 
 def test_prepare_refusals(tmp_path, repo, data):

@@ -158,7 +158,7 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
             raise SystemExit(f"--arm must be one of {sorted(ARMS)}")
         if not tokenized.exists():  # else every arm's rank 0 would tokenize (and save) on its own
             raise SystemExit(f"{tokenized} missing: run the tokenize job first")
-        plan = batch_plan(args.nodes, args.gpus_per_node, args.per_device)
+        plan = batch_plan(args.nodes, args.gpus_per_node, args.per_device, args.global_batch)
         arm = args.arm
     sets = parse_sets(args.set or [])
     cfg = train_yaml(run, data, tokenized, args.model, plan, sets)
@@ -222,6 +222,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--nodes", type=int, default=8)
     p.add_argument("--gpus-per-node", type=int, default=8)
     p.add_argument("--per-device", type=int, default=1)
+    p.add_argument("--global-batch", type=int, default=GLOBAL_BATCH, help="the recipe's 256; smaller only for tests")
     p.add_argument("--data", required=True)
     p.add_argument("--tokenized", required=True)
     p.add_argument("--model", default=MODEL_27B)
