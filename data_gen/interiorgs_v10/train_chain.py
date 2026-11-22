@@ -1053,6 +1053,21 @@ class Chain:
         self.save()
         return True
 
+    def endpoint_done(self, run_dir: Path, endpoint: int) -> Optional[Path]:
+        """Plan "endpoint_race_fix" (q38, the user's request of 2026-11-21; off unless true): the COMPLETE marker of
+        a run's endpoint checkpoint (vagen.q38.ckpt_callback writes it after the save and its HF export, so the
+        checkpoint is whole), else None; always None without the switch.  _ppo_runs takes a run with it for finished:
+        no trainer, render-service or start-up resubmission and no guard stop; it ends (STOP_RENDERER, the step's
+        clean-up deletes its jobs) at the first poll that shows its trainer ended, or "endpoint_race_grace_min"
+        minutes (default 15) after the marker if sco still shows the trainer.  Without the switch, at the endpoint
+        the render service's normal end (the trainer's job touches STOP_RENDERER after exit 0) could be taken for a
+        dead service while sco still showed the finished trainer running, and the finished run was resubmitted
+        (q38-main-rl/s20261019, q38s0s1, 2026-11-21 18:01:01Z)."""
+        if not self.plan.get("endpoint_race_fix"):
+            return None
+        marker = run_dir / "checkpoints" / f"global_step_{endpoint}" / "COMPLETE"
+        return marker if marker.is_file() else None
+
     def vision_crash_stop(self, name: str, run: Dict[str, Any], st: Dict[str, Any]) -> Optional[str]:
         """Plan rl guards "vision_token_crashes" (N; off unless given), the user's rule 91 (decision 99 of 2026-11-01:
         in the chain): a trainer that ended before the endpoint is recorded once (state["trainer_crashes"][name]: its
@@ -1954,6 +1969,18 @@ class Chain:
                     self.note_queue(f"{step}/{name}/renderer", d, "job_renderer", st_r)
                     hosts_rl = self.note_hosts(f"{step}/{name}/rl", st_rl)  # plan "record_nodes"
                     hosts_r = self.note_hosts(f"{step}/{name}/renderer", st_r)
+                    done_marker = self.endpoint_done(d, endpoint)
+                    if done_marker is not None:  # plan "endpoint_race_fix": the endpoint is saved, nothing to retry
+                        trainer_gone = self.job_gone(st_rl)
+                        grace = 60 * float(self.plan.get("endpoint_race_grace_min", 15))
+                        if not trainer_gone and self.clock() - done_marker.stat().st_mtime < grace:
+                            continue  # sco does not show the trainer's end yet: wait for it
+                        (d / "STOP_RENDERER").touch()
+                        ended[name] = (st_rl.get("state") if trainer_gone else
+                                       f"endpoint {endpoint} COMPLETE, trainer still {st_rl.get('state')} after "
+                                       f"{grace / 60:g} min")
+                        active.pop(name)
+                        continue
                     problem = self.startup_check(name, run, st_rl)  # round 12: Ray start-up failure or silence
                     if problem:
                         retries = self.state.setdefault("startup_retries", {}).setdefault(name, [])
@@ -2050,6 +2077,8 @@ class Chain:
                         ended[name] = f"renderer {st_r.get('state')}"
                         active.pop(name)
                 for name, run in list(active.items()):  # round 11: the stop conditions (plan rl.guards)
+                    if self.endpoint_done(run["run_dir"], endpoint) is not None:
+                        continue  # plan "endpoint_race_fix": a run whose endpoint is saved is not stopped by a guard
                     guards = run["rl"].get("guards")
                     logs = sorted((run["run_dir"] / "logs").glob("rl-*.log")) if guards else []
                     texts = [p.read_text(errors="ignore") for p in logs]
