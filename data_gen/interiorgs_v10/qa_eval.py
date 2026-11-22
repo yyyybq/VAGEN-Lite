@@ -52,6 +52,12 @@ q38 (2026-11-20, an EXPLORATORY probe variant the user approved for the 27B base
 not passed on, qa_probe's 256, everything as before) hands N to qa_probe run --max-tokens; done.json records
 "max_tokens" only when it was given.  The training chain passes it only for plan qa_eval "probe_variants", whose jobs
 write to their own folder (OUT/<variant>, not OUT/probe; vagen/q38/tests/test_train_chain_probe.py).
+
+q38 (2026-11-22, user OK): easi --no-stack-dump (default: not given, everything as before) runs the benchmark without
+the stack-dump thread, whatever the benchmark and model type.  C0 e5's one-card mmsi_bench and 3dsrbench children died
+of SIGSEGV during the 15-min dump, 4 of 4 runs, the dump cut off mid-frame; the base model's mmsi_bench ran without the
+thread and finished.  The training chain passes it only for plan qa_eval "no_stack_dump"; done.json records
+"stack_dump": false only when it was given (vagen/q38/tests/test_qa_no_stack_dump.py).
 """
 
 from __future__ import annotations
@@ -104,7 +110,8 @@ def easi(a: argparse.Namespace) -> int:
     # q38 (2026-11-21, user OK): every qwen3_5 benchmark too.  The 27B base's one-card mmsi_bench, mindcube_tiny and
     # 3dsrbench jobs printed nothing for 11.5 h after loading the weights, while blink, embspatial, viewspatial and
     # vsi_bench had finished in 15-20 min without the thread.
-    if a.benchmark.startswith("site") or a.model_type == "qwen3_5":
+    # q38 (2026-11-22, user OK): --no-stack-dump (plan qa_eval "no_stack_dump") turns it off for the benchmark.
+    if not a.no_stack_dump and (a.benchmark.startswith("site") or a.model_type == "qwen3_5"):
         d = own / f"_stack_dump_{os.getpid()}"
         d.mkdir(exist_ok=True)
         (d / "sitecustomize.py").write_text("import faulthandler, sys\n"
@@ -135,6 +142,8 @@ def easi(a: argparse.Namespace) -> int:
                 "score": scores[key], "sub_scores": (payload.get("subScores") or {}).get(key)}
         if a.cards > 1:  # q38: only a run with more cards records them (one card: done.json as before)
             done["cards"] = a.cards
+        if a.no_stack_dump:  # q38: only a run without the thread records it (otherwise done.json as before)
+            done["stack_dump"] = False
         (out / a.name / "done.json").write_text(json.dumps(done) + "\n")
         return 0
     return rc or 1
@@ -207,6 +216,8 @@ def main() -> int:
     e.add_argument("--model-type", default="qwen3_vl", choices=MODEL_TYPES)
     e.add_argument("--limit", type=int, default=None, help="smoke test: questions (done.json records the limit)")
     e.add_argument("--cards", type=int, default=1, help="q38: the job's cards, all shown to lmms-eval (default 1)")
+    e.add_argument("--no-stack-dump", action="store_true",
+                   help="q38 (2026-11-22): no stack-dump thread (plan qa_eval no_stack_dump; default: as before)")
     q = sub.add_parser("p0")
     q.add_argument("--name", required=True, help="the model's name in the results")
     q.add_argument("--model", required=True, help="HF model folder")
