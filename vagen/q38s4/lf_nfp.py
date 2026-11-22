@@ -25,6 +25,8 @@ What changes against vagen.q38.sft.lf_launcher (all by replacing names in LF's s
   * training_step: on the first micro-batch and at every save step, a freeze check: every parameter of visual.blocks /
     patch_embed / pos_embed has requires_grad False and grad None; the counts go to <metrics dir>/freeze_rank<R>.jsonl
     and the log; a frozen parameter with a gradient stops the run.
+- Q38S4_TOKENIZE_ONLY=1: the run stops when LF has tokenized the data (saved to tokenized_path by rank 0), before
+  the model loads (the tokenize job of vagen.q38s4.launch; both arms then load the same tokenized data).
 - With both weights 0 there is no head; the copy baseline is still logged.  The loss is LF's own on every
   micro-batch with text (test_lf_nfp checks equality bit for bit).
 """
@@ -254,8 +256,14 @@ def make_trainer_class():
 
 
 # ---------------------------------------------------------------------------------------------------- install
+TOKENIZE_ONLY = "Q38S4_TOKENIZE_ONLY"  # =1: stop once LF has tokenized the data (and saved it to tokenized_path)
+
+
 def make_load_model(orig):
     def load_model(tokenizer, model_args, finetuning_args, is_trainable=False, add_valuehead=False):
+        if os.environ.get(TOKENIZE_ONLY) == "1":  # run_sft loads the model right after get_dataset
+            print(f"[q38s4] {TOKENIZE_ONLY}=1: data tokenized, stopping before the model loads", flush=True)
+            raise SystemExit(0)
         model = orig(tokenizer, model_args, finetuning_args, is_trainable, add_valuehead)
         if is_trainable and SETTINGS is not None and SETTINGS.head_on:
             N.attach_head(model)
