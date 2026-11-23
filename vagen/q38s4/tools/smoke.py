@@ -23,7 +23,10 @@
   scaling  --runs RUN1 RUN2 ... [--base-nodes 2]   efficiency of each run = its samples/s / ((nodes / B) x the
            B-node run's samples/s), B = --base-nodes (2 since 2026-11-23: 27B does not fit one node on real data);
   compare  --a RUN_A --b RUN_B [--key loss]   per-step equality of a logged value (bit for bit: the float64s of
-           the log history), the first step that differs and the largest difference.
+           the log history), the first step that differs and the largest difference; "_loss_paths" says each run's
+           loss path (loss_path: "all" = LF's, an lf_plain run or lf_nfp with logits "all"; "targets" = lf_nfp's
+           at_targets) and whether bit-for-bit equality is expected (both "all"; S4's bit-for-bit check needs the
+           lf_nfp side prepared with launch --logits all).
 """
 from __future__ import annotations
 
@@ -423,6 +426,26 @@ def compare(a: List[Dict[str, Any]], b: List[Dict[str, Any]], key: str = "loss")
             "bitwise_equal": bool(common) and first is None and len(da) == len(db)}
 
 
+def loss_path(run: Path) -> str:
+    """'all': LF's loss path (an lf_plain run, i.e. RUN/run_plain.sh exists, or lf_nfp with logits "all", the
+    default of a q38s4.json without the key); 'targets': lf_nfp with logits "targets" (the same loss up to float
+    rounding, not bit for bit)."""
+    run = Path(run)
+    if (run / "run_plain.sh").is_file():
+        return "all"
+    f = run / "q38s4.json"
+    return str(json.loads(f.read_text()).get("logits", "all")) if f.is_file() else "all"
+
+
+def loss_paths(a: Path, b: Path) -> Dict[str, Any]:
+    pa, pb = loss_path(a), loss_path(b)
+    rep: Dict[str, Any] = {"a": pa, "b": pb, "bitwise_expected": pa == pb == "all"}
+    if not rep["bitwise_expected"]:
+        rep["note"] = ('a run with logits "targets" sums the loss over fewer terms than LF: expect float-rounding '
+                       'differences, not bit-for-bit equality (prepare with launch --logits all for that)')
+    return rep
+
+
 # ------------------------------------------------------------------------------------------------------ cli
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -482,8 +505,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     elif a.cmd == "scaling":
         res = scaling([summary(Path(r), a.skip) for r in a.runs], a.base_nodes)
     else:
-        res = {k: compare(log_history(Path(a.a).resolve()), log_history(Path(a.b).resolve()), k)
-               for k in dict.fromkeys([a.key, "grad_norm"])}
+        ra, rb = Path(a.a).resolve(), Path(a.b).resolve()
+        res = {"_loss_paths": loss_paths(ra, rb)}
+        res.update({k: compare(log_history(ra), log_history(rb), k) for k in dict.fromkeys([a.key, "grad_norm"])})
     print(json.dumps(res, indent=1, ensure_ascii=False))
 
 

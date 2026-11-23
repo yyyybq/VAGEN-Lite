@@ -12,7 +12,9 @@ prepare writes RUN (which must not exist yet):
   global batch 256, bf16, frozen encoder, trained merger + LM, D4 video settings, save every 500 steps keeping the
   latest checkpoint) plus the paths and the batch plan; ``--set key=value`` (YAML value) changes more, each change
   listed in plan.json;
-- q38s4.json: the arm's NFP weights (nfp: mse 0.1, cos 0.1; nonfp: 0, 0) for vagen.q38s4.lf_nfp;
+- q38s4.json: the arm's NFP weights (nfp: mse 0.1, cos 0.1; nonfp: 0, 0) and ``--logits`` (targets, the default:
+  the LM head only where the loss reads it; all: LF's path, for the bit-for-bit check against the plain trainer)
+  for vagen.q38s4.lf_nfp;
 - q38_sft.json: bf16_copy "sibling" (every saved checkpoint gets a bf16 HF copy in <output_dir>_bf16/checkpoint-N;
   the fp32 checkpoint is LF's and the Trainer keeps only the latest), host memory sampling every 10 s;
 - plan.json: mode, arm, nodes, GPUs per node, world size, per-device batch, gradient accumulation, global batch, the
@@ -184,9 +186,11 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
     snapshot_code(run / "code", commit)
     (run / "logs").mkdir()
     (run / "train.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
-    (run / "q38s4.json").write_text(json.dumps({**ARMS[arm], "note": f"arm {arm}"}, indent=1) + "\n")
+    (run / "q38s4.json").write_text(json.dumps({**ARMS[arm], "logits": args.logits, "note": f"arm {arm}"}, indent=1)
+                                    + "\n")
     (run / "q38_sft.json").write_text(json.dumps({"bf16_copy": "sibling", "host_mem_s": 10}, indent=1) + "\n")
-    out = {"utc": utc(), "mode": args.mode, "arm": arm, **plan, "commit": commit, "data": str(data),
+    out = {"utc": utc(), "mode": args.mode, "arm": arm, "logits": args.logits, **plan, "commit": commit,
+           "data": str(data),
            "tokenized": str(tokenized), "model": args.model, "rows": rows,
            "estimated_steps": None if rows is None or args.mode == "tokenize" else estimated_steps(rows, plan),
            "sets": sets, "worker_spec": f"N4lS.Iq.I80.{plan['gpus_per_node']}", "image": IMAGE}
@@ -239,6 +243,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--tokenized", required=True)
     p.add_argument("--model", default=MODEL_27B)
     p.add_argument("--set", action="append", help="key=value (YAML) for train.yaml")
+    p.add_argument("--logits", choices=("targets", "all"), default="targets",
+                   help="q38s4.json logits: the LM head only at the targets (default) or at every position (LF's path)")
     s = sub.add_parser("submit")
     s.add_argument("--run", required=True)
     s.add_argument("--pool", required=True, choices=POOLS)

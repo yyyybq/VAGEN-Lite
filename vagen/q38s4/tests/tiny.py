@@ -52,12 +52,17 @@ def tiny_config():
     return cfg
 
 
-def build(seed=0):
+def build(seed=0, untied=False):
+    """untied: a separate lm_head as in the 27B (the 4B config ties it to the input embeddings)."""
     from transformers import Qwen3_5ForConditionalGeneration
 
+    cfg = tiny_config()
+    if untied:
+        cfg.tie_word_embeddings = cfg.text_config.tie_word_embeddings = False
     torch.manual_seed(seed)
-    m = Qwen3_5ForConditionalGeneration._from_config(tiny_config(), attn_implementation="eager",
-                                                     torch_dtype=torch.float32)
+    m = Qwen3_5ForConditionalGeneration._from_config(cfg, attn_implementation="eager", torch_dtype=torch.float32)
+    if untied:
+        assert m.lm_head.weight.data_ptr() != m.get_input_embeddings().weight.data_ptr()
     return m.train()
 
 

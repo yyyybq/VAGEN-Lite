@@ -118,6 +118,45 @@ def test_settings_file(tmp_path):
     (tmp_path / "q38s4.json").unlink()
     with pytest.raises(SystemExit):
         L.settings_for(["x", str(tmp_path / "train.yaml")])
+    # logits: "all" when absent (run folders made before it), "targets", nothing else
+    (tmp_path / "q38s4.json").write_text('{"nfp_mse": 0, "nfp_cos": 0}')
+    assert L.settings_for(["x", str(tmp_path / "train.yaml")]).logits == "all"
+    (tmp_path / "q38s4.json").write_text('{"nfp_mse": 0.1, "nfp_cos": 0.1, "logits": "targets"}')
+    assert L.settings_for(["x", str(tmp_path / "train.yaml")]).logits == "targets"
+    (tmp_path / "q38s4.json").write_text('{"nfp_mse": 0, "nfp_cos": 0, "logits": "answer"}')
+    with pytest.raises(ValueError):
+        L.settings_for(["x", str(tmp_path / "train.yaml")])
+
+
+def test_at_targets_reads_the_same_logits_against_the_same_targets():
+    """Two rows with different targets (the union of their positions is kept): HF's causal-LM loss on the kept
+    logits with the new labels equals the loss on the full sequence, and its gradient lands on the same positions."""
+    from transformers.loss.loss_utils import ForCausalLMLoss
+
+    torch.manual_seed(0)
+    n, v = 12, 7
+    labels = torch.full((2, n), -100)
+    labels[0, 5:8] = torch.tensor([1, 2, 3])  # targets of positions 4, 5, 6
+    labels[1, 9:12] = torch.tensor([4, 5, 6])  # targets of positions 8, 9, 10
+    labels[1, 3] = 0  # a lone target (position 2)
+    pos = L.target_positions(labels)
+    assert pos.tolist() == [2, 4, 5, 6, 8, 9, 10]
+    out = L.at_targets({"labels": labels, "input_ids": torch.zeros(2, n, dtype=torch.long)})
+    assert out["logits_to_keep"].tolist() == [2, 4, 5, 6, 8, 9, 10, 10]
+    assert out["input_ids"].shape == (2, n) and out["labels"].shape == (2, 8)
+    assert out["labels"][:, 0].eq(-100).all()
+    full = torch.randn(2, n, v, dtype=torch.float64, requires_grad=True)
+    kept = full[:, out["logits_to_keep"]]
+    a = ForCausalLMLoss(full, labels, v)
+    b = ForCausalLMLoss(kept, out["labels"], v)
+    assert abs(float(a) - float(b)) < 1e-12
+    ga, = torch.autograd.grad(a, full)
+    gb, = torch.autograd.grad(b, full)
+    assert torch.allclose(ga, gb, atol=1e-12)
+    assert ga[:, [0, 1, 3, 7, 11]].abs().sum() == 0  # positions without a target get nothing either way
+    # the same multiset of targets, each counted once (the pairing with the logits: the gradient check above)
+    shifted = torch.nn.functional.pad(out["labels"], (0, 1), value=-100)[:, 1:]
+    assert sorted(shifted[shifted != -100].tolist()) == sorted(labels[labels != -100].tolist())
 
 
 # ------------------------------------------------------------------------------------------------ tiny model
@@ -280,6 +319,84 @@ def test_weights_zero_is_the_plain_sft_loss_bit_for_bit(cpu_gdn, proc, tmp_path)
     loss_c, _ = L.s4_loss(s4, inp, tap, L.S4Settings(0.0, 0.0),
                           lambda m, i: tr_s4.compute_loss(m, i, return_outputs=True), 0.0, acc)
     assert torch.equal(loss_c, loss_plain) and acc["pairs"] == 8 and acc["copy_mse_sum"] > 0
+
+
+def _grads(model):
+    return {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None}
+
+
+@needs_models
+def test_logits_at_targets_is_the_same_loss(cpu_gdn, proc, tmp_path):
+    """logits "targets" against "all" (LF's path, the plain trainer's compute_loss), on a model with an untied LM
+    head as in the 27B: a text micro-batch (answer of several tokens) gives the same loss and gradients up to float
+    rounding, with logits only at the kept positions; an NFP-only micro-batch with the head gives the same NFP sums
+    and gradients (bit for bit, an all-zero LM-head gradient); in eval mode "targets" is LF's path bit for bit."""
+    from transformers import Trainer, TrainingArguments
+
+    args = TrainingArguments(output_dir=str(tmp_path), use_cpu=True, report_to=[], per_device_train_batch_size=1)
+    batch = video_batch(proc, (6,), answer="B because the chair is left of the table")
+    n_targets = int((batch["labels"][:, 1:] != -100).sum())
+    assert n_targets > 5
+    res = {}
+    for mode in ("all", "targets"):
+        model = build(3, untied=True)
+        freeze_encoder(model)
+        tr = Trainer(model=model, args=args)
+        acc = dict.fromkeys(N.ACC_KEYS, 0.0)
+        inp = dict(batch, nfp_video=torch.tensor([False]))
+        loss, out = L.s4_loss(model, inp, N.NFPTap(model, None), L.S4Settings(0.0, 0.0, mode),
+                              lambda m, i: tr.compute_loss(m, i, return_outputs=True), 0.0, acc)
+        loss.backward()
+        res[mode] = (loss.detach(), out.logits.shape, _grads(model), acc["ce_n"])
+        assert "logits_to_keep" not in inp and inp["labels"] is batch["labels"]  # the caller's batch is unchanged
+    (la, sa, ga, na), (lt, st, gt, nt) = res["all"], res["targets"]
+    assert sa[1] == batch["input_ids"].shape[1] and st[1] == n_targets + 1 and na == nt == 1
+    assert abs(float(la) - float(lt)) < 1e-5 * max(1.0, abs(float(la)))
+    assert ga.keys() == gt.keys() and "lm_head.weight" in ga
+    assert ga["lm_head.weight"].abs().sum() > 0 and gt["lm_head.weight"].abs().sum() > 0  # the LM head learns in both
+    for n in ga:
+        assert torch.allclose(ga[n], gt[n], rtol=1e-4, atol=1e-6), n
+
+    # eval mode: "targets" falls back to LF's path (prediction_step pairs the logits with the full-length labels)
+    model = build(3, untied=True).eval()
+    tr = Trainer(model=model, args=args)
+    with torch.no_grad():
+        got = {}
+        for mode in ("all", "targets"):
+            acc = dict.fromkeys(N.ACC_KEYS, 0.0)
+            loss, o = L.s4_loss(model, dict(batch, nfp_video=torch.tensor([False])), N.NFPTap(model, None),
+                                L.S4Settings(0.0, 0.0, mode), lambda m, i: tr.compute_loss(m, i, return_outputs=True),
+                                0.0, acc)
+            got[mode] = (loss, o.logits)
+    assert torch.equal(got["all"][0], got["targets"][0]) and torch.equal(got["all"][1], got["targets"][1])
+    assert got["targets"][1].shape[1] == batch["input_ids"].shape[1]
+
+    nfp = dict(video_batch(proc, (6,)), nfp_video=torch.tensor([True]))
+    nfp["labels"][:] = -100
+    out = {}
+    for mode in ("all", "targets"):
+        model = build(3, untied=True)
+        freeze_encoder(model)
+        N.attach_head(model)
+        acc = dict.fromkeys(N.ACC_KEYS, 0.0)
+        loss, o = L.s4_loss(model, dict(nfp), N.NFPTap(model, model.nfp_head), L.S4Settings(0.1, 0.1, mode), _base,
+                            N.scale_for_global_mean(1, 1, 8), acc)
+        loss.backward()
+        out[mode] = (loss.detach(), o.logits.shape[1], acc["mse_sum"], acc["cos_sum"], _grads(model))
+    (la, ka, ma, ca, ga), (lt, kt, mt, ct, gt) = out["all"], out["targets"]
+    assert ka == nfp["input_ids"].shape[1] and kt == 1
+    assert torch.equal(la, lt) and ma == mt and ca == ct
+    assert ga.keys() == gt.keys() and "lm_head.weight" in gt
+    assert gt["lm_head.weight"].abs().sum() == 0  # in the graph, no text loss: a zero gradient, not None
+    for n in ga:
+        assert torch.equal(ga[n], gt[n]), n
+
+
+def test_logits_targets_refuses_asft():
+    L.check_logits_mode(L.S4Settings(0.0, 0.0, "targets"), SimpleNamespace(use_asft_loss=False))
+    L.check_logits_mode(L.S4Settings(0.0, 0.0, "all"), SimpleNamespace(use_asft_loss=True))
+    with pytest.raises(ValueError, match="asft"):
+        L.check_logits_mode(L.S4Settings(0.1, 0.1, "targets"), SimpleNamespace(use_asft_loss=True))
 
 
 @needs_models

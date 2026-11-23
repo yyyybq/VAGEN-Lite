@@ -276,6 +276,21 @@ def test_compare():
     assert not S.compare(a, a[:2])["bitwise_equal"]
 
 
+def test_loss_paths(tmp_path):
+    plain, old, tgt, alln = (tmp_path / n for n in ("plain", "old", "tgt", "alln"))
+    for d in (plain, old, tgt, alln):
+        d.mkdir()
+    (plain / "q38s4.json").write_text(json.dumps({"nfp_mse": 0.0, "nfp_cos": 0.0, "logits": "targets"}))
+    (plain / "run_plain.sh").write_text("")  # an lf_plain run: LF's path whatever q38s4.json says
+    (old / "q38s4.json").write_text(json.dumps({"nfp_mse": 0.0, "nfp_cos": 0.0}))  # before the key existed
+    (tgt / "q38s4.json").write_text(json.dumps({"nfp_mse": 0.0, "nfp_cos": 0.0, "logits": "targets"}))
+    (alln / "q38s4.json").write_text(json.dumps({"nfp_mse": 0.0, "nfp_cos": 0.0, "logits": "all"}))
+    assert [S.loss_path(d) for d in (plain, old, tgt, alln)] == ["all", "all", "targets", "all"]
+    assert S.loss_paths(alln, plain) == {"a": "all", "b": "all", "bitwise_expected": True}
+    r = S.loss_paths(tgt, plain)
+    assert r["a"] == "targets" and not r["bitwise_expected"] and "float-rounding" in r["note"]
+
+
 def test_lf_plain_installs_only_the_template(monkeypatch):
     from llamafactory.train.sft import workflow as W
 

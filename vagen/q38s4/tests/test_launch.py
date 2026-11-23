@@ -93,11 +93,12 @@ def test_prepare_train(tmp_path, repo, data):
                  ("video_max_pixels", 65536), ("save_total_limit", 1), ("data_shared_file_system", True)):
         assert cfg[k] == v, k
     s = S4Settings.from_file(run / "q38s4.json")  # what lf_nfp reads next to train.yaml
-    assert (s.nfp_mse, s.nfp_cos, s.head_on) == (0.1, 0.1, True)
+    assert (s.nfp_mse, s.nfp_cos, s.head_on, s.logits) == (0.1, 0.1, True, "targets") and plan["logits"] == "targets"
     assert json.loads((run / "q38_sft.json").read_text()) == {"bf16_copy": "sibling", "host_mem_s": 10}
-    # the other arm
-    prep(tmp_path, data, "--arm", "nonfp", "--nodes", "2", run="run2")
-    assert not S4Settings.from_file(tmp_path / "run2" / "q38s4.json").head_on
+    # the other arm, with LF's logits path
+    plan2 = prep(tmp_path, data, "--arm", "nonfp", "--nodes", "2", "--logits", "all", run="run2")
+    s2 = S4Settings.from_file(tmp_path / "run2" / "q38s4.json")
+    assert not s2.head_on and s2.logits == "all" and plan2["logits"] == "all"
     assert yaml.safe_load((tmp_path / "run2" / "train.yaml").read_text())["gradient_accumulation_steps"] == 16
     small = prep(tmp_path, data, "--arm", "nfp", "--nodes", "2", "--gpus-per-node", "2", "--global-batch", "8",
                  run="run3")

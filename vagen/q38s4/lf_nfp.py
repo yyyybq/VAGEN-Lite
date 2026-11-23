@@ -5,6 +5,8 @@
 RUN_DIR/q38s4.json (required, so an arm cannot start with the wrong weights):
     {"nfp_mse": 0.1, "nfp_cos": 0.1}   C-NFP
     {"nfp_mse": 0.0, "nfp_cos": 0.0}   C-noNFP
+and optionally "logits": "all" (the default: LF's loss path, the LM head at every position) or "targets" (the LM head
+only where the loss reads it: at_targets; an NFP-only micro-batch keeps one position),
 plus q38_sft.json as for vagen.q38.sft.lf_launcher (bf16 copies, metrics dir), whose main() this runs.
 
 What changes against vagen.q38.sft.lf_launcher (all by replacing names in LF's sft workflow module before run_exp):
@@ -15,7 +17,8 @@ What changes against vagen.q38.sft.lf_launcher (all by replacing names in LF's s
 - collator: LF's SFT collator; before it, a sample whose video is an NFP video gets every label IGNORE_INDEX (R7: no
   text loss); after it, ``nfp_video`` (one bool per video of the batch, in video_grid_thw's order);
 - trainer: LF's CustomSeq2SeqTrainer with
-  * compute_loss: CE exactly as LF computes it (the parent's compute_loss) for a micro-batch with text tokens; for one
+  * compute_loss: CE as LF computes it (the parent's compute_loss) for a micro-batch with text tokens (with logits
+    "targets", in training, on the micro-batch at_targets re-lays: the same targets, the LM head only there); for one
     without (only NFP samples) 0 * one logit, so lm_head stays in the graph and nothing is NaN; then
     + nfp_mse * MSE + nfp_cos * (1 - cos), each a token sum scaled to the global token mean of the optimiser step
     (R12, nfp.scale_for_global_mean; the step's NFP token count comes from get_batch_samples, all-reduced);
@@ -27,8 +30,12 @@ What changes against vagen.q38.sft.lf_launcher (all by replacing names in LF's s
     and the log; a frozen parameter with a gradient stops the run.
 - Q38S4_TOKENIZE_ONLY=1: the run stops when LF has tokenized the data (saved to tokenized_path by rank 0), before
   the model loads (the tokenize job of vagen.q38s4.launch; both arms then load the same tokenized data).
-- With both weights 0 there is no head; the copy baseline is still logged.  The loss is LF's own on every
-  micro-batch with text (test_lf_nfp checks equality bit for bit).
+- With both weights 0 there is no head; the copy baseline is still logged.  With logits "all" the loss is LF's own
+  on every micro-batch with text (test_nfp checks equality bit for bit); with "targets" it is the same loss up to
+  float rounding (test_nfp, CPU fp32, untied LM head as in the 27B: the same targets, the loss within 1e-5
+  relative, every gradient within rtol 1e-4 / atol 1e-6; float64: within 1e-12).  "targets" applies in training
+  only: evaluation (prediction_step returns the logits next to the caller's full-length labels) keeps LF's path, and
+  LF's ASFT loss (it compares against full-length reference logits) is refused with "targets".
 """
 from __future__ import annotations
 
@@ -49,10 +56,14 @@ IGNORE_INDEX = -100
 FROZEN_PREFIXES = ("visual.blocks.", "visual.patch_embed.", "visual.pos_embed.")
 
 
+LOGITS = ("all", "targets")  # q38s4.json "logits": LM-head logits at every position (LF's) or at the targets only
+
+
 @dataclass
 class S4Settings:
     nfp_mse: float = 0.0
     nfp_cos: float = 0.0
+    logits: str = "all"
 
     @property
     def head_on(self) -> bool:
@@ -61,12 +72,14 @@ class S4Settings:
     @classmethod
     def from_file(cls, path: Path) -> "S4Settings":
         cfg = json.loads(Path(path).read_text())
-        unknown = set(cfg) - {"nfp_mse", "nfp_cos", "note"}
+        unknown = set(cfg) - {"nfp_mse", "nfp_cos", "logits", "note"}
         if unknown:
             raise ValueError(f"{path}: unknown keys {sorted(unknown)}")
-        s = cls(float(cfg["nfp_mse"]), float(cfg["nfp_cos"]))
+        s = cls(float(cfg["nfp_mse"]), float(cfg["nfp_cos"]), str(cfg.get("logits", "all")))
         if s.nfp_mse < 0 or s.nfp_cos < 0:
             raise ValueError(f"{path}: negative weight")
+        if s.logits not in LOGITS:
+            raise ValueError(f"{path}: logits {s.logits!r} not in {LOGITS}")
         return s
 
 
@@ -116,19 +129,47 @@ def has_text_tokens(labels: Optional[torch.Tensor]) -> bool:
     return labels is None or bool((labels[..., 1:] != IGNORE_INDEX).any())
 
 
+def target_positions(labels: torch.Tensor) -> torch.Tensor:
+    """The sequence positions whose logits the causal-LM loss reads: p with labels[b, p + 1] != IGNORE_INDEX in some
+    row b (ascending)."""
+    return (labels[:, 1:] != IGNORE_INDEX).any(0).nonzero().flatten()
+
+
+def at_targets(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """The micro-batch for a forward whose LM head runs only at the target positions (logits_to_keep as an index
+    tensor, which Qwen3_5ForConditionalGeneration.forward takes), with labels laid out so that the model's own loss
+    (labels shifted by one, CE in fp32, mean over the targets) pairs the same logits with the same targets as on the
+    full sequence: kept logit k (position pos[k]) meets new label k + 1 = labels[:, pos[k] + 1].  One more position
+    (the last target's again) is kept because the shift pads the last label with IGNORE_INDEX; its logit is never
+    read.  Positions without a target (the video, the question) contribute nothing to the loss either way, and with
+    the full sequence their logits (~9.4K x 248,320, three fp32 copies of ~9.3 GB in the loss) were most of a 2-node
+    micro-batch's peak memory (S2, 2026-11-23).  The sums run over fewer terms, so the loss equals LF's up to float
+    rounding, not bit for bit (logits "all" keeps LF's path)."""
+    labels = inputs["labels"]
+    pos = target_positions(labels)
+    keep = torch.cat([pos, pos[-1:]])
+    new = torch.full((labels.shape[0], keep.numel()), IGNORE_INDEX, dtype=labels.dtype, device=labels.device)
+    new[:, 1:] = labels[:, pos + 1]
+    return {**inputs, "labels": new, "logits_to_keep": keep}
+
+
 def s4_loss(model, inputs: Dict[str, Any], tap: N.NFPTap, settings: S4Settings, base_compute, scale: float,
             acc: Dict[str, float]):
     """One micro-batch: (loss, outputs).  ``base_compute(model, inputs)`` is the parent trainer's
-    compute_loss(..., return_outputs=True)."""
+    compute_loss(..., return_outputs=True).  Logits "targets" only while the model trains: an evaluation's
+    prediction_step pairs the returned logits with the full-length labels, so it gets LF's path."""
     nfp_video = inputs.pop("nfp_video", None)
     tap.arm(nfp_video)
     try:
+        targets_only = settings.logits == "targets" and model.training
         if has_text_tokens(inputs.get("labels")):
-            loss, outputs = base_compute(model, inputs)
+            loss, outputs = base_compute(model, at_targets(inputs) if targets_only else inputs)
             acc["ce_sum"] += float(loss.detach())
             acc["ce_n"] += 1
         else:
             fwd = {k: v for k, v in inputs.items() if k != "labels"}
+            if targets_only:
+                fwd["logits_to_keep"] = 1  # one position's logits keep lm_head in the graph (its gradient is 0)
             outputs = model(**fwd)
             loss = outputs.logits[..., :1, :1].float().sum() * 0.0
         res = tap.collect()
@@ -186,6 +227,14 @@ def freeze_check_due(last: Optional[int], global_step: int, args) -> bool:
     return bool(save_steps) and global_step > 0 and global_step % save_steps == 0 and last != global_step
 
 
+def check_logits_mode(settings: S4Settings, finetuning_args) -> None:
+    """Logits "targets" cannot run with LF's ASFT loss: ASFT compares the model's logits against full-length
+    reference logits (the DFT / EAFT losses shift the labels like the model's loss and stay consistent)."""
+    if settings.logits == "targets" and getattr(finetuning_args, "use_asft_loss", False):
+        raise ValueError('logits "targets" with use_asft_loss: ASFT compares the logits against full-length '
+                         'reference logits; use logits "all"')
+
+
 # ---------------------------------------------------------------------------------------------------- trainer
 def make_trainer_class():
     from llamafactory.train.sft.trainer import CustomSeq2SeqTrainer
@@ -194,6 +243,7 @@ def make_trainer_class():
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.s4 = SETTINGS or S4Settings()
+            check_logits_mode(self.s4, self.finetuning_args)
             head = getattr(self.model, "nfp_head", None)
             if self.s4.head_on and head is None:
                 raise ValueError("NFP weights > 0 but the model has no nfp_head")
