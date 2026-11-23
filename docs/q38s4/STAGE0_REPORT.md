@@ -52,7 +52,7 @@
 | procthor.tar.gz | 6,523,652,708 | 6.52 | 881d7be20b7d67b4a4bd76f23082c48623c2e68cf02ebb661eeaa1f1bffb7bc6 |
 | s3dis.tar.gz | 2,865,916,732 | 2.87 | c97c0dfd60430bef6365f4adfc376c1a94ff0e0ce50909ca84df0e2396ff1b53 |
 | robotics.tar.gz | 1,104,873,829 | 1.10 | 9bae84fac90fcfa7f86d4a7dfb75f3798da241d7211ec10a512d2e3c01ba5816 |
-| **合计 9 个** | 235,653,909,915 | **235.65** | |
+| **合计 9 个** | 235,652,909,915 | **235.65** | |
 
 **jsonl 的构成**（全量统计，单进程）：
 
