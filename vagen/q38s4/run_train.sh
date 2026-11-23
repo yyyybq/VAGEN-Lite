@@ -48,6 +48,8 @@ plan() { "$PY" -c "import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[
       -m vagen.q38s4.lf_nfp "$RUN/train.yaml"
   fi
   rc=$?
+  # h800 jobs write /mnt/umm as another uid and safetensors files come out 0600: make the checkpoints readable
+  [[ "${NODE_RANK}" == 0 ]] && chmod -R a+rX "$RUN/ckpt" "$RUN/ckpt_bf16" 2>/dev/null || true
   echo "[q38s4 train] $(date -u +%FT%TZ) exit ${rc}"
   exit ${rc}
 } >> "$LOG" 2>&1

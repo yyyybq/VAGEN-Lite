@@ -19,7 +19,8 @@
            head's nfp_cos, step times (the slowest rank's step_s per step, median over the steps after the first
            --skip), samples per second (global batch / median step), GPU peaks over every rank, host memory peaks
            (the q38 callback's rank-0 lines and every host_mem_sft file); RUN/smoke_summary.json;
-  scaling  --runs RUN1 RUN2 ...   efficiency of each run = its samples/s / (nodes x the 1-node run's samples/s);
+  scaling  --runs RUN1 RUN2 ... [--base-nodes 2]   efficiency of each run = its samples/s / ((nodes / B) x the
+           B-node run's samples/s), B = --base-nodes (2 since 2026-11-23: 27B does not fit one node on real data);
   compare  --a RUN_A --b RUN_B [--key loss]   per-step equality of a logged value (bit for bit: the float64s of
            the log history), the first step that differs and the largest difference.
 """
@@ -380,14 +381,18 @@ def summary(run: Path, skip: int = 2) -> Dict[str, Any]:
     return rep
 
 
-def scaling(reps: List[Dict[str, Any]]) -> Dict[str, Any]:
-    base = [r for r in reps if r["nodes"] == 1]
+def scaling(reps: List[Dict[str, Any]], base_nodes: int = 1) -> Dict[str, Any]:
+    """Efficiency of each run = its samples/s / ((nodes / base_nodes) x the base run's samples/s).
+
+    base_nodes 2 since 2026-11-23: 27B does not fit one node on real data (user: 2 nodes are the smallest unit).
+    """
+    base = [r for r in reps if r["nodes"] == base_nodes]
     if len(base) != 1 or not base[0]["samples_per_s"]:
-        raise SystemExit("scaling: exactly one 1-node run with a step time is needed")
+        raise SystemExit(f"scaling: exactly one {base_nodes}-node run with a step time is needed")
     one = base[0]["samples_per_s"]
     rows = []
     for r in sorted(reps, key=lambda x: x["nodes"]):
-        eff = r["samples_per_s"] / (r["nodes"] * one) if r["samples_per_s"] else None
+        eff = r["samples_per_s"] / (r["nodes"] / base_nodes * one) if r["samples_per_s"] else None
         rows.append({"run": r["run"], "nodes": r["nodes"], "samples_per_s": r["samples_per_s"],
                      "efficiency": None if eff is None else round(eff, 4)})
     eight = [x for x in rows if x["nodes"] == 8 and x["efficiency"] is not None]
@@ -396,7 +401,7 @@ def scaling(reps: List[Dict[str, Any]]) -> Dict[str, Any]:
         e = eight[0]["efficiency"]
         verdict = "8 nodes (>= 0.70)" if e >= 0.70 else ("stop and report (< 0.50)" if e < 0.50 else
                                                          "between 0.50 and 0.70: ask the user")
-    return {"one_node_samples_per_s": one, "rows": rows, "verdict": verdict}
+    return {"base_nodes": base_nodes, "base_samples_per_s": one, "rows": rows, "verdict": verdict}
 
 
 def compare(a: List[Dict[str, Any]], b: List[Dict[str, Any]], key: str = "loss") -> Dict[str, Any]:
@@ -444,6 +449,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     c = sub.add_parser("scaling")
     c.add_argument("--runs", nargs="+", required=True)
     c.add_argument("--skip", type=int, default=2)
+    c.add_argument("--base-nodes", type=int, default=2)
     q = sub.add_parser("compare")
     q.add_argument("--a", required=True)
     q.add_argument("--b", required=True)
@@ -466,7 +472,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     elif a.cmd == "summary":
         res = summary(Path(a.run), a.skip)
     elif a.cmd == "scaling":
-        res = scaling([summary(Path(r), a.skip) for r in a.runs])
+        res = scaling([summary(Path(r), a.skip) for r in a.runs], a.base_nodes)
     else:
         res = {k: compare(log_history(Path(a.a).resolve()), log_history(Path(a.b).resolve()), k)
                for k in dict.fromkeys([a.key, "grad_norm"])}

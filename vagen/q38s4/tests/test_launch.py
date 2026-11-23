@@ -220,3 +220,31 @@ def test_entry_stops_on_node_count_mismatch(tmp_path, repo, data):
     log = (run / "logs" / "node3.log").read_text()
     assert "node_rank 3 nnodes 2" in log and "[plan] mode train nodes 8 gpus_per_node 8 grad_accum 4" in log
     assert "the plan 8: stop" in log and "accelerate" not in log.split("[plan]")[1]
+
+
+def test_entry_opens_checkpoints_and_keeps_the_exit_code(tmp_path, repo, data):
+    """Node 0 makes RUN/ckpt and RUN/ckpt_bf16 readable after training (h800: files written 0600 as another uid)."""
+    prep(tmp_path, data, "--arm", "nfp", "--nodes", "1")
+    run = tmp_path / "run"
+    fake = tmp_path / "fakepy.sh"  # plan() reads go to python; the training line writes a 0600 file and fails
+    fake.write_text("#!/usr/bin/env bash\n"
+                    "if [[ \"$1\" == -m && \"$2\" == accelerate.commands.launch ]]; then\n"
+                    f"  mkdir -p {run}/ckpt/checkpoint-1 {run}/ckpt_bf16/checkpoint-1\n"
+                    f"  (umask 077; echo w > {run}/ckpt/checkpoint-1/model.safetensors;"
+                    f" echo w > {run}/ckpt_bf16/checkpoint-1/model.safetensors)\n"
+                    "  exit 5\nfi\n"
+                    f"exec {sys.executable} \"$@\"\n")
+    fake.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PET_", "RANK", "WORLD_SIZE"))}
+    env.update(PET_NODE_RANK="0", PET_NNODES="1", Q38S4_PYTHON=str(fake))
+    res = subprocess.run(["bash", str(ENTRY), str(run)], env=env, timeout=120)
+    assert res.returncode == 5
+    for d in ("ckpt", "ckpt_bf16"):
+        f = run / d / "checkpoint-1" / "model.safetensors"
+        assert f.stat().st_mode & 0o777 == 0o644, oct(f.stat().st_mode)
+        assert (run / d / "checkpoint-1").stat().st_mode & 0o055 == 0o055
+    assert "exit 5" in (run / "logs" / "node0.log").read_text()
+    env.update(PET_NODE_RANK="1", PET_NNODES="1")  # a node other than 0 leaves the files alone
+    (run / "ckpt" / "checkpoint-1" / "model.safetensors").chmod(0o600)
+    subprocess.run(["bash", str(ENTRY), str(run)], env=env, timeout=120)
+    assert (run / "ckpt" / "checkpoint-1" / "model.safetensors").stat().st_mode & 0o777 == 0o600

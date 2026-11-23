@@ -237,6 +237,13 @@ def test_scaling(tmp_path):
     assert S.scaling([reps[0], slow])["verdict"].startswith("stop")
     with pytest.raises(SystemExit):
         S.scaling(reps[1:])
+    # 2 nodes as the base (27B on real data): slowest ranks 40 s (2 nodes) and 14 s (8) -> 40 / (4 x 14)
+    two = S.scaling(reps[1:], base_nodes=2)
+    eff2 = {r["nodes"]: r["efficiency"] for r in two["rows"]}
+    assert two["base_nodes"] == 2 and eff2[2] == 1.0 and abs(eff2[8] - 40 / 56) < 1e-4
+    assert two["verdict"] == "8 nodes (>= 0.70)"
+    with pytest.raises(SystemExit):
+        S.scaling(reps[:1], base_nodes=2)
 
 
 def test_compare():
