@@ -91,10 +91,13 @@ def test_submit_dry_run(tmp_path, capsys):
         S.submit(run, "zoetrope", plain=True, yes=False)  # run_plain.sh missing
     S.plain_entry(run)
     cmd = S.submit(run, "h800", plain=True, yes=False)
-    assert cmd[-1] == f"--command=bash {run.resolve()}/run_plain.sh {run.resolve()}"
+    assert cmd[-1] == f"--command=umask 0000; bash {run.resolve()}/run_plain.sh {run.resolve()}"
     assert "--aec2-name=h800" in cmd and "--priority=NORMAL" in cmd and "--worker-nodes=1" in cmd
     cmd2 = S.submit(run, "zoetrope", plain=False, yes=False)
     assert cmd2[-1].endswith(f"code/vagen/q38s4/run_train.sh {run.resolve()}")
+    assert cmd2[-1].startswith("--command=umask 0000; bash ")
+    import stat
+    assert stat.S_IMODE(run.stat().st_mode) != 0o777  # dry run: nothing opened
     assert "dry run" in capsys.readouterr().out
     assert not (run / "submits.jsonl").exists()
 
@@ -105,10 +108,12 @@ def test_job_prepare_and_env(tmp_path, monkeypatch):
     spec = J.prepare(tmp_path / "j", "vagen.q38s4.data_build", ["--src", "x"], commit="abc")
     assert spec["module"] == "vagen.q38s4.data_build" and spec["args"] == ["--src", "x"] and spec["threads"] == 4
     assert json.loads((tmp_path / "j" / "job.json").read_text())["commit"] == "abc"
+    import stat
+    assert stat.S_IMODE((tmp_path / "j").stat().st_mode) == 0o777
     with pytest.raises(SystemExit):
         J.prepare(tmp_path / "j", "m", [], commit="abc")
     cmd = J.sco_command((tmp_path / "j").resolve(), spec, "zoetrope", "n")
-    assert cmd[-1] == f"--command=bash {(tmp_path / 'j').resolve()}/code/vagen/q38s4/tools/job_entry.sh {(tmp_path / 'j').resolve()}"
+    assert cmd[-1] == f"--command=umask 0000; bash {(tmp_path / 'j').resolve()}/code/vagen/q38s4/tools/job_entry.sh {(tmp_path / 'j').resolve()}"
     assert "--worker-spec=N4lS.Iq.I80.1" in cmd
     with pytest.raises(ValueError):
         J.sco_command(tmp_path, spec, "auto", "n")

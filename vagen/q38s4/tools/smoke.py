@@ -102,10 +102,16 @@ def submit(run: Path, pool: str, plain: bool, yes: bool, job_name: Optional[str]
     plan = json.loads((run / "plan.json").read_text())
     name = job_name or f"q38s4-smoke-{'plain' if plain else plan['arm']}-{run.name}"
     cmd = L.sco_command(run, plan, pool, name)
+    entry = f"bash {run}/code/vagen/q38s4/run_train.sh {run}"
+    if not cmd[-1] == f"--command={entry}":
+        raise SystemExit(f"unexpected launch command {cmd[-1]!r}")
     if plain:
         if not (run / "run_plain.sh").is_file():
             raise SystemExit(f"{run}/run_plain.sh missing: run smoke plain first")
-        cmd[-1] = f"--command=bash {run}/run_plain.sh {run}"
+        entry = f"bash {run}/run_plain.sh {run}"
+    cmd[-1] = f"--command={J.UMASK}{entry}"  # tools.job: h800 jobs write /mnt/umm as another uid
+    if yes:
+        J.open_up(run, run / "logs")
     J.run_sco(cmd, run / "submits.jsonl", name, pool, yes)
     return cmd
 
