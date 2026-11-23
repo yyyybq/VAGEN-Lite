@@ -4,12 +4,16 @@
 
 Writes into OUT (which must not exist yet; nothing is overwritten or deleted):
 
-- qa.jsonl: every source row (590,667), in source order.  Roles human -> user, gpt -> assistant, every message
-  stripped; a video row's ``<image>`` placeholder (the source writes one in the first user turn whatever the medium)
-  becomes ``<video>`` -- with the chat template's <|vision_start|> ... <|vision_end|> around it for --video-markers
-  outer (what Qwen3.8's processor and vLLM write at evaluation, vagen.q38.sft.lf_data), as it is for none -- and its
-  path is MEDIA/<video>|s4|qa (all 256 frames, lf_video); an image row keeps <image> and MEDIA/<image>.  Multi-turn
-  rows stay multi-turn (all assistant turns trained, as in the 8B SFT: mask_history false);
+- qa.jsonl: every source video row, qa_img.jsonl every source image row (together 590,667), each in source order.
+  Roles human -> user, gpt -> assistant, every message stripped; a video row's ``<image>`` placeholder (the source
+  writes one in the first user turn whatever the medium) becomes ``<video>`` -- with the chat template's
+  <|vision_start|> ... <|vision_end|> around it for --video-markers outer (what Qwen3.8's processor and vLLM write at
+  evaluation, vagen.q38.sft.lf_data), as it is for none -- and its path is MEDIA/<video>|s4|qa (all 256 frames,
+  lf_video); an image row keeps <image> and MEDIA/<image>.  Multi-turn rows stay multi-turn (all assistant turns
+  trained, as in the 8B SFT: mask_history false).  Two files, one medium each: the datasets JSON loader takes a
+  column's type from the first block of a file (about 10 MB), so a file whose first block has only video rows
+  cannot take a later image row (ArrowInvalid / CastError: the images column was typed null; an empty list in the
+  other column fails the same way), which stopped the full tokenize of the one-file v1 build;
 - nfp.jsonl: --nfp-rows rows (290,000 by default) drawn without replacement, with --seed, from the video rows whose
   video is not held out (and, with --probe, is long enough for an NFP window); each is the user turn's video
   placeholder alone and the assistant turn "." (lf_nfp ignores every label of an NFP sample), the video
@@ -19,7 +23,8 @@ Writes into OUT (which must not exist yet; nothing is overwritten or deleted):
 - heldout_videos.txt: the --heldout-frac of the distinct videos (sorted names, drawn with --seed); with
   --heldout-scope all their QA rows go to qa_heldout.jsonl instead of qa.jsonl, with nfp (the default) only the NFP
   rows avoid them;
-- dataset_info.json: s4_qa, s4_nfp, s4_nfp_heldout (and s4_qa_heldout);
+- dataset_info.json: s4_qa (videos), s4_qa_img (images; only when there are image rows), s4_nfp, s4_nfp_heldout
+  (and s4_qa_heldout, videos);
 - build_manifest.json: arguments, source sha256, output sha256 and line counts, row counts per source / medium,
   the probe's counts and every video it found too short or unreadable.
 
@@ -161,15 +166,15 @@ def dataset_entry(file_name: str, media: str) -> Dict[str, Any]:
                      "system_tag": "system"}}
 
 
-def dataset_info(with_qa_heldout: bool) -> Dict[str, Any]:
-    info = {}
-    for name, fn in (("s4_qa", "qa.jsonl"), ("s4_nfp", "nfp.jsonl"), ("s4_nfp_heldout", "nfp_heldout.jsonl")):
-        info[name] = dataset_entry(fn, "videos")
-        if name == "s4_qa":
-            info[name]["columns"]["images"] = "images"
+def dataset_info(with_qa_heldout: bool, with_img: bool = True) -> Dict[str, Any]:
+    """One medium per entry (and per file): s4_qa, s4_nfp, s4_nfp_heldout, s4_qa_heldout videos, s4_qa_img images."""
+    info = {"s4_qa": dataset_entry("qa.jsonl", "videos")}
+    if with_img:
+        info["s4_qa_img"] = dataset_entry("qa_img.jsonl", "images")
+    info["s4_nfp"] = dataset_entry("nfp.jsonl", "videos")
+    info["s4_nfp_heldout"] = dataset_entry("nfp_heldout.jsonl", "videos")
     if with_qa_heldout:
         info["s4_qa_heldout"] = dataset_entry("qa_heldout.jsonl", "videos")
-        info["s4_qa_heldout"]["columns"]["images"] = "images"
     return info
 
 
@@ -218,13 +223,17 @@ def build(args: argparse.Namespace) -> Dict[str, Any]:
     if tmp.exists():
         raise SystemExit(f"{tmp} exists (an earlier build stopped): look at it and remove it yourself")
     tmp.mkdir(parents=True)
-    n_qa = n_qa_held = 0
+    n_qa = n_qa_img = n_qa_held = 0
     split_qa = args.heldout_scope == "all"
     with open(src, encoding="utf-8") as f, open(tmp / "qa.jsonl", "w", encoding="utf-8") as fq, \
+            open(tmp / "qa_img.jsonl", "w", encoding="utf-8") as fi, \
             open(tmp / "qa_heldout.jsonl", "w", encoding="utf-8") if split_qa else open(os.devnull, "w") as fh:
         for (kind, path), line in zip(rows, f):
             row = convert_row(json.loads(line), media_root, args.video_markers)
-            if split_qa and kind == "video" and path in heldout:
+            if kind == "image":
+                fi.write(json.dumps(row, ensure_ascii=False) + "\n")
+                n_qa_img += 1
+            elif split_qa and path in heldout:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 n_qa_held += 1
             else:
@@ -240,7 +249,7 @@ def build(args: argparse.Namespace) -> Dict[str, Any]:
                 u = (k + 0.5) / args.heldout_windows
                 fo.write(json.dumps(nfp_row(media_root, v, u, args.video_markers), ensure_ascii=False) + "\n")
     (tmp / "heldout_videos.txt").write_text("".join(v + "\n" for v in sorted(heldout)))
-    (tmp / "dataset_info.json").write_text(json.dumps(dataset_info(split_qa), indent=2) + "\n")
+    (tmp / "dataset_info.json").write_text(json.dumps(dataset_info(split_qa, n_qa_img > 0), indent=2) + "\n")
 
     files = sorted(p.name for p in tmp.iterdir())
     manifest = {
@@ -251,7 +260,7 @@ def build(args: argparse.Namespace) -> Dict[str, Any]:
         "distinct_videos": len(videos),
         "heldout_videos": len(heldout),
         "nfp_pool_rows": len(pool),
-        "rows_out": {"qa": n_qa, "qa_heldout": n_qa_held, "nfp": len(picked),
+        "rows_out": {"qa": n_qa, "qa_img": n_qa_img, "qa_heldout": n_qa_held, "nfp": len(picked),
                      "nfp_heldout": len(held_sorted) * args.heldout_windows},
         "nfp_videos_used": len({rows[i][1] for i in picked}),
         "probe": None if probe is None else {

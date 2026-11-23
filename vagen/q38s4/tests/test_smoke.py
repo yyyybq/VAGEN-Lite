@@ -34,7 +34,8 @@ def fake_data(root: Path) -> Path:
 def test_subset(tmp_path):
     d = fake_data(tmp_path)
     m = S.subset(d, tmp_path / "sub", 7, 3, seed=1)
-    assert m["rows_out"] == {"qa": 7, "nfp": 3, "qa_heldout": 0, "nfp_heldout": 0}
+    assert m["rows_out"] == {"qa": 7, "qa_img": 0, "nfp": 3, "qa_heldout": 0, "nfp_heldout": 0}
+    assert not (tmp_path / "sub" / "qa_img.jsonl").exists()
     qa = [json.loads(x)["i"] for x in (tmp_path / "sub" / "qa.jsonl").read_text().splitlines()]
     assert len(qa) == 7 and qa == sorted(qa) and len(set(qa)) == 7
     # seeded: the same rows again; another seed other rows
@@ -50,6 +51,24 @@ def test_subset(tmp_path):
         S.subset(d, tmp_path / "sub", 1, 1)  # exists
     with pytest.raises(SystemExit):
         S.subset(d, tmp_path / "big", 31, 0)
+    with pytest.raises(SystemExit):  # a v1 build has no qa_img.jsonl
+        S.subset(d, tmp_path / "img_v1", 5, 0, n_img=2)
+
+
+def test_subset_image_rows(tmp_path):
+    d = fake_data(tmp_path)
+    write_jsonl(d / "qa_img.jsonl", [{"k": k} for k in range(10)])
+    (d / "dataset_info.json").write_text(json.dumps({"s4_qa": {}, "s4_qa_img": {"x": 1}, "s4_nfp": {},
+                                                     "s4_nfp_heldout": {}}))
+    m = S.subset(d, tmp_path / "sub", 6, 2, seed=0, n_img=4)
+    assert m["rows_out"] == {"qa": 6, "qa_img": 4, "nfp": 2, "qa_heldout": 0, "nfp_heldout": 0}
+    img = [json.loads(x)["k"] for x in (tmp_path / "sub" / "qa_img.jsonl").read_text().splitlines()]
+    assert len(img) == 4 and img == sorted(img)
+    info = json.loads((tmp_path / "sub" / "dataset_info.json").read_text())
+    assert info.keys() == {"s4_qa", "s4_qa_img", "s4_nfp", "s4_nfp_heldout"} and info["s4_qa_img"] == {"x": 1}
+    S.subset(d, tmp_path / "noimg", 6, 2)  # no --img: no image dataset in the subset
+    assert "s4_qa_img" not in json.loads((tmp_path / "noimg" / "dataset_info.json").read_text())
+    assert S.parse_args(["subset", "--data", "d", "--out", "o", "--qa", "1", "--nfp", "0", "--img", "3"]).img == 3
 
 
 # ------------------------------------------------------------------------------------------------------ plain

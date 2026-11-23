@@ -58,7 +58,7 @@ def repo(tmp_path, monkeypatch):
 def data(tmp_path):
     d = tmp_path / "data"
     d.mkdir()
-    (d / "dataset_info.json").write_text("{}")
+    (d / "dataset_info.json").write_text(json.dumps({"s4_qa": {}, "s4_nfp": {}, "s4_nfp_heldout": {}}))  # v1 build
     (d / "build_manifest.json").write_text(json.dumps({"rows_out": {"qa": 590_667, "nfp": 290_000}}))
     tok = tmp_path / "tok"
     tok.mkdir()
@@ -102,6 +102,23 @@ def test_prepare_train(tmp_path, repo, data):
     small = prep(tmp_path, data, "--arm", "nfp", "--nodes", "2", "--gpus-per-node", "2", "--global-batch", "8",
                  run="run3")
     assert (small["world"], small["grad_accum"], small["global_batch"]) == (4, 2, 8)
+
+
+def test_prepare_v2_build_with_image_rows(tmp_path, repo, data):
+    """data_build v2: image QA rows in qa_img.jsonl / s4_qa_img; the list and the step estimate include them."""
+    d, _ = data
+    (d / "dataset_info.json").write_text(json.dumps({"s4_qa": {}, "s4_qa_img": {}, "s4_nfp": {},
+                                                     "s4_nfp_heldout": {}}))
+    (d / "build_manifest.json").write_text(json.dumps({"rows_out": {"qa": 374_148, "qa_img": 216_519,
+                                                                    "nfp": 290_000}}))
+    plan = prep(tmp_path, data, "--arm", "nonfp", "--nodes", "8")
+    cfg = yaml.safe_load((tmp_path / "run" / "train.yaml").read_text())
+    assert cfg["dataset"] == "s4_qa,s4_qa_img,s4_nfp"
+    assert plan["rows"] == 880_667 and plan["estimated_steps"] == 3441  # as with the one-file v1 build
+    (d / "dataset_info.json").write_text(json.dumps({"s4_qa_img": {}, "s4_nfp": {}}))
+    with pytest.raises(SystemExit):  # s4_qa missing
+        prep(tmp_path, data, "--arm", "nonfp", run="run_bad")
+    assert not (tmp_path / "run_bad").exists()
 
 
 def test_prepare_refusals(tmp_path, repo, data):

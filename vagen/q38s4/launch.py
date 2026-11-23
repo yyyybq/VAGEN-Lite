@@ -52,7 +52,18 @@ STORAGE = "019ec9f9-6d12-7d49-aad4-864b15c9eb06:/mnt/umm"
 GLOBAL_BATCH = 256
 ARMS = {"nfp": {"nfp_mse": 0.1, "nfp_cos": 0.1}, "nonfp": {"nfp_mse": 0.0, "nfp_cos": 0.0}}
 MODES = ("train", "tokenize")
-DATASETS = "s4_qa,s4_nfp"
+# the training datasets, in this order, of those DATA/dataset_info.json lists: s4_qa_img (image QA rows, a file of
+# their own since data_build v2) is absent from v1 builds and from data without image rows; both arms use the same list
+TRAIN_DATASETS = ("s4_qa", "s4_qa_img", "s4_nfp")
+REQUIRED_DATASETS = ("s4_qa", "s4_nfp")
+
+
+def train_datasets(data: Path) -> str:
+    info = json.loads((Path(data) / "dataset_info.json").read_text())
+    missing = [d for d in REQUIRED_DATASETS if d not in info]
+    if missing:
+        raise SystemExit(f"{data}/dataset_info.json lacks {missing}")
+    return ",".join(d for d in TRAIN_DATASETS if d in info)
 
 # Cambrian-S stage 4 on Qwen3.8-27B (STAGE0_REPORT sections 2-3; the 27B matrix SFT's LF settings where the stage-4
 # recipe says nothing: template, thinking off, cutoff, sdpa, sync_each_batch, ddp_timeout, image pixels)
@@ -109,7 +120,8 @@ def parse_sets(items: List[str]) -> Dict[str, Any]:
 def train_yaml(run: Path, data: Path, tokenized: Path, model: str, plan: Dict[str, int],
                sets: Dict[str, Any]) -> Dict[str, Any]:
     cfg = {"model_name_or_path": model, **RECIPE,
-           "dataset_dir": str(data), "media_dir": str(data), "dataset": DATASETS, "tokenized_path": str(tokenized),
+           "dataset_dir": str(data), "media_dir": str(data), "dataset": train_datasets(data),
+           "tokenized_path": str(tokenized),
            "output_dir": str(run / "ckpt"),
            "per_device_train_batch_size": plan["per_device"], "gradient_accumulation_steps": plan["grad_accum"]}
     for k in ("per_device_train_batch_size", "gradient_accumulation_steps", "output_dir"):
@@ -166,7 +178,7 @@ def prepare(args: argparse.Namespace) -> Dict[str, Any]:
     rows = None
     if manifest.is_file():
         ro = json.loads(manifest.read_text())["rows_out"]
-        rows = ro["qa"] + ro["nfp"]
+        rows = ro["qa"] + ro.get("qa_img", 0) + ro["nfp"]
     commit = committed_head()  # every check before the folder is made
     run.mkdir(parents=True)
     snapshot_code(run / "code", commit)

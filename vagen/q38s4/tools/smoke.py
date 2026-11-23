@@ -1,8 +1,9 @@
 """C line (q38 s4), stage 3: helpers of the smoke and scaling tests S1-S4 and of the data checks.
 
-  subset   --data DATA --out OUT --qa N --nfp M [--seed S]
-           a seeded sample of a data_build folder (N rows of qa.jsonl, M of nfp.jsonl, both in source order) with
-           its dataset_info.json and a build_manifest.json (rows_out, so launch prepare can estimate the steps);
+  subset   --data DATA --out OUT --qa N --nfp M [--img K] [--seed S]
+           a seeded sample of a data_build folder (N rows of qa.jsonl, M of nfp.jsonl, K of a v2 build's
+           qa_img.jsonl, each in source order) with its dataset_info.json and a build_manifest.json (rows_out, so
+           launch prepare can estimate the steps);
   plain    --run RUN       RUN/run_plain.sh: RUN/code's run_train.sh with the training module
            vagen.q38s4.lf_nfp replaced by vagen.q38s4.tools.lf_plain (S4's existing SFT trainer); RUN must be a train
            run folder of vagen.q38s4.launch prepare;
@@ -57,22 +58,28 @@ def _pick(path: Path, n: int, rng: random.Random) -> List[str]:
     return [lines[i] for i in keep]
 
 
-def subset(data: Path, out: Path, n_qa: int, n_nfp: int, seed: int = 0) -> Dict[str, Any]:
+def subset(data: Path, out: Path, n_qa: int, n_nfp: int, seed: int = 0, n_img: int = 0) -> Dict[str, Any]:
     data, out = Path(data).resolve(), Path(out).resolve()
     if out.exists():
         raise SystemExit(f"{out} exists: pick a new folder")
     info = json.loads((data / "dataset_info.json").read_text())
+    if n_img and "s4_qa_img" not in info:
+        raise SystemExit(f"{data}: no s4_qa_img (a v1 build keeps image rows in qa.jsonl): --img needs a v2 build")
     rng = random.Random(f"subset:{seed}")
     qa = _pick(data / "qa.jsonl", n_qa, rng)
     nfp = _pick(data / "nfp.jsonl", n_nfp, rng) if n_nfp else []
+    img = _pick(data / "qa_img.jsonl", n_img, rng) if n_img else []
     out.mkdir(parents=True)
     (out / "qa.jsonl").write_text("".join(qa), encoding="utf-8")
     (out / "nfp.jsonl").write_text("".join(nfp), encoding="utf-8")
     (out / "nfp_heldout.jsonl").write_text("", encoding="utf-8")
-    keep = {k: v for k, v in info.items() if k in ("s4_qa", "s4_nfp", "s4_nfp_heldout")}
+    names = ("s4_qa", "s4_nfp", "s4_nfp_heldout") + (("s4_qa_img",) if img else ())
+    if img:
+        (out / "qa_img.jsonl").write_text("".join(img), encoding="utf-8")
+    keep = {k: v for k, v in info.items() if k in names}
     (out / "dataset_info.json").write_text(json.dumps(keep, indent=2) + "\n")
     man = {"subset_of": str(data), "seed": seed, "utc": utc(),
-           "rows_out": {"qa": len(qa), "nfp": len(nfp), "qa_heldout": 0, "nfp_heldout": 0}}
+           "rows_out": {"qa": len(qa), "qa_img": len(img), "nfp": len(nfp), "qa_heldout": 0, "nfp_heldout": 0}}
     (out / "build_manifest.json").write_text(json.dumps(man, indent=2) + "\n")
     return man
 
@@ -426,6 +433,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     s.add_argument("--qa", type=int, required=True)
     s.add_argument("--nfp", type=int, required=True)
     s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--img", type=int, default=0, help="rows of qa_img.jsonl (a v2 build's image QA rows)")
     p = sub.add_parser("plain")
     p.add_argument("--run", required=True)
     u = sub.add_parser("submit")
@@ -460,7 +468,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> None:
     a = parse_args(argv)
     if a.cmd == "subset":
-        res: Any = subset(Path(a.data), Path(a.out), a.qa, a.nfp, a.seed)
+        res: Any = subset(Path(a.data), Path(a.out), a.qa, a.nfp, a.seed, a.img)
     elif a.cmd == "plain":
         res = str(plain_entry(Path(a.run)))
     elif a.cmd == "submit":
