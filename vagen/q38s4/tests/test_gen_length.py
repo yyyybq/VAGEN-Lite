@@ -34,12 +34,14 @@ def clock(seconds: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
-def log(folder: Path, stamp: str, seconds, tokens, wall=None, n=None) -> Path:
+def log(folder: Path, stamp: str, seconds, tokens, wall=None, n=None, first=None) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     f = folder / f"eval_qwen3_vl_{stamp}.log"
     body = "loading\n"
     if wall is not None:  # as tqdm writes it: partial bars, then the finished one twice (ANSI codes after it)
         bar = "█" * 10
+        if first is not None:  # the first question's bar (start-up included)
+            body += f"Model Responding:   2%|▏         | 1/{n} [{clock(first)}<38:31, 47.18s/it]\r"
         body += f"Model Responding:  50%|{bar[:5]}     | {n // 2}/{n} [00:01<00:01,  1.00it/s]\r"
         body += f"Model Responding: 100%|{bar}| {n}/{n} [{clock(wall)}<00:00,  3.71it/s]\x1b[32m2026-11-24\x1b[0m\n"
         body += f"Model Responding: 100%|{bar}| {n}/{n} [{clock(wall)}<00:00,  1.57it/s]\n"
@@ -63,6 +65,7 @@ def test_row_counts_and_projection(tmp_path):
     assert r["n"] == 50 and r["tasks"] == 1 and r["tokens_mean"] == 939.2 and r["tokens_max"] == 2048
     assert r["tokens_median"] == 300 and r["tokens_p90"] == 2048.0 and r["at_cap"] == 0.4 and r["cap"] == 2048
     assert r["gen_s_per_q"] == 10.0 and r["tok_per_s"] == 66.6 and r["gen_seconds"] == 500.0
+    assert r["summary_tokens"] == 33280.0 and "source" not in r
     assert r["wall_seconds"] == 800.0 and r["wall_n"] == 50 and r["s_per_q"] == r["wall_s_per_q"] == 16.0
     assert r["s_per_q_from"] == "wall"
     assert r["full_n"] == 2000 and r["base_tokens_mean"] == round((500 * 50 + 1000 * 1950) / 2000, 1)
@@ -132,6 +135,57 @@ def test_newest_log_with_a_summary(tmp_path):
     assert r["tokens_mean"] == 7 and r["gen_seconds"] == 70.0 and r["gen_s_per_q"] == 1.4
     assert r["wall_seconds"] == 3725.0 and r["s_per_q"] == 74.5  # 1:02:05
     assert "full_n" not in r and "projected_h" not in r and "over_limit" not in r  # no base folder
+
+
+def test_warm_up_once_then_the_steady_rate(tmp_path):
+    """Every run's first question carries 45-65 s of start-up; a 50-question run's mean would put it on every
+    question of the full benchmark, so the projection counts it once and the other questions at the steady rate."""
+    qa, base = tmp_path / "qa", tmp_path / "base"
+    run = qa / "embspatial" / "n"
+    samples(run, "s", "embspatial", [2] * 50)
+    log(run, "s", 55.957, 100, wall=56, n=50, first=47)
+    samples(base / "embspatial" / "q38base", "s", "embspatial", [2] * 3640, model=BASE_MODEL)
+    log(base / "embspatial" / "q38base", "s", 792.0, 7280, wall=900, n=3640, first=58)
+    r = GL.job_row(qa, "n", "embspatial", base, "q38base")
+    assert r["warmup_seconds"] == 47.0 and r["steady_s_per_q"] == round(9 / 49, 2) == 0.18
+    assert r["s_per_q"] == 1.12 and r["s_per_q_from"] == "wall"  # the plain mean, kept beside
+    assert r["projected_from"] == "warm-up + steady"
+    assert r["projected_h"] == round((47 + 9 / 49 * 3639) / 3600, 2) == 0.2 and r["over_limit"] is False
+    assert r["base_h"] == 0.25
+    t = GL.table([r])
+    assert "| 1.12 | 47.0 | 0.18 | 3640 | 0.2 | 0.25 | no |" in t
+    one = qa / "viewspatial" / "n"  # one question: no steady rate, the plain mean
+    samples(one, "s", "viewspatial", [2])
+    log(one, "s", 40.0, 2, wall=45, n=1, first=45)
+    samples(base / "viewspatial" / "q38base", "s", "viewspatial", [2] * 10, model=BASE_MODEL)
+    r1 = GL.job_row(qa, "n", "viewspatial", base, "q38base")
+    assert r1["warmup_seconds"] is None and r1["steady_s_per_q"] is None and r1["projected_from"] == "wall"
+    assert r1["projected_h"] == round(45.0 * 10 / 3600, 2)
+
+
+def test_log_only_when_scoring_failed(tmp_path):
+    """vsi_bench at --limit 50: its aggregation raises after generation, so lmms-eval writes no samples file; the row
+    then comes from the log (n from the finished bar, the mean from the Metric summary), marked log only."""
+    qa, base = tmp_path / "qa", tmp_path / "base"
+    run = qa / "vsi_bench" / "n"
+    log(run, "20261124_122424", 118.706, 117, wall=157, n=50)
+    log(run, "20261124_123148", None, None)  # the chain's retry, still running (no summary yet)
+    samples(base / "vsi_bench" / "q38base", "s", "vsi_bench", [3] * 5130, model=BASE_MODEL)
+    log(base / "vsi_bench" / "q38base", "s", 9000.0, 15390, wall=11160, n=5130)
+    r = GL.job_row(qa, "n", "vsi_bench", base, "q38base")
+    assert r["source"] == GL.LOG_ONLY and r["n"] == 50 and r["tasks"] is None and r["samples"] == []
+    assert r["tokens_mean"] == 2.3 and r["summary_tokens"] == 117.0
+    assert r["tokens_median"] is None and r["tokens_p90"] is None and r["tokens_max"] is None and r["at_cap"] is None
+    assert r["s_per_q"] == 3.14 and r["s_per_q_from"] == "wall" and r["gen_s_per_q"] == 2.37
+    assert r["full_n"] == 5130 and r["projected_h"] == round(3.14 * 5130 / 3600, 2) == 4.47 and r["over_limit"]
+    assert r["base_same_n"] is None and r["base_same_tokens_mean"] is None and r["len_ratio"] is None
+    assert r["base_tokens_mean"] == 3.0 and r["base_h"] == 3.1
+    t = GL.table([r])
+    assert "| vsi_bench (log only) | 50 | 2.3 |" in t
+    assert all(line.count("|") == len(GL.COLUMNS) + 1 for line in t.splitlines())
+    other = qa / "mmsi_bench" / "n"
+    log(other, "a", 10.0, 20)  # a summary but no finished bar: nothing to count the questions by
+    assert GL.job_row(qa, "n", "mmsi_bench", base, "q38base")["missing"] == "no samples file"
 
 
 def test_missing(tmp_path):
