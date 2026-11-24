@@ -239,17 +239,124 @@ def test_progress_bar_total_wins(tmp_path):
     assert guard(run).check(T0)["total_steps"] == 3440
 
 
+def test_final_step_waits_for_the_last_save(tmp_path):
+    # the last step (3441) is no save step; the final full save, export, bf16 copy and chmod come after it
+    run = make_run(tmp_path, save_steps=500, total=3441)
+    add_steps(run, range(3420, 3442), t0=T0 - 3441 * 25.0 - 100 * 60)  # step 3441 ended 100 min ago
+    st = guard(run, "RUNNING").check(T0)
+    assert "throughput" not in st["alerts"], st["alerts"]
+    run2 = make_run(tmp_path / "b", save_steps=500, total=3441)
+    add_steps(run2, range(3420, 3442), t0=T0 - 3441 * 25.0 - 125 * 60)
+    assert "limit 120" in guard(run2, "RUNNING").check(T0)["alerts"]["throughput"]
+    run3 = make_run(tmp_path / "c", save_steps=500, total=3441)  # step 3440 is no final step: 30 min
+    add_steps(run3, range(3420, 3441), t0=T0 - 3440 * 25.0 - 40 * 60)
+    assert "limit 30" in guard(run3, "RUNNING").check(T0)["alerts"]["throughput"]
+    assert G.stall_limit(3441, 500, 3441) == G.FINAL_STALL_MIN and G.stall_limit(3000, 500, 3441) == 60.0
+
+
+def header(run, t):
+    with open(run / "logs" / "node0.log", "a") as f:
+        f.write(f"[q38s4 train] {iso(t)} host pt-x-master-0 node_rank 0 nnodes 8 commit abc\n")
+        f.write(f"[q38s4 train] {iso(t)} host pt-x-worker-0 node_rank 1 nnodes 8 commit abc\n")
+
+
+def train_begin(run, t):
+    with open(run / "sft_metrics" / "rank0.jsonl", "a") as f:
+        f.write(json.dumps({"event": "train_begin", "utc": iso(t), "rank": 0}) + "\n")
+
+
+def test_resume_is_a_new_attempt(tmp_path):
+    run = make_run(tmp_path, save_steps=500, total=3441)
+    t_old = T0 - 12 * 3600  # the old attempt stepped until about 3.7 h ago
+    header(run, t_old)
+    train_begin(run, t_old)
+    add_steps(run, range(1, 1201), t0=t_old, step_s=25.0, nfp=(0.5, 0.2))  # a bad head, then a crash at 1200
+    add_steps(run, [1200], loss="nan", t0=t_old, nfp=(0.5, 0.2))
+    save_ckpt(run, 1000)
+    hm = run / "sft_metrics" / "host_mem_sft-old.jsonl"
+    hm.write_text(json.dumps({"utc": iso(t_old), "mem": {"used_gb": 1700.0}}) + "\n")
+    start = T0 - 20 * 60  # the resubmitted job started 20 minutes ago and is still loading
+    g = guard(run, "RUNNING", iso(start))
+    st = g.check(T0)
+    assert set(st["alerts"]) >= {"nan", "head"}  # the old attempt's findings while only its log is there
+    header(run, start + 5)
+    st = g.check(T0)
+    assert "nan" not in st["alerts"] and "head" not in st["alerts"] and "throughput" not in st["alerts"]
+    assert "host_mem" not in st["alerts"] and st["attempts"] == 2, st["alerts"]
+    # no step yet: the first-step limit of a resume is 120 min, not 75
+    assert "throughput" not in guard(run, "RUNNING", iso(T0 - 100 * 60)).check(T0)["alerts"]
+    assert "limit 120" in guard(run, "RUNNING", iso(T0 - 125 * 60)).check(T0)["alerts"]["throughput"]
+    # the new attempt steps: train_begin clears the old step times; a slow first step alone does not fire
+    train_begin(run, T0 - 10 * 60)
+    add_steps(run, [1001], t0=T0 - 5 * 60 - 1001 * 400.0, step_s=400.0)
+    st = g.check(T0)
+    assert st["alerts"] == {} and st["last_step"] == 1001 and st["median_step_s_20"] == 400.0, st["alerts"]
+    add_steps(run, range(1002, 1022), t0=T0 - 5 * 60 - 1001 * 25.0)
+    st = g.check(T0)
+    assert st["alerts"] == {} and st["median_step_s_20"] == 25.0
+
+
+def test_old_step_events_do_not_stall_a_new_job(tmp_path):
+    run = make_run(tmp_path)
+    add_steps(run, range(1, 51), t0=T0 - 5 * 3600)  # an earlier job's steps, no header or train_begin
+    st = guard(run, "RUNNING", iso(T0 - 10 * 60)).check(T0)
+    assert "throughput" not in st["alerts"]
+
+
+def test_warnings_suspended_describe_and_log_lag(tmp_path):
+    run = make_run(tmp_path)
+    add_steps(run, range(1, 5))
+    st = guard(run, "SUSPENDED").check(T0)
+    assert not st["ended"] and st["alerts"] == {} and "SUSPENDED" in st["warnings"][0]
+    g = G.Guard(run, job="pt-x", describer=lambda j: {"state": None, "error": "timed out"})
+    for _ in range(G.DESCRIBE_WARN - 1):
+        assert g.check(T0)["warnings"] == []
+    assert "describe failed 5 passes" in g.check(T0)["warnings"][0]
+    with open(run / "sft_metrics" / "rank0.jsonl", "a") as f:  # rank 0 runs on, the log dicts do not come
+        for s in range(5, 30):
+            f.write(json.dumps({"event": "step", "step": s, "utc": iso(T0 - 60), "step_s": 25.0}) + "\n")
+    with open(run / "logs" / "node0.log", "a") as f:
+        f.write("{'loss': '1.0', 'grad_norm': '2.0'} no progress bar\n")
+    st = guard(run).check(T0)
+    assert any("rank 0 is at step 29" in w for w in st["warnings"]) and st["log_dicts_dropped"] == 1
+
+
+def test_bad_bf16_started_time_is_no_crash(tmp_path):
+    run = make_run(tmp_path, save_steps=10)
+    add_steps(run, range(1, 11))
+    save_ckpt(run, 10)
+    (run / "sft_metrics" / "bf16_copies.json").write_text(json.dumps(
+        [{"checkpoint": str(run / "ckpt" / "checkpoint-10"), "log": "x", "started": "soon", "exit_status": None}]))
+    assert guard(run).check(T0)["alerts"] == {}
+
+
 # ------------------------------------------------------------------------------------------------ stop + watch
 class Runner:
-    def __init__(self):
-        self.calls = []
+    def __init__(self, rcs=(0,)):
+        self.calls, self.rcs = [], list(rcs)
 
     def __call__(self, cmd, **kw):
         self.calls.append(cmd)
+        rc = self.rcs.pop(0) if self.rcs else 0
 
         class R:
-            returncode, stdout, stderr = 0, "stopped", ""
+            returncode, stdout, stderr = rc, "stopped" if rc == 0 else "", "" if rc == 0 else "error"
         return R()
+
+
+class Desc:
+    """Answers describe with the given states in turn (the last one repeats)."""
+
+    def __init__(self, *states, name="q38s4-train-nfp-c_nfp"):
+        self.states, self.name, self.n = list(states), name, 0
+
+    def __call__(self, job):
+        s = self.states[min(self.n, len(self.states) - 1)]
+        self.n += 1
+        return {"state": s, "display_name": self.name}
+
+
+STOP = [G.SCO, "acp", "jobs", "stop", "--workspace-name=aigc", "pt-x"]
 
 
 @pytest.mark.parametrize("state, name, stops", [("RUNNING", "q38s4-train-nfp-c_nfp", True),
@@ -257,15 +364,42 @@ class Runner:
                                                 ("RUNNING", "someone-else", False)])
 def test_stop_job_describes_again(state, name, stops):
     r = Runner()
-    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", lambda j: {"state": state, "display_name": name}, r)
+    desc = Desc(state, "STOPPED", name=name)
+    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", desc, r, sleep=lambda s: None)
     assert rec["stopped"] is stops
-    assert (r.calls == [[G.SCO, "acp", "jobs", "stop", "--workspace-name=aigc", "pt-x"]]) is stops
+    assert (r.calls == [STOP]) is stops  # `sco acp jobs stop --workspace-name=aigc <jobid>` (its --help)
+    if stops:
+        assert rec["state_after"] == "STOPPED" and rec["tries"][0]["rc"] == 0
 
 
 def test_stop_job_needs_a_name():
     r = Runner()
-    rec = G.stop_job("pt-x", None, lambda j: {"state": "RUNNING", "display_name": "x"}, r)
+    rec = G.stop_job("pt-x", None, Desc("RUNNING", name="x"), r, sleep=lambda s: None)
     assert rec["stopped"] is False and r.calls == []
+
+
+def test_stop_job_retries_and_verifies():
+    slept = []
+    r = Runner(rcs=(1, 1, 0))
+    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", Desc("RUNNING", "RUNNING", "RUNNING", "RUNNING", "STOPPED"), r,
+                     sleep=slept.append, wait_s=30.0)
+    assert rec["stopped"] is True and r.calls == [STOP] * 3 and [t["rc"] for t in rec["tries"]] == [1, 1, 0]
+    assert slept == [30.0, 60.0, 30.0, 30.0]
+    # sco says 0 but the job stays RUNNING: not stopped, and said so
+    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", Desc("RUNNING"), Runner(), sleep=lambda s: None, verify=3)
+    assert rec["stopped"] is False and "has not left RUNNING" in rec["why"]
+    # every try fails
+    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", Desc("RUNNING"), Runner(rcs=(1, 1, 1)), sleep=lambda s: None)
+    assert rec["stopped"] is False and len(rec["tries"]) == 3 and "did not succeed" in rec["why"]
+    # the job ends by itself between two tries: no further stop
+    r = Runner(rcs=(1,))
+    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", Desc("RUNNING", "FAILED"), r, sleep=lambda s: None)
+    assert r.calls == [STOP] and rec["state_after"] == "FAILED"
+
+    def slow(cmd, **kw):
+        raise G.subprocess.TimeoutExpired(cmd, 180)
+    rec = G.stop_job("pt-x", "q38s4-train-nfp-c_nfp", Desc("RUNNING"), slow, sleep=lambda s: None)
+    assert rec["stopped"] is False and rec["tries"][0]["out"] == "sco stop timed out"
 
 
 def test_watch_alert_stops(tmp_path, monkeypatch):
@@ -279,6 +413,19 @@ def test_watch_alert_stops(tmp_path, monkeypatch):
     alert = json.loads((tmp_path / "out" / "ALERT.json").read_text())
     assert "nan" in alert["alerts"] and alert["stop"] == {"stopped": True}
     assert (tmp_path / "out" / "status.json").is_file() and (tmp_path / "out" / "guard.jsonl").is_file()
+
+
+def test_watch_writes_the_alert_before_stopping(tmp_path, monkeypatch):
+    run = make_run(tmp_path)
+    add_steps(run, [1], loss="nan")
+    seen = []
+
+    def stop(job, name, desc):
+        seen.append(json.loads((tmp_path / "out" / "ALERT.json").read_text())["stop"])
+        return {"stopped": False}
+    monkeypatch.setattr(G, "stop_job", stop)
+    rc, st = G.watch(guard(run, "RUNNING", iso(T0)), tmp_path / "out", 1, True, "n", sleep=lambda s: None)
+    assert rc == 1 and seen == ["pending"]
 
 
 def test_watch_without_stop_only_reports(tmp_path, monkeypatch):
@@ -302,24 +449,30 @@ def test_watch_end_and_passes(tmp_path):
     assert rc == 0 and slept == [7, 7] and len((tmp_path / "o2" / "guard.jsonl").read_text().splitlines()) == 3
 
 
-def test_watch_survives_bad_passes_then_gives_up(tmp_path):
-    class Bad:
-        job = "pt-x"
-        describer = None
+class Bad:
+    job = "pt-x"
+    describer = None
 
-        def __init__(self, fails):
-            self.n, self.fails = 0, fails
+    def __init__(self, fails):
+        self.n, self.fails = 0, fails
 
-        def check(self):
-            self.n += 1
-            if self.n <= self.fails:
-                raise OSError("stale file handle")
-            return {"alerts": {}, "ended": True}
+    def check(self):
+        self.n += 1
+        if self.n <= self.fails:
+            raise OSError("stale file handle")
+        return {"alerts": {}, "ended": True}
 
+
+def test_watch_keeps_going_through_bad_passes(tmp_path):
     rc, st = G.watch(Bad(2), tmp_path / "a", 1, True, "n", sleep=lambda s: None)
     assert rc == 0 and not (tmp_path / "a" / "GUARD_ERROR.json").exists()
-    rc, st = G.watch(Bad(99), tmp_path / "b", 1, True, "n", sleep=lambda s: None)
-    assert rc == 2 and st["fails_in_a_row"] == G.GUARD_FAILS and (tmp_path / "b" / "GUARD_ERROR.json").is_file()
+    slept = []
+    rc, st = G.watch(Bad(99), tmp_path / "b", 100, True, "n", sleep=slept.append, max_passes=8)
+    assert rc == 0 and st["fails_in_a_row"] == 8 and (tmp_path / "b" / "GUARD_ERROR.json").is_file()
+    assert slept == [100, 200, 400, 800, 800, 800, 800]  # growing pause, capped at 8 x interval (<= 900 s)
+    rc, st = G.watch(Bad(6), tmp_path / "c", 1, True, "n", sleep=lambda s: None)
+    assert rc == 0 and st == {"alerts": {}, "ended": True}
+    assert not (tmp_path / "c" / "GUARD_ERROR.json").exists() and list((tmp_path / "c").glob("GUARD_ERROR_*.json"))
 
 
 def test_describe_tolerates_bad_output():
@@ -338,3 +491,56 @@ def test_describe_tolerates_bad_output():
     def slow(cmd, **kw):
         raise G.subprocess.TimeoutExpired(cmd, 120)
     assert G.describe("pt-x", slow)["state"] is None
+
+    def gone(cmd, **kw):
+        raise FileNotFoundError("sco")
+    assert "sco describe" in G.describe("pt-x", gone)["error"]
+
+
+def test_run_sco_kills_the_whole_group_on_timeout(tmp_path):
+    pidfile = tmp_path / "child.pid"
+    cmd = ["bash", "-c", f"sleep 60 & echo $! > {pidfile}; wait"]
+    with pytest.raises(G.subprocess.TimeoutExpired):
+        G.run_sco(cmd, timeout=2)
+    pid = int(pidfile.read_text())
+    import time
+
+    def alive():
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return False
+        return stat.rsplit(")", 1)[1].split()[0] != "Z"  # a killed child not yet reaped is a zombie
+    for _ in range(50):
+        if not alive():
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("the background child of the timed-out command is still alive")
+    assert G.run_sco(["bash", "-c", "echo hi"], timeout=10).stdout == "hi\n"
+
+
+# ------------------------------------------------------------------------------------------------ run / job tie
+def write_submits(run, recs):
+    with open(run / "submits.jsonl", "a") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+
+
+def test_submitted_jobs_and_the_watch_tie(tmp_path, monkeypatch):
+    run = make_run(tmp_path)
+    write_submits(run, [
+        {"utc": "x", "job_name": "q38s4-train-nfp-c_nfp", "rc": 0,
+         "stdout": "job pt-aaa submitted successfully, please wait for scheduling!\njob id : pt-aaa \n"},
+        {"utc": "y", "job_name": "q38s4-train-nfp-c_nfp", "rc": 1, "stdout": "job id : pt-bad \n"},
+    ])
+    assert G.submitted_jobs(run) == {"pt-aaa": "q38s4-train-nfp-c_nfp"}
+    got = {}
+    monkeypatch.setattr(G, "watch", lambda g, out, iv, stop, name: got.update(job=g.job, name=name) or (0, {}))
+    with pytest.raises(SystemExit) as e:
+        G.main(["watch", "--run", str(run), "--job", "pt-aaa", "--out", str(tmp_path / "o"), "--stop"])
+    assert e.value.code == 0 and got == {"job": "pt-aaa", "name": "q38s4-train-nfp-c_nfp"}
+    for argv in (["--job", "pt-other"], ["--job", "pt-bad"], ["--job", "pt-aaa", "--job-name", "q38s4-train-nonfp-c_nfp"]):
+        with pytest.raises(SystemExit) as e:
+            G.main(["watch", "--run", str(run), "--out", str(tmp_path / "o"), "--stop", *argv])
+        assert e.value.code == 2  # argparse's error
