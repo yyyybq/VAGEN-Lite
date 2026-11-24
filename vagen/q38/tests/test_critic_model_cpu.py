@@ -282,10 +282,13 @@ def test_packed_episodes_without_cu_seqlens_mix(cpu_gdn, episodes, monkeypatch):
 
 
 def test_load_valuehead_model_asks_for_flash_attention_2():
-    """verl's critic loader passes attn_implementation="flash_attention_2" to from_pretrained (utils/model.py:645-651),
-    which wins over the config's override_config: the 27B critic would run FA2 where the actor runs eager (layout
-    file, the user 11-17).  Pinned here: phase 3 open question (accept, or a verl patch)."""
+    """verl's critic loader passes attn_implementation="flash_attention_2" to from_pretrained (utils/model.py:694-700),
+    which wins over the config's override_config: the 27B critic runs FA2 where the actor runs eager (layout file, the
+    user 11-17; PORT_P23 item 10: kept and registered).  Pinned here, with PORT_P23 item 9's from_config build of the
+    ranks under init_empty_weights (utils/model.py:668-673) asking for the same: 3 = token classification
+    from_config / from_pretrained, TRL fallback."""
     from verl.utils import model as vm
 
     src = inspect.getsource(vm.load_valuehead_model)
-    assert src.count('attn_implementation="flash_attention_2"') == 2, src
+    assert src.count('attn_implementation="flash_attention_2"') == 3, src
+    assert "AutoModelForTokenClassification.from_config(" in src, src
