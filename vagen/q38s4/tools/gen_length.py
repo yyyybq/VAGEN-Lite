@@ -25,10 +25,11 @@ count; generation-only when a log has no finished bar) and the base's own (its l
 projection is over the 3-hour line (PROJECT_LIMIT_H).  Loading and scoring (minutes) are in neither.  summary_tokens is the Metric summary's token total (a cross-check of the samples
 files' sum).
 
-A job whose scoring failed after generation (vsi_bench at --limit 50: the first 50 questions lack some question
-types and its aggregation raises KeyError) has no samples file; when its log has a Metric summary and a finished
-bar, its row is "log only" (source): n from the bar, the mean from the summary's tokens over n, no per-question
-statistics and no same-question base mean.
+A job with no samples file after generation (lmms-eval writes them only after aggregation, so: its scoring failed --
+vsi_bench at --limit 50, whose first 50 questions lack some question types, raises KeyError there -- or it is still
+scoring, or it was stopped while scoring) is "log only" (source) when its log has a Metric summary and a finished
+bar: n from the bar, the mean from the summary's tokens over n, no per-question statistics and no same-question base
+mean.  The row does not say which of these it was; the job's log does.
 """
 from __future__ import annotations
 
@@ -52,7 +53,8 @@ SUMMARY = re.compile(r"Total elapsed time: ([0-9.]+)s, Total gen tokens: ([0-9]+
 BAR = re.compile(r"Model Responding: 100%\|[^|]*\| (\d+)/(\d+) \[([0-9:]+)<")
 FIRST = re.compile(r"Model Responding:\s+\d+%\|[^|]*\| 1/(\d+) \[([0-9:]+)<")
 SEP = "_samples_"
-LOG_ONLY = "log only: no samples file (scoring failed after generation), mean from the Metric summary over the bar's n"
+LOG_ONLY = ("log only: no samples file after generation (scoring failed, unfinished or stopped; see the job log), "
+            "mean from the Metric summary over the bar's n")
 
 
 def stamp_of(p: Path) -> str:
