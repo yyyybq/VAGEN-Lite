@@ -182,7 +182,9 @@ q38 (the Qwen3.8-27B rerun line, DESIGN_ASYNC questions 1, 4 and 6, the user's O
 (default 1; job_sco.SPECS) is the cards of every action evaluation job (the evaluate step's and those of eval
 "stop_invalid"), 2 for the 27B model: the job script keeps card 0 for the render service and gives vLLM the others
 (VAGEN_LITE_EVAL_CARDS).  QA evaluation jobs keep one card (qa_eval runs easi_eval on the first visible card),
-unless plan "qa_eval" "cards" gives an EASI benchmark more (qa_jobs; the 27B model's SITE video OOMed on one card).  The
+unless plan "qa_eval" "cards" gives an EASI benchmark more (qa_jobs; the 27B model's SITE video OOMed on one card);
+plan "qa_eval" "no_stack_dump" (2026-11-22, off unless given) runs the EASI benchmarks it names without qa_eval's
+stack-dump thread (C0 e5's mmsi_bench and 3dsrbench children died of SIGSEGV during the dump).  The
 plan's "model_type" "qwen3_5" (vagen/models/model_types.py) gives the jobs the q38 environment (TRAIN_ENV_ROOT and the
 V1 entry module) the way every model type gives its own (job_env); the job script adds the CUDA 13
 forward-compatibility libraries by itself on a node whose driver is older than 580.  A failed
@@ -1140,7 +1142,10 @@ class Chain:
         job is as before.  q38 (2026-11-20; off unless given; EXPLORATORY, the user's OK for the 27B base model):
         "probe_variants" {VARIANT: {"max_tokens": N}} (probe_variants) adds, beside the main probe, one job a probe
         model "qa_<VARIANT>__<name>" -- the main probe's arguments and --max-tokens N (qa_eval probe, qa_probe run),
-        one card, results out/<VARIANT>/<name>, so a variant never writes to or mixes into out/probe."""
+        one card, results out/<VARIANT>/<name>, so a variant never writes to or mixes into out/probe.  q38
+        (2026-11-22, user OK; off unless given): "no_stack_dump" [EASI benchmark, ...] (qa_no_stack_dump) appends
+        --no-stack-dump to those benchmarks' jobs' arguments (qa_eval easi without the stack-dump thread: C0 e5's
+        mmsi_bench and 3dsrbench children died of SIGSEGV during the 15-min dump); every other job is as before."""
         qa = self.plan.get("qa_eval")
         if not qa:
             return {}
@@ -1163,6 +1168,7 @@ class Chain:
         if unknown or missing:
             raise ChainError(f"qa_eval: benchmarks not in EASI-8 {unknown}; models the evaluate step lacks {missing}")
         cards = self.qa_cards(benchmarks)  # q38: {benchmark: cards > 1}; empty without plan qa_eval "cards"
+        no_dump = self.qa_no_stack_dump(benchmarks)  # q38: empty without plan qa_eval "no_stack_dump"
         variants = self.probe_variants()  # q38: {variant: {"max_tokens": N}}; empty without qa_eval "probe_variants"
         kind = str(self.plan.get("model_type") or "qwen2_5_vl")
         out = Path(qa["out"])
@@ -1174,6 +1180,9 @@ class Chain:
             b = job[0].name
             if b in cards:
                 jobs[name] = (*job[:4], [*job[4], "--cards", str(cards[b])], "qa", cards[b])
+        for name, job in jobs.items():  # q38: the benchmarks without the stack-dump thread (none without the key)
+            if job[0].name in no_dump:
+                jobs[name] = (*job[:4], [*job[4], "--no-stack-dump"], *job[5:])
         if qa.get("p0"):
             jobs.update({f"qa_p0__{n}": (out / "p0", n, models[n][0], None,
                                          ["p0", "--selection", str(qa["p0"]), "--res", str(qa.get("p0_res", 256)),
@@ -1229,6 +1238,21 @@ class Chain:
             raise ChainError(f"qa_eval cards: {bad} -- each key one of this plan's EASI benchmarks {list(benchmarks)}, "
                              f"each value one of {sorted(job_sco.SPECS)}")
         return {b: c for b, c in given.items() if c > 1}
+
+    def qa_no_stack_dump(self, benchmarks: Sequence[str]) -> List[str]:
+        """q38 (2026-11-22, user OK): plan "qa_eval" "no_stack_dump" [EASI benchmark, ...], the benchmarks whose jobs
+        run qa_eval easi --no-stack-dump (no faulthandler stack-dump thread); each must be one of qa_jobs' EASI
+        benchmarks.  Empty without the key (every QA job as before)."""
+        given = (self.plan.get("qa_eval") or {}).get("no_stack_dump")
+        if given is None or given == []:
+            return []
+        if not isinstance(given, list) or not all(isinstance(b, str) for b in given):
+            raise ChainError(f"qa_eval no_stack_dump must be a list of EASI benchmarks, not {given!r}")
+        bad = [b for b in given if b not in benchmarks]
+        if bad:
+            raise ChainError(f"qa_eval no_stack_dump: {bad} -- each one of this plan's EASI benchmarks "
+                             f"{list(benchmarks)}")
+        return list(dict.fromkeys(given))
 
     def external_renderer_state(self, name: str, run_dir: Path, info: Dict[str, Any]) -> Dict[str, Any]:
         """Round 12 freeze (the user's decision of 2026-10-24): a render service outside sco (renderer_external.json),
