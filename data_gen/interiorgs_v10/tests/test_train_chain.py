@@ -2995,5 +2995,386 @@ class Q38GuardTest(unittest.TestCase):
                           T.guard_reason("".join(line(s, 0.25 if s < 3 else 0.31) for s in range(1, 8)), guards))
 
 
+class Q38TurnCreditKeysTest(unittest.TestCase):
+    """q38 p2 (PORT_P23 item 8): plan rl "turn_credit" (JSON) and "table_near" (a flag) reach rl-config as the reward
+    line passes them (YQ5, rw_p3n_s2tcswf3c: after --save-freq); a plan without them gives the command it gave before;
+    a bad type stops the step before any rl-config runs."""
+
+    XIN_TC = {"episode_weight": 0, "baseline": "none", "phi_version": "success_table",
+              "phi_table": "/tables/phi_success/success_table_tcn3_v1.json", "unreadable_as_wrong": True,
+              "unreadable_floor": -0.3}
+
+    def xin_plan(self, tmp, **run_rl):
+        """辛's plan shape (YQ5's rl and rl_runs, q38's start model and model type, the e3 template at plan level)."""
+        rl = {"progress_version": "optimal", "distance_tables": "/tables/b3000", "turn_credit": dict(self.XIN_TC),
+              "table_near": True, "group_filter": "nominal", "target_groups": 24, "history_mode": "concat",
+              "save_freq": 50, "no_internal_val": True, "opt_package": "p1"}
+        rl.update(run_rl)
+        return {"tr": tmp, "sft_dir": str(Path(tmp) / "sft"), "endpoint": 320, "gs_root": "/ply",
+                "model_type": "qwen3_5", "rl_start_model": "/c0/checkpoint-770", "rl_name": "q38_t",
+                "ppo_template": "/tpl/ppo_template_e3.yaml", "sft_groups": {"q3formal": "sft_trajectories.jsonl"},
+                "rl": {"seed": 20261019, "task_pool": "reserve", "rows": "/rows_b3000.jsonl", "exclude": "/depth.json",
+                       "format_example": "action_names"},
+                "rl_runs": {"tcswf3c": {"rl": rl, "reward_preset": "S0"}}}
+
+    @staticmethod
+    def commands(plan):
+        chain = T.Chain(plan, sleep=lambda s: None)
+        calls = []
+        chain.sh = lambda args, **k: calls.append(list(args))
+        chain.rl_config()
+        return calls
+
+    @staticmethod
+    def parsed(args):
+        """rl-config's own argument parser on the chain's command (cmd_rl_config itself not run)."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import training_prep
+
+        got = []
+        with mock.patch.object(training_prep, "cmd_rl_config", side_effect=got.append):
+            training_prep.main(args[3:])
+        return got[0]
+
+    def test_xin_keys_reach_rl_config(self):
+        import sys
+
+        from data_gen.interiorgs_v10 import training_prep
+
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = self.commands(self.xin_plan(tmp))
+            self.assertEqual(len(calls), 1)
+            args = calls[0]
+            # the whole command, in YQ5's order (logs/rl_config_rw_s2tcswf3c.log), with q38's model and model type
+            self.assertEqual(args, [
+                sys.executable, "-m", "data_gen.interiorgs_v10.training_prep", "rl-config",
+                "--rows", "/rows_b3000.jsonl", "--gs-root", "/ply", "--model", "/c0/checkpoint-770",
+                "--name", "q38_t_tcswf3c", "--run-root", str(Path(tmp) / "rl_run_tcswf3c"), "--val-limit", "64",
+                "--out", str(Path(tmp) / "rl_tcswf3c"), "--ppo-template", "/tpl/ppo_template_e3.yaml",
+                "--seed", "20261019", "--history-mode", "concat", "--format-example", "action_names",
+                "--group-filter", "nominal", "--progress-version", "optimal", "--distance-tables", "/tables/b3000",
+                "--save-freq", "50", "--turn-credit", json.dumps(self.XIN_TC), "--table-near", "--no-internal-val",
+                "--model-type", "qwen3_5", "--reward-preset", "S0", "--task-pool", "reserve",
+                "--sft-trajectories", str(Path(tmp) / "sft" / "sft_trajectories.jsonl"), "--exclude", "/depth.json",
+                "--opt-package", "p1", "--target-groups", "24"])
+            given = json.loads(args[args.index("--turn-credit") + 1])
+            self.assertEqual(given, self.XIN_TC)
+            self.assertEqual(list(given), list(self.XIN_TC))  # the plan's key order (the reward line's json.dumps)
+            self.assertEqual(args.count("--table-near"), 1)
+            self.assertNotIn("--stack", args)  # rl-config picks q38 from the model type
+            # rl-config's parser reads them; the q38 option check accepts 辛's command (Q5 PT: nominal + 24 groups)
+            ns = self.parsed(args)
+            self.assertEqual((json.loads(ns.turn_credit), ns.table_near, ns.group_filter, ns.target_groups),
+                             (self.XIN_TC, True, "nominal", 24))
+            self.assertIn(ns.model_type, training_prep.Q38_STACK_TYPES)
+            self.assertIsNone(ns.stack)
+            training_prep.q38_check_options(ns)
+            # the same keys in the plan's rl (one legacy run) and table_near alone (the reward line's phase 2)
+            plan = self.xin_plan(tmp)
+            plan["rl"].update(plan.pop("rl_runs")["tcswf3c"]["rl"])
+            args = self.commands(plan)[0]
+            self.assertEqual(json.loads(args[args.index("--turn-credit") + 1]), self.XIN_TC)
+            self.assertIn("--table-near", args)
+            args = self.commands(self.xin_plan(tmp, turn_credit=None, group_filter=None))[0]
+            self.assertNotIn("--turn-credit", args)
+            self.assertEqual(args[args.index("--save-freq"):args.index("--save-freq") + 4],
+                             ["--save-freq", "50", "--table-near", "--no-internal-val"])
+
+    def test_turn_credit_keys_checked_by_rl_config(self):
+        """Unknown keys still fail loudly: an unknown turn_credit key is refused by the settings rl-config reads it
+        with; a misspelt "turn_credit" is not passed (as any rl key the chain does not know) and rl-config's q38 check
+        then refuses 辛's nominal group filter without --turn-credit."""
+        import torch
+
+        torch.set_num_threads(1)
+        from vagen.turn_credit import settings
+
+        from data_gen.interiorgs_v10 import training_prep
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = self.commands(self.xin_plan(tmp))[0]
+            ok = settings({"turn_credit": json.loads(args[args.index("--turn-credit") + 1])})
+            self.assertEqual((ok["phi_version"], ok["baseline"], ok["unreadable_floor"]), ("success_table", "none", -0.3))
+            args = self.commands(self.xin_plan(tmp, turn_credit=dict(self.XIN_TC, phi_versoin="table")))[0]
+            with self.assertRaisesRegex(ValueError, "unknown turn_credit settings"):
+                settings({"turn_credit": json.loads(args[args.index("--turn-credit") + 1])})
+            plan = self.xin_plan(tmp)
+            run = plan["rl_runs"]["tcswf3c"]["rl"]
+            run["turn_credits"] = run.pop("turn_credit")
+            args = self.commands(plan)[0]
+            self.assertNotIn("--turn-credit", args)
+            with self.assertRaisesRegex(SystemExit, "goes with --turn-credit"):
+                training_prep.q38_check_options(self.parsed(args))
+
+    def test_absent_keys_give_the_same_command(self):
+        """A plan without the keys (the q38 main-line plans' shape): the command the chain gave before the change,
+        written out in full; null / false values give the same command."""
+        import sys
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = {"tr": tmp, "sft_dir": "/sft", "endpoint": 705, "gs_root": "/ply", "model_type": "qwen3_5",
+                    "rl_start_model": "/c0/checkpoint-770", "rl_name": "q38_rl_s1",
+                    "sft_groups": {"q38c0": "sft_trajectories.jsonl"},
+                    "rl": {"standard": "v10_p1_S0", "seed": 20261019, "task_pool": "reserve", "rows": "/rows.jsonl",
+                           "exclude": "/depth.json", "format_example": "action_names"},
+                    "rl_runs": {"q38s0s1": {"rl": {"standard": "v10_p1_S0", "seed": 20261019}},
+                                "q38v4s1": {"rl": {"standard": "v10_p1_Dcond", "group_filter": "keep_by_return_std",
+                                                   "keep_std_threshold": 0.3318, "keep_std_floor": 1.0,
+                                                   "progress_reward_scale": 3.3333333333333335, "seed": 20261019}}}}
+            head = [sys.executable, "-m", "data_gen.interiorgs_v10.training_prep", "rl-config", "--rows", "/rows.jsonl",
+                    "--gs-root", "/ply", "--model", "/c0/checkpoint-770"]
+            tail = ["--model-type", "qwen3_5", "--task-pool", "reserve", "--sft-trajectories", "/sft/sft_trajectories.jsonl",
+                    "--exclude", "/depth.json"]
+            want = [
+                head + ["--name", "q38_rl_s1_q38s0s1", "--run-root", str(Path(tmp) / "rl_run_q38s0s1"), "--val-limit", "64",
+                        "--out", str(Path(tmp) / "rl_q38s0s1"), "--standard", "v10_p1_S0", "--seed", "20261019",
+                        "--format-example", "action_names"] + tail,
+                head + ["--name", "q38_rl_s1_q38v4s1", "--run-root", str(Path(tmp) / "rl_run_q38v4s1"), "--val-limit", "64",
+                        "--out", str(Path(tmp) / "rl_q38v4s1"), "--standard", "v10_p1_Dcond", "--seed", "20261019",
+                        "--format-example", "action_names", "--group-filter", "keep_by_return_std",
+                        "--keep-std-threshold", "0.3318", "--keep-std-floor", "1.0",
+                        "--progress-reward-scale", "3.3333333333333335"] + tail]
+            self.assertEqual(self.commands(json.loads(json.dumps(plan))), want)
+            for extra in ({"turn_credit": None}, {"table_near": False}, {"turn_credit": None, "table_near": None}):
+                p = json.loads(json.dumps(plan))
+                for spec in p["rl_runs"].values():
+                    spec["rl"].update(extra)
+                self.assertEqual(self.commands(p), want, extra)
+            p = json.loads(json.dumps(plan))
+            p["rl"]["table_near"] = False
+            self.assertEqual(self.commands(p), want)
+
+    def test_bad_types_refused(self):
+        """A turn_credit that is not a non-empty JSON object, or a table_near that is not true / false, stops the
+        rl_config step before any rl-config runs (rl-config would otherwise take "x", [] or {} as the defaults)."""
+        bad = [({"turn_credit": "x"}, "turn_credit must be a non-empty JSON object"),
+               ({"turn_credit": []}, "turn_credit must be a non-empty JSON object"),
+               ({"turn_credit": {}}, "turn_credit must be a non-empty JSON object"),
+               ({"turn_credit": [["baseline", "none"]]}, "turn_credit must be a non-empty JSON object"),
+               ({"turn_credit": 0}, "turn_credit must be a non-empty JSON object"),
+               ({"turn_credit": True}, "turn_credit must be a non-empty JSON object"),
+               ({"table_near": "yes"}, "table_near must be true or false"),
+               ({"table_near": "false"}, "table_near must be true or false"),
+               ({"table_near": 1}, "table_near must be true or false"),
+               ({"table_near": 0}, "table_near must be true or false")]
+        with tempfile.TemporaryDirectory() as tmp:
+            for extra, msg in bad:
+                plan = self.xin_plan(tmp)
+                plan["rl_runs"] = {"a_ok": {"rl": dict(plan["rl_runs"]["tcswf3c"]["rl"]), "reward_preset": "S0"},
+                                   "b_bad": {"rl": dict(plan["rl_runs"]["tcswf3c"]["rl"], **extra), "reward_preset": "S0"}}
+                chain = T.Chain(plan, sleep=lambda s: None)
+                calls = []
+                chain.sh = lambda args, **k: calls.append(args)
+                with self.assertRaisesRegex(T.ChainError, msg):
+                    chain.rl_config()
+                self.assertEqual(calls, [], extra)  # the good run's rl-config did not run either
+
+    def test_p0_qa_runs_refuse_the_keys(self):
+        """turn_credit / table_near on a p0_qa run (qa_rl's rl-config has neither option) stop the step before any
+        rl-config runs, given in the run's rl or in the plan's rl; null / false, or no keys, give the command the
+        p0_qa runs got before (test_qa_rl_runs' plan)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = {"tr": tmp, "sft_dir": tmp, "endpoint": 50, "gs_root": "/ply", "retries": 2, "pool": "h800",
+                    "rl_start_model": str(root / "start"),
+                    "rl": {"env": "p0_qa", "rows": str(root / "rows.jsonl"), "val_rows": str(root / "val.jsonl"),
+                           "candidates": 64, "target_groups": 32, "response_length": 256},
+                    "rl_runs": {"s1": {"rl": {"seed": 20261019}}, "s2": {"rl": {"seed": 20261021}}}}
+            want = self.commands(json.loads(json.dumps(plan)))
+            self.assertEqual([a[1:4] for a in want], [["-m", "data_gen.interiorgs_v10.qa_rl", "rl-config"]] * 2)
+            for a in want:
+                self.assertFalse({"--turn-credit", "--table-near"} & set(a))
+            for extra in ({"turn_credit": None}, {"table_near": False}, {"turn_credit": None, "table_near": None}):
+                p = json.loads(json.dumps(plan))
+                p["rl_runs"]["s2"]["rl"].update(extra)
+                self.assertEqual(self.commands(p), want, extra)
+            for where, extra, msg in (("s2", {"turn_credit": dict(self.XIN_TC)}, "turn_credit on the p0_qa run 's2'"),
+                                      ("s2", {"table_near": True}, "table_near on the p0_qa run 's2'"),
+                                      ("s2", {"turn_credit": dict(self.XIN_TC), "table_near": True},
+                                       "turn_credit / table_near on the p0_qa run 's2'"),
+                                      ("plan", {"table_near": True}, "table_near on the p0_qa run 's1'")):
+                p = json.loads(json.dumps(plan))
+                (p["rl"] if where == "plan" else p["rl_runs"][where]["rl"]).update(extra)
+                chain = T.Chain(p, sleep=lambda s: None)
+                calls = []
+                chain.sh = lambda args, **k: calls.append(args)
+                with self.assertRaisesRegex(T.ChainError, msg):
+                    chain.rl_config()
+                self.assertEqual(calls, [], extra)  # s1's rl-config did not run either
+            # a bad type on a p0_qa run is still the type error
+            p = json.loads(json.dumps(plan))
+            p["rl_runs"]["s1"]["rl"]["turn_credit"] = {}
+            with self.assertRaisesRegex(T.ChainError, "turn_credit must be a non-empty JSON object"):
+                self.commands(p)
+
+    def test_hold_checkpoints_refused(self):
+        """Plan "hold_checkpoints" (the reward line's, YQ5: [160]) has no code in this train_chain: rl_config stops
+        before any rl-config runs, and the PPO steps (rl_runs and the one-run plan) before any sco call, for a chain
+        resumed past rl_config; null / [] or no key give the same command and reach the PPO submit."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        def no_sco(*a, **k):
+            raise AssertionError("sco called")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            want = self.commands(self.xin_plan(tmp))
+            for value in (None, []):
+                self.assertEqual(self.commands(dict(self.xin_plan(tmp), hold_checkpoints=value)), want, value)
+            for value in ([160], [160, 320], 160):
+                plan = dict(self.xin_plan(tmp), hold_checkpoints=value)
+                chain = T.Chain(plan, sleep=lambda s: None)
+                calls = []
+                chain.sh = lambda args, **k: calls.append(args)
+                with self.assertRaisesRegex(T.ChainError, "hold_checkpoints .* is the reward line's"):
+                    chain.rl_config()
+                self.assertEqual(calls, [], value)
+                one_run = dict(plan)
+                one_run.pop("rl_runs")
+                for p in (plan, one_run):
+                    chain = T.Chain(p, sleep=lambda s: None)
+                    with mock.patch.multiple(job_sco, prepare=no_sco, submit=no_sco, status=no_sco, delete=no_sco):
+                        with self.assertRaisesRegex(T.ChainError, "hold_checkpoints .* is the reward line's"):
+                            chain.rl()
+            # without the key the PPO step goes on to the sco calls (stubbed: the first prepare stops it)
+            chain = T.Chain(self.xin_plan(tmp), sleep=lambda s: None)
+            with mock.patch.multiple(job_sco, prepare=no_sco, submit=no_sco, status=no_sco, delete=no_sco):
+                with self.assertRaisesRegex(AssertionError, "sco called"):
+                    chain.rl()
+
+
+class Q38EndpointRaceKeysTest(unittest.TestCase):
+    """q38 p2 (PORT_P23 item 8, recheck): plan "endpoint_race_fix" / "endpoint_race_grace_min" (61ce6655's switch,
+    read by Chain.endpoint_done and _ppo_runs) are checked before anything runs or is submitted: the switch is read by
+    truthiness, so the string "false" would switch it on; the grace by float(plan.get(key, 15)).  The single-run PPO
+    path (Chain._ppo: rl without rl_runs, rl_extend's extend_to) does not read the switch, so a true one stops there."""
+
+    XIN_TC = Q38TurnCreditKeysTest.XIN_TC
+    xin_plan = Q38TurnCreditKeysTest.xin_plan
+    commands = staticmethod(Q38TurnCreditKeysTest.commands)
+
+    FIX_MSG = "plan endpoint_race_fix must be true or false, not "
+    GRACE_MSG = "plan endpoint_race_grace_min must be a number of minutes >= 0"
+    NULL_MSG = "plan endpoint_race_grace_min null with endpoint_race_fix true"
+    BAD = [({"endpoint_race_fix": "false"}, FIX_MSG + "'false'"),
+           ({"endpoint_race_fix": "true"}, FIX_MSG + "'true'"),
+           ({"endpoint_race_fix": 0}, FIX_MSG + "0"),
+           ({"endpoint_race_fix": 1}, FIX_MSG + "1"),
+           ({"endpoint_race_fix": [True]}, FIX_MSG + "[True]"),
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": True}, GRACE_MSG),
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": False}, GRACE_MSG),
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": -1}, GRACE_MSG),
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": -0.5}, GRACE_MSG),
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": "15"}, GRACE_MSG),
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": float("nan")}, GRACE_MSG),
+           ({"endpoint_race_grace_min": -1}, GRACE_MSG),  # a bad grace is refused with the switch off too
+           ({"endpoint_race_fix": True, "endpoint_race_grace_min": None}, NULL_MSG)]
+    GOOD = [{}, {"endpoint_race_fix": None}, {"endpoint_race_fix": False}, {"endpoint_race_grace_min": None},
+            {"endpoint_race_fix": None, "endpoint_race_grace_min": None},
+            {"endpoint_race_fix": False, "endpoint_race_grace_min": None},
+            {"endpoint_race_fix": True}, {"endpoint_race_fix": True, "endpoint_race_grace_min": 15},
+            {"endpoint_race_fix": True, "endpoint_race_grace_min": 0},
+            {"endpoint_race_fix": True, "endpoint_race_grace_min": 2.5},
+            {"endpoint_race_fix": False, "endpoint_race_grace_min": 15}]
+
+    @staticmethod
+    def no_sco(*a, **k):
+        raise AssertionError("sco called")
+
+    def one_run(self, tmp, **extra):
+        """辛's plan as one legacy run (no rl_runs): rl and rl_extend take Chain._ppo."""
+        plan = self.xin_plan(tmp)
+        plan["rl"].update(plan.pop("rl_runs")["tcswf3c"]["rl"])
+        plan.update(extra)
+        return plan
+
+    def test_bad_values_stop_rl_config_before_any_rl_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for extra, msg in self.BAD:
+                chain = T.Chain(dict(self.xin_plan(tmp), **extra), sleep=lambda s: None)
+                calls = []
+                chain.sh = lambda args, **k: calls.append(args)
+                with self.assertRaises(T.ChainError) as caught:
+                    chain.rl_config()
+                self.assertIn(msg, str(caught.exception), extra)
+                self.assertEqual(calls, [], extra)  # no rl-config ran
+
+    def test_bad_values_stop_a_resumed_chain_before_any_sco_call(self):
+        """A chain resumed past rl_config: _ppo_runs (rl_runs) and _ppo (one run) check again before any sco call."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for extra, msg in self.BAD:
+                for plan in (dict(self.xin_plan(tmp), **extra), self.one_run(tmp, **extra)):
+                    chain = T.Chain(plan, sleep=lambda s: None)
+                    with mock.patch.multiple(job_sco, prepare=self.no_sco, submit=self.no_sco, status=self.no_sco,
+                                             delete=self.no_sco):
+                        with self.assertRaises(T.ChainError) as caught:
+                            chain.rl()
+                    self.assertIn(msg, str(caught.exception), (extra, "rl_runs" in plan))
+                    self.assertFalse((Path(tmp) / "rl_run").exists(), extra)
+
+    def test_good_values_give_the_same_command_and_reach_the_ppo_submit(self):
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        with tempfile.TemporaryDirectory() as tmp:
+            want = self.commands(self.xin_plan(tmp))
+            for extra in self.GOOD:
+                self.assertEqual(self.commands(dict(self.xin_plan(tmp), **extra)), want, extra)
+                chain = T.Chain(dict(self.xin_plan(tmp), **extra), sleep=lambda s: None)
+                with mock.patch.multiple(job_sco, prepare=self.no_sco, submit=self.no_sco, status=self.no_sco,
+                                         delete=self.no_sco):
+                    with self.assertRaisesRegex(AssertionError, "sco called"):  # _ppo_runs got to the first prepare
+                        chain.rl()
+
+    def test_single_run_ppo_refuses_a_true_switch_before_any_submit(self):
+        """Chain._ppo (rl without rl_runs; rl_extend's extend_to, also in a plan with rl_runs but no per-run extend
+        rule) ignores the switch: a true one stops the step before any sco call, naming the key and rl_runs; absent,
+        false or null (and a valid grace with the switch off) go on to the sco calls as before."""
+        from unittest import mock
+
+        from data_gen.interiorgs_v10 import job_sco
+
+        msg = "plan endpoint_race_fix true works only with plan rl_runs (Chain._ppo_runs)"
+        decision = {"val_success": [], "keep_training": True, "extend_to": 400}
+        with tempfile.TemporaryDirectory() as tmp:
+            sco = dict(prepare=self.no_sco, submit=self.no_sco, status=self.no_sco, delete=self.no_sco)
+            for extra in ({"endpoint_race_fix": True}, {"endpoint_race_fix": True, "endpoint_race_grace_min": 15}):
+                chain = T.Chain(self.one_run(tmp, **extra), sleep=lambda s: None)
+                with mock.patch.multiple(job_sco, **sco):
+                    with self.assertRaises(T.ChainError) as caught:
+                        chain.rl()
+                self.assertIn(msg, str(caught.exception))
+                self.assertIn("step rl ", str(caught.exception))
+                self.assertFalse((Path(tmp) / "rl_run").exists())  # stopped before the run folder, before any submit
+                for plan in (self.one_run(tmp, extend_to=400, **extra), dict(self.xin_plan(tmp), extend_to=400, **extra)):
+                    chain = T.Chain(plan, sleep=lambda s: None)
+                    chain.state["steps"]["rl_extend"]["decision"] = dict(decision)  # decided at the endpoint
+                    with mock.patch.multiple(job_sco, **sco):
+                        with self.assertRaises(T.ChainError) as caught:
+                            chain.rl_extend()
+                    self.assertIn(msg, str(caught.exception))
+                    self.assertIn("step rl_extend ", str(caught.exception))
+                    self.assertFalse((Path(tmp) / "rl_run").exists())
+            for extra in ({}, {"endpoint_race_fix": False}, {"endpoint_race_fix": None},
+                          {"endpoint_race_fix": False, "endpoint_race_grace_min": 15},
+                          {"endpoint_race_fix": None, "endpoint_race_grace_min": None}):
+                chain = T.Chain(self.one_run(tmp, **extra), sleep=lambda s: None)
+                with mock.patch.multiple(job_sco, **sco):
+                    with self.assertRaisesRegex(AssertionError, "sco called"):  # _ppo got to the first prepare
+                        chain.rl()
+                chain = T.Chain(self.one_run(tmp, extend_to=400, **extra), sleep=lambda s: None)
+                chain.state["steps"]["rl_extend"]["decision"] = dict(decision)
+                with mock.patch.multiple(job_sco, **sco):
+                    with self.assertRaisesRegex(AssertionError, "sco called"):
+                        chain.rl_extend()
+
+
 if __name__ == "__main__":
     unittest.main()

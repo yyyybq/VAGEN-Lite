@@ -847,6 +847,32 @@ def with_chain_defaults(rl: Dict[str, Any], defaults: Optional[Dict[str, Any]]) 
     return out
 
 
+def turn_credit_args(rl: Dict[str, Any]) -> List[str]:
+    """rl-config's --turn-credit and --table-near from a run's rl settings (q38 p2, PORT_P23 item 8), as the reward
+    line passes them (VAGEN-Lite-reward: "turn_credit" since 4d525b00, "table_near" since 541f9a74, both unchanged at
+    26afbc6f, the commit YQ5's 辛 ran on, rw_p3n_s2tcswf3c): after --save-freq, "turn_credit" as JSON in the plan's
+    key order (rl-config checks its keys with vagen.turn_credit.settings), "--table-near" when "table_near" is true.
+    Without the keys (or with null / false) no argument, as before.
+
+    Unlike the reward line, the values are checked here: "turn_credit" must be a non-empty JSON object, "table_near"
+    true or false.  The empty object is refused on purpose, a deliberate departure from the reward line, whose runs
+    rw_p2_r1 / rw_tc1 did pass --turn-credit {} (rl-config takes {} as every setting at its default): in q38 only 辛
+    uses turn_credit and its plan writes its settings out, so {} here is taken for a plan error; a plan that wants the
+    defaults writes them out."""
+    args: List[str] = []
+    tc = rl.get("turn_credit")
+    if tc is not None:
+        if not isinstance(tc, dict) or not tc:
+            raise ChainError(f"rl turn_credit must be a non-empty JSON object (rl-config --turn-credit), not {tc!r}")
+        args += ["--turn-credit", json.dumps(tc)]
+    near = rl.get("table_near")
+    if near is not None and not isinstance(near, bool):
+        raise ChainError(f"rl table_near must be true or false (rl-config --table-near), not {near!r}")
+    if near:
+        args.append("--table-near")
+    return args
+
+
 def eval_options_for(options: Sequence[str], format_example: Optional[str], lenient_parse: bool = False) -> List[str]:
     """The evaluation options for a model that trained with ``format_example`` (round 12 freeze, the user's 3.1.1):
     --format-example is added unless it is the template's placeholder text; a plan option naming another one is
@@ -1700,8 +1726,61 @@ class Chain:
             raise ChainError(f"rl env must be p0_qa or absent (the action env), not {env!r}")
         return env == "p0_qa"
 
+    def refuse_hold_checkpoints(self) -> None:
+        """q38 p2 (PORT_P23 item 8): plan "hold_checkpoints" is the reward line's (VAGEN-Lite-reward 26afbc6f,
+        Chain.hold_checkpoints: hard links of a COMPLETE checkpoint into TR/hold_<update> during PPO); this
+        train_chain has no such code, so a plan that sets it stops instead of losing the held checkpoints.  Checked
+        by rl_config and again before any PPO submit (a chain resumed past rl_config); null, [] or absent: no-op."""
+        if self.plan.get("hold_checkpoints"):
+            raise ChainError(f"plan hold_checkpoints {self.plan['hold_checkpoints']!r} is the reward line's "
+                             "(VAGEN-Lite-reward 26afbc6f); this train_chain has no such code and would ignore it: "
+                             "drop the key, or port Chain.hold_checkpoints first")
+
+    def check_endpoint_race_keys(self) -> None:
+        """q38 p2 (PORT_P23 item 8, recheck): plan "endpoint_race_fix" is read by truthiness (Chain.endpoint_done), so
+        a string such as "false" would switch it on, and "endpoint_race_grace_min" by float(plan.get(key, 15)) at the
+        endpoint.  Checked where refuse_hold_checkpoints is (rl_config, and again before any PPO submit, for a chain
+        resumed past rl_config): endpoint_race_fix, when given and not null, must be true or false;
+        endpoint_race_grace_min, when given and not null, a number of minutes >= 0 (int or float, not a bool); and
+        with endpoint_race_fix true it may not be null (float(None) would stop the step at the endpoint with a
+        TypeError instead of taking the default 15).  Absent keys, or null ones with the switch off: no-op."""
+        fix = self.plan.get("endpoint_race_fix")
+        if fix is not None and not isinstance(fix, bool):
+            raise ChainError(f"plan endpoint_race_fix must be true or false, not {fix!r}: the chain reads it by "
+                             "truthiness (Chain.endpoint_done), so a string such as \"false\" would switch it on")
+        if "endpoint_race_grace_min" not in self.plan:
+            return
+        grace = self.plan["endpoint_race_grace_min"]
+        if grace is None:
+            if fix:
+                raise ChainError("plan endpoint_race_grace_min null with endpoint_race_fix true: the chain reads it as "
+                                 "float(plan.get(\"endpoint_race_grace_min\", 15)), so null is not the default 15 but "
+                                 "a TypeError at the endpoint: drop the key for 15 minutes, or give the minutes")
+            return
+        if isinstance(grace, bool) or not isinstance(grace, (int, float)) or not grace >= 0:
+            raise ChainError(f"plan endpoint_race_grace_min must be a number of minutes >= 0 (an int or a float, not "
+                             f"a bool or a string), not {grace!r}")
+
+    def check_rl_keys(self, runs: Dict[str, Dict[str, Any]]) -> None:
+        """q38 p2 (PORT_P23 item 8): keys this chain would otherwise drop or misread without a word stop the
+        rl_config step before any rl-config runs: plan "hold_checkpoints" (refuse_hold_checkpoints); plan
+        "endpoint_race_fix" / "endpoint_race_grace_min" (check_endpoint_race_keys); every run's turn_credit /
+        table_near (turn_credit_args); the two keys on a p0_qa run (qa_rl's rl-config has no such options)."""
+        self.refuse_hold_checkpoints()
+        self.check_endpoint_race_keys()
+        for name, run in runs.items():
+            rl = run["rl"]
+            turn_credit_args(rl)
+            if rl.get("env") == "p0_qa":  # null / false: nothing asked (turn_credit_args has checked the types)
+                given = [k for k in ("turn_credit", "table_near") if rl.get(k)]
+                if given:
+                    raise ChainError(f"rl {' / '.join(given)} on the p0_qa run {name!r}: the QA RL pilot's rl-config "
+                                     "(data_gen.interiorgs_v10.qa_rl) has no such option and would ignore it")
+
     def rl_config(self) -> None:
-        for name, run in self.rl_runs().items():
+        runs = self.rl_runs()
+        self.check_rl_keys(runs)  # q38 p2 (PORT_P23 item 8): stops before any rl-config runs
+        for name, run in runs.items():
             rl = run["rl"]
             if self.qa_env(run):  # the QA RL pilot: its own rl-config (data_gen.interiorgs_v10.qa_rl)
                 if not self.plan.get("rl_runs"):
@@ -1743,6 +1822,7 @@ class Chain:
                               ("ppo_mini_batch_size", "--ppo-mini-batch-size"), ("save_freq", "--save-freq")):
                 if rl.get(key) is not None:
                     args += [flag, str(rl[key])]
+            args += turn_credit_args(rl)  # q38 p2 (PORT_P23 item 8): 辛's per-turn credit and the table's neighbour lookup
             for key, flag in (("progress_weights", "--progress-weights"), ("milestone_rewards", "--milestone-rewards")):
                 if rl.get(key) is not None:  # round 12 freeze, the dense-reward design variants: three numbers
                     value = rl[key]
@@ -1844,6 +1924,8 @@ class Chain:
         the step fails after all ended if any failed."""
         from . import job_sco
 
+        self.refuse_hold_checkpoints()  # q38 p2 (PORT_P23 item 8)
+        self.check_endpoint_race_keys()  # q38 p2 (PORT_P23 item 8, recheck)
         # a run stopped by a guard stays stopped when the chain is started again (round 12 batch: a restart had
         # submitted the stopped run anew, and taken its ended render service for a dead one)
         stopped_before = set(self.state.get("guard_stops") or {})
@@ -2401,6 +2483,12 @@ class Chain:
         """Render service (1 card) + PPO (8 cards) to ``endpoint``; resumes from the latest checkpoint."""
         from . import job_sco
 
+        self.refuse_hold_checkpoints()  # q38 p2 (PORT_P23 item 8)
+        self.check_endpoint_race_keys()  # q38 p2 (PORT_P23 item 8, recheck)
+        if self.plan.get("endpoint_race_fix"):  # q38 p2 (PORT_P23 item 8, recheck): only _ppo_runs reads the switch
+            raise ChainError(f"plan endpoint_race_fix true works only with plan rl_runs (Chain._ppo_runs); the "
+                             f"single-run PPO path of step {step} (Chain._ppo: rl without rl_runs, or rl_extend's "
+                             "extend_to) would ignore it: give the run in rl_runs, or drop the key")
         run = self.tr / "rl_run"
         run.mkdir(parents=True, exist_ok=True)
         jr, jl = "job_renderer" + suffix, "job_rl" + suffix
