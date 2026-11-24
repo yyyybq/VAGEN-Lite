@@ -15,8 +15,10 @@ prepare writes RUN (which must not exist yet):
 - q38s4.json: the arm's NFP weights (nfp: mse 0.1, cos 0.1; nonfp: 0, 0) and ``--logits`` (targets, the default:
   the LM head only where the loss reads it; all: LF's path, for the bit-for-bit check against the plain trainer)
   for vagen.q38s4.lf_nfp;
-- q38_sft.json: bf16_copy "sibling" (every saved checkpoint gets a bf16 HF copy in <output_dir>_bf16/checkpoint-N;
-  the fp32 checkpoint is LF's and the Trainer keeps only the latest), host memory sampling every 10 s;
+- q38_sft.json: bf16_copy "sibling" (every saved checkpoint gets a bf16 HF copy in <output_dir>_bf16/checkpoint-N,
+  without the resume states (lf_nfp runs tools.bf16_lean); the fp32 checkpoint is LF's, with the optimizer,
+  scheduler and RNG states (save_only_model false), so a run folder submitted again resumes from it, and the Trainer
+  keeps only the latest), host memory sampling every 10 s;
 - plan.json: mode, arm, nodes, GPUs per node, world size, per-device batch, gradient accumulation, global batch, the
   estimated optimizer steps (from DATA/build_manifest.json), the sco settings, the --set changes, the commit.
 
@@ -78,7 +80,9 @@ RECIPE: Dict[str, Any] = {
     "learning_rate": 1.0e-5, "num_train_epochs": 1, "lr_scheduler_type": "cosine", "warmup_ratio": 0.03,
     "weight_decay": 0.0, "max_grad_norm": 1.0,
     "bf16": True, "gradient_checkpointing": True, "flash_attn": "sdpa",
-    "save_strategy": "steps", "save_steps": 500, "save_total_limit": 1, "save_only_model": True,
+    # save_only_model false (the user's decision of 2026-11-23, STAGE3_REPORT section 5): a full checkpoint every 500
+    # steps, the latest only, so a failed 8-node run resumes instead of starting over
+    "save_strategy": "steps", "save_steps": 500, "save_total_limit": 1, "save_only_model": False,
     "logging_steps": 1, "report_to": "none", "ddp_timeout": 10800,
     "data_shared_file_system": True, "preprocessing_num_workers": 12, "dataloader_num_workers": 4,
     "overwrite_output_dir": False,

@@ -90,7 +90,8 @@ def test_prepare_train(tmp_path, repo, data):
     for k, v in (("learning_rate", 1e-5), ("num_train_epochs", 1), ("lr_scheduler_type", "cosine"),
                  ("warmup_ratio", 0.03), ("weight_decay", 0.0), ("freeze_vision_tower", True),
                  ("freeze_multi_modal_projector", False), ("video_fps", 2.0), ("video_maxlen", 256),
-                 ("video_max_pixels", 65536), ("save_total_limit", 1), ("data_shared_file_system", True)):
+                 ("video_max_pixels", 65536), ("save_total_limit", 1), ("save_only_model", False),
+                 ("data_shared_file_system", True)):
         assert cfg[k] == v, k
     s = S4Settings.from_file(run / "q38s4.json")  # what lf_nfp reads next to train.yaml
     assert (s.nfp_mse, s.nfp_cos, s.head_on, s.logits) == (0.1, 0.1, True, "targets") and plan["logits"] == "targets"

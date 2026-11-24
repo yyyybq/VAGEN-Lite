@@ -28,6 +28,10 @@ What changes against vagen.q38.sft.lf_launcher (all by replacing names in LF's s
   * training_step: on the first micro-batch and at every save step, a freeze check: every parameter of visual.blocks /
     patch_embed / pos_embed has requires_grad False and grad None; the counts go to <metrics dir>/freeze_rank<R>.jsonl
     and the log; a frozen parameter with a gradient stops the run.
+- bf16 copies (lf_launcher's background copy after each save): vagen.q38s4.tools.bf16_lean instead of
+  vagen.q38.sft.to_bf16, the same conversion, shards and check without copying the Trainer's resume states
+  (optimizer, scheduler, RNG, the FSDP model file: 325 GB of a 27B checkpoint with save_only_model false) into the
+  bf16 copy; the fp32 checkpoint keeps them (lean_bf16, which replaces lf_launcher.bf16_command).
 - Q38S4_TOKENIZE_ONLY=1: the run stops when LF has tokenized the data (saved to tokenized_path by rank 0), before
   the model loads (the tokenize job of vagen.q38s4.launch; both arms then load the same tokenized data).
 - With both weights 0 there is no head; the copy baseline is still logged.  With logits "all" the loss is LF's own
@@ -347,11 +351,29 @@ def install(settings: S4Settings) -> None:
     W.CustomSeq2SeqTrainer = make_trainer_class()
 
 
+BF16_TOOL, BF16_LEAN = "vagen.q38.sft.to_bf16", "vagen.q38s4.tools.bf16_lean"
+
+
+def lean_bf16(lf_launcher) -> None:
+    """lf_launcher's bf16 copy after each save runs tools.bf16_lean (to_bf16 without the resume states) with the
+    same arguments.  Refused at start when lf_launcher's command does not run to_bf16 (it changed)."""
+    orig = lf_launcher.bf16_command
+    probe = orig(Path("/probe/checkpoint-0"), "sibling")
+    if BF16_TOOL not in probe:
+        raise RuntimeError(f"lf_launcher.bf16_command does not run {BF16_TOOL}: {probe}")
+
+    def bf16_command(ckpt, mode):
+        return [BF16_LEAN if c == BF16_TOOL else c for c in orig(ckpt, mode)]
+
+    lf_launcher.bf16_command = bf16_command
+
+
 def main() -> None:
     settings = settings_for(sys.argv)
     install(settings)
     from vagen.q38.sft import lf_launcher
 
+    lean_bf16(lf_launcher)
     lf_launcher.main()
 
 
