@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,9 +15,11 @@ pytestmark = pytest.mark.skipif(not (SC.EASI_ROOT / "scripts/submissions/backend
 COUNT, SPATIAL, MOVE = "counting & existence", "spatial relationship reasoning", "movement prediction & navigation"
 
 
-def part(qa: Path, job: str, name: str, task: str, items, stamp: str = "20261124_120000", done: bool = True) -> Path:
-    """items: (category, chance-adjusted value, its denominator); accuracy = 1 if the value is 1 else 0."""
-    d = qa / job / name / "models__Qwen3.8-27B"
+def part(qa: Path, job: str, name: str, task: str, items, stamp: str = "20261124_120000", done: bool = True,
+         model: str = "evalprep__c_nfp_3441_nohead") -> Path:
+    """items: (category, chance-adjusted value, its denominator); accuracy = 1 if the value is 1 else 0.  model: the
+    folder lmms-eval names after the model path's last two parts (the C line's are not models__*)."""
+    d = qa / job / name / model
     d.mkdir(parents=True, exist_ok=True)
     f = d / f"{stamp}_samples_{task}.jsonl"
     f.write_text("".join(json.dumps({"doc_id": i, "accuracy": {"total": 1.0, "overall": float(v == 1), cat: float(v == 1)},
@@ -95,3 +98,16 @@ def test_load_easi_leaves_sys_path(tmp_path):
     assert Path(mod.__file__).resolve() == (SC.EASI_ROOT / "scripts/submissions/backends/lmmseval.py").resolve()
     assert sys.path == path and sys.modules.get("scripts") is scripts
     assert SC.load_easi() is mod and "site" in mod._METRIC_MAP
+
+
+def test_base_folder_name_and_relative_qa(tmp_path, monkeypatch):
+    qa = tmp_path / "qa"
+    part(qa, "site_image", "q38base", "site_bench_image", IMAGE, model="models__Qwen3.8-27B")
+    part(qa, "site_video", "q38base", "site_bench_video_multiimage", VIDEO, model="models__Qwen3.8-27B")
+    (tmp_path / "out").mkdir()
+    monkeypatch.chdir(tmp_path)
+    assert SC.main(["--qa", "qa", "--name", "q38base", "--out", "out/base.json"]) == 0
+    res = json.loads((tmp_path / "out" / "base.json").read_text())
+    assert res["site_caa"] == 70.0 and res["site_image_caa"] == 50.0 and res["site_video_caa"] == 100.0
+    links = list((tmp_path / "out" / "base_join").iterdir())
+    assert len(links) == 2 and all(os.path.isabs(os.readlink(p)) and p.resolve().is_file() for p in links)

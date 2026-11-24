@@ -7,8 +7,9 @@ loaded from its files), for the combined CAA and its sub-scores, and again on ea
     python -m vagen.q38s4.tools.site_caa --qa QA --name NAME --out OUT.json [--easi EASI_ROOT]
 
 QA/site_image/NAME and QA/site_video/NAME must each have done.json (qa_eval's mark of a finished job) and exactly one
-newest samples file (lmms-eval's <timestamp>_samples_<task>.jsonl under models__*/; the newest by name, as EASI picks
-them).  The links go to OUT's sibling folder OUT.stem + "_join" (combined) and "_image" / "_video" (each part); it
+newest samples file (lmms-eval's <timestamp>_samples_<task>.jsonl in the model folder it makes, named after the
+model path's last two parts: models__Qwen3.8-27B for the base, evalprep__c_nfp_N_nohead or ckpt_bf16__checkpoint-N
+for the C line; the newest by name, as EASI picks them).  The links go to OUT's sibling folder OUT.stem + "_join" (combined) and "_image" / "_video" (each part); it
 must not exist.  Used for both arms and for the base (q38/runs/q38-base-zs/qa, q38base).
 """
 from __future__ import annotations
@@ -46,7 +47,7 @@ def load_easi(root: Path = EASI_ROOT):
 
 
 def newest(folder: Path, pattern: str) -> Path:
-    found = sorted(folder.glob(f"models__*/{pattern}"), key=lambda p: p.name, reverse=True)
+    found = sorted(folder.glob(f"*/{pattern}"), key=lambda p: p.name, reverse=True)  # any model folder
     if not found:
         raise SystemExit(f"{folder}: no samples file {pattern}")
     if len(found) > 1 and found[0].name == found[1].name:
@@ -67,7 +68,7 @@ def part_files(qa: Path, name: str) -> Dict[str, Path]:
 def scores(mod, folder: Path, files: List[Path]) -> Tuple[Optional[float], Dict[str, Optional[float]]]:
     folder.mkdir(parents=True)
     for f in files:
-        os.symlink(f, folder / f.name)
+        os.symlink(f.resolve(), folder / f.name)  # absolute: a relative --qa would leave broken links
     return mod.LmmsEvalAdapter()._extract_site_scores(folder, mod._METRIC_MAP["site"])
 
 
@@ -95,6 +96,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--easi", type=Path, default=EASI_ROOT)
     a = ap.parse_args(argv)
+    a.qa, a.out = a.qa.absolute(), a.out.absolute()
     if a.out.exists():
         raise SystemExit(f"{a.out} exists")
     res = site(a.qa, a.name, a.out, a.easi)
