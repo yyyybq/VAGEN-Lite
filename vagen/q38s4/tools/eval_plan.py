@@ -8,10 +8,11 @@ composition and options).  Builds the chain folder, copies of the task sets and 
 
 Chain folder q38/s4/evals/<kind>_<arm>_<step> (TR; must not exist), result name <arm>_<step> (T 0.8: <arm>_<step>_t08):
 - length (PREREG section 8, the first bf16 copy, C-NFP step 500): EASI-8's 9 jobs with "limit" 50 (lmms-eval
-  --limit: the first 50 questions of each benchmark), only to measure answer tokens and seconds per question
-  (tools.gen_length); results TR/qa, never mixed with a full run's.
+  --limit: the first 50 questions of each lmms-eval task; blink is 14 sub-tasks, so 700 questions), only to measure
+  answer tokens and seconds per question (tools.gen_length); results TR/qa, never mixed with a full run's.
 - quick (section 2, step 3000; at 1000 and 2000 the full plan holds the same jobs): val 413 at T 0.8 (an "extra"
-  set only the T 0.8 variant uses) + the probe at 256 tokens.
+  set only the T 0.8 variant uses) + the probe at 256 tokens.  The chain's tables cover only eval_sets, so the val
+  T 0.8 table is made by hand afterwards (TABLE_CMD; printed by main and in the plan's note).
 - full (sections 3-7, steps 1000, 2000 and the final 3441): val 413, test 292 and the screened test's 59 new tasks,
   greedy and T 0.8 (the screened 674 is composed from these as for the base); P0 5,590 at 256 px; the probe at 256
   and 1,024 tokens (probe_variants probe1024); EASI-8 (9 jobs, site_video on 2 cards).
@@ -191,6 +192,9 @@ def easi_block(tr: Path, name: str) -> Dict[str, Any]:
             "models": [name]}
 
 
+TABLE_CMD = "python -m data_gen.interiorgs_v10.evaluation table --eval {eval_dir}"
+
+
 def build(kind: str, arm: str, step: int, model: Path, commit: str, tr: Path,
           sets: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The plan (pure: the set folders come from write_sets)."""
@@ -201,7 +205,8 @@ def build(kind: str, arm: str, step: int, model: Path, commit: str, tr: Path,
         plan.update({"eval_sets": {}, "eval": {"models": {name: {"model": str(model), "options": []}}},
                      "qa_eval": {**easi_block(tr, name), "limit": LENGTH_LIMIT},
                      "note": f"C line {arm} step {step}: the answer-length measurement of PREREG_v1 section 8 -- "
-                             f"EASI-8's 9 jobs on the first {LENGTH_LIMIT} questions each (lmms-eval --limit), "
+                             f"EASI-8's 9 jobs on the first {LENGTH_LIMIT} questions of each lmms-eval task (--limit; blink: 14 "
+                             f"sub-tasks, {14 * LENGTH_LIMIT} questions), "
                              "--no-stack-dump; only tokens and seconds per question are read (tools.gen_length), "
                              "no score."})
     elif kind == "quick":
@@ -213,7 +218,8 @@ def build(kind: str, arm: str, step: int, model: Path, commit: str, tr: Path,
                      "qa_eval": {"out": str(tr / "qa"), "easi": [], "probe": str(MP.PROBE), "models": [name]},
                      "note": f"C line {arm} step {step}: the quick evaluation of PREREG_v1 section 2 -- val 413 at "
                              "T 0.8 (top-p 0.92, entropy, format example action_names; as the base's q38base_t08) "
-                             "and the probe at 256 tokens."})
+                             "and the probe at 256 tokens.  Its table is not made by the chain (tables() covers "
+                             "eval_sets only): afterwards run " + TABLE_CMD.format(eval_dir=sets["val"]["dir"]) + "."})
     elif kind == "full":
         keys = list(SET_KEYS)
         plan.update({"eval_sets": {k: sets[k]["dir"] for k in keys},
@@ -268,6 +274,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     (tr / "plan.json").write_text(json.dumps(plan, indent=1, ensure_ascii=False) + "\n")
     print(tr / "plan.json")
     print(json.dumps({k: v["md5"] for k, v in sets.items()}))
+    if a.kind == "quick":
+        print("after the chain: " + TABLE_CMD.format(eval_dir=sets["val"]["dir"]))
     return 0
 
 

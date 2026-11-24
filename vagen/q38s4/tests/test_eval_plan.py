@@ -202,7 +202,9 @@ def test_length_plan_jobs(tmp_path):
 def test_quick_plan_jobs(tmp_path):
     tr, model = tmp_path / "quick", tmp_path / "m"
     sets = fake_sets(tr, "quick", "c_nonfp", 3000)
-    jobs = chain_jobs(EP.build("quick", "c_nonfp", 3000, model, "abcdef12", tr, sets), tmp_path)
+    plan = EP.build("quick", "c_nonfp", 3000, model, "abcdef12", tr, sets)
+    assert EP.TABLE_CMD.format(eval_dir=sets["val"]["dir"]) in plan["note"]  # the chain makes no table for val
+    jobs = chain_jobs(plan, tmp_path)
     assert set(jobs) == {"val__c_nonfp_3000_t08", "qa_probe__c_nonfp_3000"}
     val = jobs["val__c_nonfp_3000_t08"]
     assert val[0] == Path(sets["val"]["dir"]) and val[1] == "c_nonfp_3000_t08" and list(val[4]) == MP.T08
