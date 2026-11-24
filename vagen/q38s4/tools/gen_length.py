@@ -1,18 +1,26 @@
 """q38s4 stage 5 (PREREG_v1 section 8): answer lengths and seconds per question of an EASI run, and each benchmark's
 projected time, so a generation cap can be decided (and registered) before any accuracy is seen.  Reads no score:
-from the samples files only each line's token_counts[0].output_tokens; from the lmms-eval log only the "Metric
-summary" line (total elapsed generation time, total generated tokens); never results.json, done.json or
-easi_results.json.
+from the samples files only each line's doc_id and token_counts[0].output_tokens; from the lmms-eval log only the
+"Metric summary" line (generation seconds, generated tokens) and the last finished "Model Responding" progress bar
+(its wall time); never results.json, done.json or easi_results.json.
 
     python -m vagen.q38s4.tools.gen_length --qa TR/qa --name c_nfp_500 [--base-qa q38/runs/q38-base-zs/qa]
         [--base-name q38base] [--out FILE.json]
 
-Per EASI job (qa_eval.EASI_8_JOBS): n (the questions answered: lines of the newest samples file), mean / median /
-90th percentile / max output tokens, the share at the task's cap (TASK_CAPS: the task yamls' max_new_tokens), seconds
-per question (elapsed / n) and tokens per second; the full benchmark's question count (lines of the base's newest
-samples file, a count only), the projected generation hours (seconds per question x full count) and the base's own
-(its log's elapsed), and whether the projection is over the 3-hour line (PROJECT_LIMIT_H).  The elapsed time is the
-model's generation only (lmms-eval's gen_metrics), without loading and scoring (minutes).
+A run's samples files are every <timestamp>_samples_<task>.jsonl with the newest timestamp, in any model folder
+(lmms-eval names it after the model path's last two parts: models__Qwen3.8-27B for the base, evalprep__... or
+ckpt_bf16__... for the C line).  One EASI job can be several lmms-eval tasks (blink: 14 sub-tasks, one file each) and
+--limit applies to each task, so a limit-50 blink run answers 700 questions; they are pooled.
+
+Per EASI job (qa_eval.EASI_8_JOBS): n (the questions answered), mean / median / 90th percentile / max output tokens,
+the share at the task's cap (TASK_CAPS: the task yamls' max_new_tokens); the base's mean tokens on the same questions
+(same task and doc_id; --limit takes each task's first docs, which need not be typical of the whole benchmark) and on
+the whole benchmark, and their ratio; seconds per question: wall (the progress bar's time over its count: generation
+plus each question's preparation, e.g. video decoding, 35-50% of a video benchmark's time) and generation only (the
+Metric summary's elapsed over n); the full benchmark's question count (the base run's lines, a count only), the
+projected hours (wall seconds per question x full count; generation-only when a log has no finished bar) and the
+base's own (its log's wall time), and whether the projection is over the 3-hour line (PROJECT_LIMIT_H).  Loading and
+scoring (minutes) are in neither.
 """
 from __future__ import annotations
 
@@ -22,45 +30,72 @@ import re
 import statistics
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 EASI_JOBS = ("vsi_bench", "mmsi_bench", "mindcube_tiny", "viewspatial", "site_image", "site_video", "blink",
              "3dsrbench", "embspatial")
-# max_new_tokens in the EASI v0.2.2 lmms-eval task yamls (read 2026-11-24; reported, not enforced)
+# max_new_tokens in the EASI v0.2.2 lmms-eval task yamls (read 2026-11-24; reported, not enforced); viewspatial's yaml
+# leaves it out, so the model class default (128) applies
 TASK_CAPS = {"vsi_bench": 16, "mmsi_bench": 2048, "mindcube_tiny": 4096, "viewspatial": 128, "site_image": 1024,
              "site_video": 1024, "blink": 1024, "3dsrbench": 4096, "embspatial": 1024}
 PROJECT_LIMIT_H = 3.0
 BASE_QA = Path("/mnt/umm/users/yinbaiqiao/q38/runs/q38-base-zs/qa")
 SUMMARY = re.compile(r"Total elapsed time: ([0-9.]+)s, Total gen tokens: ([0-9]+)")
+BAR = re.compile(r"Model Responding: 100%\|[^|]*\| (\d+)/(\d+) \[([0-9:]+)<")
+SEP = "_samples_"
 
 
-def newest_samples(folder: Path) -> Optional[Path]:
-    """The newest samples file of a result folder (lmms-eval names them <timestamp>_samples_<task>.jsonl)."""
-    found = sorted(folder.glob("models__*/*_samples_*.jsonl"), key=lambda p: p.name, reverse=True)
-    return found[0] if found else None
+def stamp_of(p: Path) -> str:
+    return p.name.split(SEP, 1)[0]
 
 
-def output_tokens(path: Path) -> List[int]:
+def task_of(p: Path) -> str:
+    return p.name.split(SEP, 1)[1][:-len(".jsonl")]
+
+
+def run_samples(folder: Path) -> List[Path]:
+    """The samples files of a result folder's newest run (all files with the newest timestamp), in one model folder."""
+    found = list(folder.glob(f"*/*{SEP}*.jsonl"))
+    if not found:
+        return []
+    stamp = max(stamp_of(p) for p in found)
+    files = sorted(p for p in found if stamp_of(p) == stamp)
+    parents = sorted({str(p.parent) for p in files})
+    if len(parents) > 1:
+        raise SystemExit(f"{folder}: run {stamp} has samples files in {len(parents)} model folders: {parents}")
+    return files
+
+
+def records(path: Path) -> List[Tuple[Any, int]]:
+    """(doc_id, output tokens) per answered line."""
     out = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
-            counts = json.loads(line).get("token_counts") or [{}]
-            out.append(int(counts[0].get("output_tokens", 0)))
+            rec = json.loads(line)
+            counts = rec.get("token_counts") or [{}]
+            out.append((rec.get("doc_id"), int(counts[0].get("output_tokens", 0))))
     return out
 
 
-def count_lines(path: Path) -> int:
-    with open(path, "rb") as f:
-        return sum(1 for line in f if line.strip())
+def hms(text: str) -> int:
+    secs = 0
+    for part in text.split(":"):
+        secs = secs * 60 + int(part)
+    return secs
 
 
-def elapsed(folder: Path) -> Optional[Dict[str, float]]:
-    """The last "Metric summary" of the newest log that has one: {"seconds", "tokens"}."""
+def elapsed(folder: Path) -> Optional[Dict[str, Any]]:
+    """The newest log that has a "Metric summary": its last summary {"seconds", "tokens"} and its last finished
+    progress bar {"wall_seconds", "wall_n"} (None when it has none)."""
     for log in sorted(folder.glob("eval_*.log"), key=lambda p: p.name, reverse=True):
-        hits = SUMMARY.findall(log.read_text(encoding="utf-8", errors="replace"))
+        text = log.read_text(encoding="utf-8", errors="replace")
+        hits = SUMMARY.findall(text)
         if hits:
             s, t = hits[-1]
-            return {"seconds": float(s), "tokens": float(t), "log": str(log)}
+            bars = [b for b in BAR.findall(text) if b[0] == b[1]]
+            wall = {"wall_seconds": float(hms(bars[-1][2])), "wall_n": int(bars[-1][1])} if bars else \
+                {"wall_seconds": None, "wall_n": None}
+            return {"seconds": float(s), "tokens": float(t), "log": str(log), **wall}
     return None
 
 
@@ -69,48 +104,76 @@ def pct(xs: List[int], q: float) -> float:
     return float(s[min(len(s) - 1, int(q * len(s)))]) if s else 0.0
 
 
+def mean(xs: List[int]) -> Optional[float]:
+    return round(statistics.mean(xs), 1) if xs else None
+
+
 def job_row(qa: Path, name: str, bench: str, base_qa: Path, base_name: str) -> Dict[str, Any]:
     folder = qa / bench / name
     row: Dict[str, Any] = {"benchmark": bench, "cap": TASK_CAPS.get(bench)}
-    sam = newest_samples(folder)
+    files = run_samples(folder)
     el = elapsed(folder)
-    if sam is None or el is None:
-        return {**row, "missing": "no samples file" if sam is None else "no Metric summary in the logs"}
-    toks = output_tokens(sam)
+    if not files or el is None:
+        return {**row, "missing": "no samples file" if not files else "no Metric summary in the logs"}
+    recs = {task_of(f): records(f) for f in files}
+    toks = [t for rs in recs.values() for _, t in rs]
     n = len(toks)
     cap = TASK_CAPS.get(bench)
-    row.update({"n": n, "samples": str(sam), "tokens_mean": round(statistics.mean(toks), 1) if toks else 0.0,
+    gen_spq = round(el["seconds"] / n, 2) if n else None
+    wall_spq = round(el["wall_seconds"] / n, 2) if n and el["wall_seconds"] is not None else None
+    row.update({"n": n, "tasks": len(files), "samples": [str(f) for f in files], "tokens_mean": mean(toks) or 0.0,
                 "tokens_median": statistics.median(toks) if toks else 0, "tokens_p90": pct(toks, 0.9),
                 "tokens_max": max(toks) if toks else 0,
                 "at_cap": round(sum(t >= cap for t in toks) / n, 3) if cap and n else None,
-                "gen_seconds": el["seconds"], "s_per_q": round(el["seconds"] / n, 2) if n else None,
-                "tok_per_s": round(el["tokens"] / el["seconds"], 1) if el["seconds"] else None})
+                "gen_seconds": el["seconds"], "gen_s_per_q": gen_spq,
+                "tok_per_s": round(el["tokens"] / el["seconds"], 1) if el["seconds"] else None,
+                "wall_seconds": el["wall_seconds"], "wall_n": el["wall_n"], "wall_s_per_q": wall_spq,
+                "s_per_q": wall_spq if wall_spq is not None else gen_spq,
+                "s_per_q_from": "wall" if wall_spq is not None else "generation only"})
     base = base_qa / bench / base_name
-    bsam, bel = newest_samples(base), elapsed(base)
-    if bsam is not None:
-        full = count_lines(bsam)
-        btoks = output_tokens(bsam)
-        row.update({"full_n": full, "base_tokens_mean": round(statistics.mean(btoks), 1) if btoks else None,
+    bfiles, bel = run_samples(base), elapsed(base)
+    if bfiles:
+        brecs = {task_of(f): records(f) for f in bfiles}
+        same, unmatched = [], []
+        for task, rs in recs.items():
+            ids = {d for d, _ in rs}
+            if task in brecs:
+                same += [t for d, t in brecs[task] if d in ids]
+            else:
+                unmatched.append(task)
+        full = sum(len(rs) for rs in brecs.values())
+        bsame = mean(same)
+        row.update({"full_n": full, "base_tokens_mean": mean([t for rs in brecs.values() for _, t in rs]),
+                    "base_same_n": len(same), "base_same_tokens_mean": bsame,
+                    "len_ratio": round(row["tokens_mean"] / bsame, 2) if bsame else None,
                     "projected_h": round(row["s_per_q"] * full / 3600, 2) if row["s_per_q"] is not None else None})
+        if unmatched:
+            row["tasks_not_in_base"] = unmatched
         row["over_limit"] = row["projected_h"] is not None and row["projected_h"] > PROJECT_LIMIT_H
     if bel is not None:
-        row["base_h"] = round(bel["seconds"] / 3600, 2)
+        row["base_gen_h"] = round(bel["seconds"] / 3600, 2)
+        if bel["wall_seconds"] is not None:
+            row["base_h"] = round(bel["wall_seconds"] / 3600, 2)
     return row
 
 
+COLUMNS = ("benchmark", "n", "mean tok", "base mean tok, same qs", "ratio", "p90", "max", "at cap", "s/q",
+           "full n", "projected h", "base h", "> 3 h")
+
+
 def table(rows: List[Dict[str, Any]]) -> str:
-    head = ("| benchmark | n | mean tok | p90 | max | at cap | s/q | tok/s | full n | projected h | base h | "
-            "base mean tok | > 3 h |")
-    lines = [head, "|" + "---|" * 13]
+    lines = ["| " + " | ".join(COLUMNS) + " |", "|" + "---|" * len(COLUMNS)]
     for r in rows:
         if "missing" in r:
-            lines.append(f"| {r['benchmark']} | {r['missing']} |" + " |" * 11)
+            lines.append(f"| {r['benchmark']} | {r['missing']} |" + " |" * (len(COLUMNS) - 2))
             continue
-        cells = [r["benchmark"], r["n"], r["tokens_mean"], r["tokens_p90"], r["tokens_max"],
-                 "" if r["at_cap"] is None else f"{100 * r['at_cap']:.0f}% of {r['cap']}", r["s_per_q"],
-                 r["tok_per_s"], r.get("full_n", ""), r.get("projected_h", ""), r.get("base_h", ""),
-                 r.get("base_tokens_mean", ""), "yes" if r.get("over_limit") else "no"]
-        lines.append("| " + " | ".join(str(c) for c in cells) + " |")
+        spq = "" if r["s_per_q"] is None else f"{r['s_per_q']}" + ("" if r["s_per_q_from"] == "wall" else " (gen)")
+        cells = [r["benchmark"], r["n"], r["tokens_mean"], r.get("base_same_tokens_mean", ""), r.get("len_ratio", ""),
+                 r["tokens_p90"], r["tokens_max"],
+                 "" if r["at_cap"] is None else f"{100 * r['at_cap']:.0f}% of {r['cap']}", spq,
+                 r.get("full_n", ""), r.get("projected_h", ""), r.get("base_h", r.get("base_gen_h", "")),
+                 "yes" if r.get("over_limit") else "no"]
+        lines.append("| " + " | ".join("" if c is None else str(c) for c in cells) + " |")
     return "\n".join(lines)
 
 
